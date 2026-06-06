@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MQTT Telemetry Envelope",
+  "type": "object",
+  "required": ["msgId", "tenantId", "deviceId", "ts", "type", "version", "payload"],
+  "properties": {
+    "msgId": { "type": "string" },
+    "tenantId": { "type": "string" },
+    "deviceId": { "type": "string" },
+    "ts": { "type": "integer" },
+    "type": { "type": "string" },
+    "version": { "type": "string" },
+    "traceId": { "type": "string" },
+    "productId": { "type": "string" },
+    "region": { "type": "string" },
+    "seq": { "type": "integer" },
+    "payload": { "type": "object" }
+  }
+}

@@ -1,0 +1,1090 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>物联网平台技术方案</title>
+  <style>
+    :root{
+      --bg:#06101d;
+      --panel:rgba(11,18,35,.88);
+      --panel-2:rgba(18,28,48,.88);
+      --panel-3:rgba(25,36,60,.85);
+      --text:#e7eefc;
+      --muted:#a8b7d4;
+      --brand:#7dd3fc;
+      --brand-2:#a78bfa;
+      --good:#34d399;
+      --warn:#fbbf24;
+      --bad:#fb7185;
+      --border:rgba(148,163,184,.18);
+      --shadow:0 24px 70px rgba(0,0,0,.34);
+      --radius:22px;
+      --radius-sm:14px;
+      --max:1280px;
+    }
+
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      color:var(--text);
+      font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+      line-height:1.7;
+      background:
+        radial-gradient(circle at 12% 10%, rgba(125,211,252,.16), transparent 24%),
+        radial-gradient(circle at 86% 0%, rgba(167,139,250,.15), transparent 28%),
+        linear-gradient(180deg,#04101b 0%, #07111f 44%, #050b16 100%);
+    }
+    a{color:var(--brand);text-decoration:none}
+    a:hover{text-decoration:underline}
+    code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+    .page{max-width:var(--max);margin:0 auto;padding:40px 20px 72px}
+    .hero{
+      position:relative;overflow:hidden;padding:40px;border:1px solid var(--border);border-radius:28px;
+      background:linear-gradient(135deg, rgba(10,18,35,.98), rgba(8,14,27,.92));box-shadow:var(--shadow)
+    }
+    .hero::after{
+      content:"";position:absolute;inset:auto -120px -120px auto;width:280px;height:280px;border-radius:50%;
+      background:radial-gradient(circle, rgba(125,211,252,.18), transparent 68%);pointer-events:none
+    }
+    .eyebrow{
+      display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;
+      border:1px solid rgba(125,211,252,.2);background:rgba(125,211,252,.08);color:#dbf2ff;
+      font-size:13px;letter-spacing:.04em;text-transform:uppercase
+    }
+    h1,h2,h3,h4{margin:0;line-height:1.2;letter-spacing:-.02em}
+    h1{
+      margin-top:18px;
+      font-size:clamp(1.35rem,2.6vw,2.6rem);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:100%;
+    }
+    .lead{margin-top:18px;max-width:980px;color:var(--muted);font-size:1.05rem}
+    .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+    .chip{
+      display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;
+      border:1px solid var(--border);background:rgba(255,255,255,.04);font-size:13px
+    }
+    .layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:22px;margin-top:22px}
+    .sticky{
+      position:sticky;top:18px;align-self:start;background:var(--panel);border:1px solid var(--border);
+      border-radius:var(--radius);box-shadow:var(--shadow);backdrop-filter:blur(14px)
+    }
+    .toc{padding:20px}
+    .toc h2{font-size:1rem;margin-bottom:12px}
+    .toc ol{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+    .toc a{
+      display:block;padding:8px 10px;border-radius:10px;color:var(--muted);
+      border:1px solid transparent;text-decoration:none
+    }
+    .toc a:hover{color:var(--text);background:rgba(125,211,252,.08);border-color:rgba(125,211,252,.16)}
+    .content{display:grid;gap:18px}
+    section.card, .tabs-shell{
+      border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);
+      box-shadow:var(--shadow);backdrop-filter:blur(14px)
+    }
+    section.card{padding:24px}
+    .tab-bar{
+      display:flex;flex-wrap:wrap;gap:10px;padding:14px;border-bottom:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(255,255,255,.02), transparent)
+    }
+    .tab-btn{
+      appearance:none;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);
+      padding:10px 14px;border-radius:999px;cursor:pointer;font-weight:600;font-size:14px
+    }
+    .tab-btn:hover{border-color:rgba(125,211,252,.35);background:rgba(125,211,252,.08)}
+    .tab-btn.active{background:linear-gradient(135deg, rgba(125,211,252,.22), rgba(167,139,250,.18));border-color:rgba(125,211,252,.4)}
+    .tab-panels{padding:24px}
+    [data-tab-panel]{display:none}
+    [data-tab-panel].active{display:block}
+    p{margin:10px 0;color:var(--text)}
+    .muted{color:var(--muted)}
+    .callout{
+      margin-top:14px;padding:14px 16px;border-left:3px solid var(--brand);border-radius:12px;
+      background:rgba(125,211,252,.08);color:#d7ecff
+    }
+    .alert{
+      margin-top:14px;padding:14px 16px;border-left:3px solid var(--warn);border-radius:12px;
+      background:rgba(251,191,36,.08);color:#fff1c8
+    }
+    .danger{
+      margin-top:14px;padding:14px 16px;border-left:3px solid var(--bad);border-radius:12px;
+      background:rgba(251,113,133,.08);color:#ffd4dd
+    }
+    .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .panel{
+      background:var(--panel-2);border:1px solid var(--border);border-radius:16px;padding:16px
+    }
+    .panel h3{margin-bottom:10px}
+    .stack{display:grid;gap:16px}
+    ul{margin:10px 0 0 20px;padding:0}
+    li{margin:6px 0}
+    table{
+      width:100%;border-collapse:collapse;margin-top:14px;overflow:hidden;border-radius:14px
+    }
+    th,td{
+      border:1px solid var(--border);padding:12px 14px;text-align:left;vertical-align:top
+    }
+    th{background:rgba(125,211,252,.08);color:#e7f7ff}
+    td{background:rgba(255,255,255,.02)}
+    pre{
+      margin:14px 0 0;padding:16px;border-radius:16px;background:#0b1325;color:#dbeafe;
+      overflow:auto;border:1px solid rgba(148,163,184,.16)
+    }
+    .mini-tabs{margin-top:12px}
+    .mini-tabs .tab-bar{padding:10px 12px}
+    .mini-tabs .tab-btn{font-size:13px;padding:8px 12px}
+    .mini-tabs .tab-panels{padding:16px}
+    .footer{
+      margin-top:18px;padding:18px 20px;border-radius:var(--radius);background:var(--panel);
+      border:1px solid var(--border);color:var(--muted);box-shadow:var(--shadow)
+    }
+    .note-list{display:grid;gap:8px}
+    .kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}
+    .kpi .panel strong{display:block;font-size:1.1rem;margin-bottom:6px}
+    .inline{padding:2px 6px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.06)}
+    .diagram{margin-top:14px}
+    .diagram .mermaid{
+      background:#091425;border:1px solid rgba(148,163,184,.16);border-radius:16px;padding:14px;overflow:auto
+    }
+    .diagram .mermaid{cursor:zoom-in}
+    .modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      background:rgba(2,6,23,.72);
+      backdrop-filter:blur(8px);
+      z-index:1000;
+    }
+    .modal.open{display:flex}
+    .modal-card{
+      width:min(96vw, 1400px);
+      max-height:92vh;
+      overflow:auto;
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:20px;
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    .modal-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:14px;
+    }
+    .modal-title{font-size:1rem;color:var(--text)}
+    .modal-close{
+      appearance:none;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.05);
+      color:var(--text);
+      border-radius:999px;
+      padding:8px 12px;
+      cursor:pointer;
+    }
+    .modal-body .mermaid{
+      cursor:default;
+      background:#08111f;
+      padding:18px;
+    }
+    .modal-body .mermaid svg{
+      width:100%!important;
+      height:auto!important;
+      max-width:none!important;
+    }
+    @media (max-width:1100px){
+      .layout{grid-template-columns:1fr}
+      .sticky{position:relative;top:0}
+      .kpi,.grid-3,.grid-2{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Unified Technical Proposal · IoT Platform</span>
+      <h1>物联网平台技术方案</h1>
+      <p class="lead">
+        这是一个面向工业设备接入、数据采集、状态管理和业务控制的物联网平台项目，
+        采用 Go + EMQX + Kafka + TDengine + PostgreSQL 的组合，支撑设备接入、消息流转、
+        时序存储、命令下发和多租户管理等核心能力。
+      </p>
+      <div class="chips">
+        <span class="chip">技术栈：Go / MQTT / EMQX / Kafka / TDengine / PostgreSQL</span>
+        <span class="chip">架构风格：少拆服务、强边界、先可用、可演进</span>
+        <span class="chip">多租户：逻辑隔离优先</span>
+        <span class="chip">可靠性：默认 at-least-once</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sticky toc">
+        <h2>快速导航</h2>
+        <ol>
+          <li><a href="#overview">1. 总览与目标</a></li>
+          <li><a href="#architecture">2. 总体架构</a></li>
+          <li><a href="#flow">3. 核心数据流</a></li>
+          <li><a href="#contract">4. 协议与 Topic</a></li>
+          <li><a href="#storage">5. 存储设计</a></li>
+          <li><a href="#security">6. 安全与多租户</a></li>
+          <li><a href="#ops">7. 运维与可观测性</a></li>
+          <li><a href="#repo">8. Go 仓库结构</a></li>
+          <li><a href="#delivery">9. 交付路线</a></li>
+          <li><a href="#decision">10. 风险与决策</a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <div class="tabs-shell" id="main-tabs" data-tab-group="main">
+          <div class="tab-panels">
+            <section id="overview" data-tab-panel="overview" class="active">
+              <h2>1. 总览与目标</h2>
+              <p>
+                第一版的重点不是把平台能力一次做满，而是先把物联网最关键的业务闭环打稳：
+                设备接入、身份鉴权、上行遥测、消息解耦、时序落库、查询、下行控制、ACK 回执、
+                在线状态和基础告警。
+              </p>
+              <div class="callout">
+                推荐范围：<strong>设备预注册、设备接入鉴权、MQTT 上行遥测、Kafka 解耦、TDengine 入库与查询、
+                下行命令与 ACK、在线状态查询、基础告警。</strong>
+              </div>
+              <div class="grid-2" style="margin-top:16px">
+                <div class="panel">
+                  <h3>目标</h3>
+                  <ul>
+                    <li>打通设备接入、消息传输、时序入库和查询闭环。</li>
+                    <li>保证 MQTT / Kafka / TDengine 链路具备重试、幂等和 DLQ 能力。</li>
+                    <li>支持下行命令、ACK 和命令状态机。</li>
+                    <li>支持逻辑多租户隔离和基础权限控制。</li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>非目标</h3>
+                  <ul>
+                    <li>第一版不做复杂规则引擎。</li>
+                    <li>第一版不做完整设备影子。</li>
+                    <li>第一版不做多地域双活。</li>
+                    <li>第一版不引入 Schema Registry / 配置中心。</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="kpi">
+                <div class="panel"><strong>主链路</strong><span class="muted">接入 → 解耦 → 入库 → 查询</span></div>
+                <div class="panel"><strong>可靠性</strong><span class="muted">at-least-once + 幂等</span></div>
+                <div class="panel"><strong>隔离</strong><span class="muted">tenantId 贯穿全链路</span></div>
+                <div class="panel"><strong>演进</strong><span class="muted">先少拆服务，后按需扩展</span></div>
+              </div>
+            </section>
+
+            <section id="architecture" data-tab-panel="architecture">
+              <h2>2. 总体架构</h2>
+              <p>
+                平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，接入服务做鉴权和标准化，
+                将事件写入 Kafka，再由 worker 异步落 TDengine 和 PostgreSQL；管理后台和外部系统通过
+                REST API 查询元数据、命令状态、在线状态和历史数据。
+              </p>
+              <div class="diagram">
+                <div class="mermaid">
+graph TD
+  D[设备] -->|MQTT PUBLISH| E[EMQX]
+  E -->|消息回调/订阅| I[Go ingress]
+  I -->|标准事件| K[Kafka]
+  K --> W[Go worker]
+  W --> T[TDengine]
+  W --> P[PostgreSQL]
+  U[管理后台/外部系统] --> A[Go admin]
+  A --> P
+  A --> T
+  I -->|命令下发| E
+  E -->|ACK/状态| I
+                </div>
+              </div>
+              <div class="grid-2" style="margin-top:16px">
+                <div class="panel">
+                  <h3>推荐组件</h3>
+                  <ul>
+                    <li><strong>EMQX</strong>：MQTT 接入、Topic ACL、会话保持、离线消息。</li>
+                    <li><strong>Kafka</strong>：接入解耦、削峰、重试、DLQ、重放。</li>
+                    <li><strong>TDengine</strong>：时序写入、时序查询、聚合分析。</li>
+                    <li><strong>PostgreSQL</strong>：业务元数据、命令、告警、权限、当前态。</li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>架构原则</h3>
+                  <ul>
+                    <li>第一版优先简单，服务数量尽量少。</li>
+                    <li>端到端默认按 <span class="inline">at-least-once</span> 设计。</li>
+                    <li>所有写路径都预留幂等能力。</li>
+                    <li>所有数据都携带 <span class="inline">tenantId</span>。</li>
+                  </ul>
+                </div>
+              </div>
+
+              <h3 style="margin-top:18px">部署视图</h3>
+              <div class="diagram">
+                <div class="mermaid">
+flowchart LR
+  subgraph K8S[Kubernetes 单地域集群]
+    G[API Gateway/Ingress]
+    I[Go ingress]
+    A[Go admin]
+    W[Go worker]
+  end
+  subgraph EDGE[接入层]
+    E[EMQX]
+  end
+  subgraph BUS[消息与存储]
+    K[Kafka]
+    T[TDengine]
+    P[PostgreSQL]
+  end
+  D[设备] --> E
+  E --> I
+  I --> K
+  K --> W
+  W --> T
+  W --> P
+  G --> A
+  A --> P
+  A --> T
+                </div>
+              </div>
+            </section>
+
+            <section id="flow" data-tab-panel="flow">
+              <h2>3. 核心数据流</h2>
+              <p>
+                这一部分按业务场景拆成子标签页，方便直接查看不同链路的职责、顺序和状态变化。
+              </p>
+              <div class="tabs-shell mini-tabs" data-tab-group="flow">
+                <div class="tab-bar" role="tablist">
+                  <button class="tab-btn active" data-tab-target="telemetry" type="button">上行遥测</button>
+                  <button class="tab-btn" data-tab-target="command" type="button">下行命令</button>
+                  <button class="tab-btn" data-tab-target="alarm" type="button">告警</button>
+                  <button class="tab-btn" data-tab-target="status" type="button">在线状态</button>
+                </div>
+                <div class="tab-panels">
+                  <section data-tab-panel="telemetry" class="active">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>上行遥测步骤</h3>
+                        <ul>
+                          <li>设备发布 MQTT 到上行 Topic。</li>
+                          <li>EMQX 完成连接和 ACL 判断。</li>
+                          <li>ingress 校验设备身份、版本和字段。</li>
+                          <li>标准事件写入 Kafka。</li>
+                          <li>worker 消费后落 TDengine，并同步关键状态到 PostgreSQL。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>上行时序图</h3>
+                        <div class="mermaid" id="telemetry-diagram" role="button" tabindex="0" aria-label="放大查看上行时序图" onclick="openDiagramById('telemetry-diagram')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDiagramById('telemetry-diagram')}">
+sequenceDiagram
+  participant D as Device
+  participant E as EMQX
+  participant I as Go ingress
+  participant K as Kafka
+  participant W as Go worker
+  participant T as TDengine
+  participant P as PostgreSQL
+  D->>E: PUBLISH /up
+  E->>I: 回调/订阅消息
+  I->>I: 鉴权 / 校验 / 标准化
+  I->>K: produce telemetry event
+  K->>W: consume event
+  W->>T: insert timeseries
+  W->>P: upsert latest state
+  W-->>K: commit offset
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section data-tab-panel="command">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>下行命令步骤</h3>
+                        <ul>
+                          <li>管理后台创建命令，admin 写 PostgreSQL 并生成 <span class="inline">commandId</span>。</li>
+                          <li>ingress 按租户与设备上下文发布下行消息。</li>
+                          <li>设备收到命令后返回 ACK。</li>
+                          <li>命令状态更新为 <span class="inline">pending / dispatched / sent / acked / timeout / failed</span>。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>命令时序图</h3>
+                        <div class="mermaid" id="command-diagram" role="button" tabindex="0" aria-label="放大查看命令时序图" onclick="openDiagramById('command-diagram')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDiagramById('command-diagram')}">
+sequenceDiagram
+  participant U as 管理后台
+  participant A as Go admin
+  participant P as PostgreSQL
+  participant I as Go ingress
+  participant E as EMQX
+  participant D as Device
+  U->>A: POST /commands
+  A->>P: insert command(pending)
+  A-->>U: commandId
+  A->>I: dispatch request
+  I->>E: publish /down
+  E->>D: deliver command
+  D->>E: publish /ack
+  E->>I: ack callback
+  I->>P: update command status
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section data-tab-panel="alarm">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>告警步骤</h3>
+                        <ul>
+                          <li>遥测进入后先做轻量阈值判断。</li>
+                          <li>触发后将告警写 Kafka 或 PostgreSQL。</li>
+                          <li>admin 提供告警列表、详情和通知消费入口。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>告警时序图</h3>
+                        <div class="mermaid">
+sequenceDiagram
+  participant D as Device
+  participant I as Go ingress
+  participant K as Kafka
+  participant W as Go worker
+  participant P as PostgreSQL
+  D->>I: telemetry
+  I->>I: threshold / N次连续判断
+  alt 触发告警
+    I->>K: alarm event
+    K->>W: consume alarm
+    W->>P: store alarm / notify
+  end
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section data-tab-panel="status">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>在线状态判定</h3>
+                        <ul>
+                          <li>采用 <strong>EMQX 连接状态 + 设备心跳</strong> 的双来源判定方式。</li>
+                          <li>业务库保存当前态即可，不把在线状态当作单一强一致真相。</li>
+                          <li>核心字段以最后活跃时间和会话状态为主。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>常用字段</h3>
+                        <table>
+                          <thead><tr><th>字段</th><th>用途</th></tr></thead>
+                          <tbody>
+                            <tr><td><span class="inline">last_seen_at</span></td><td>最后上报或心跳时间</td></tr>
+                            <tr><td><span class="inline">connected</span></td><td>当前在线标识</td></tr>
+                            <tr><td><span class="inline">session_id</span></td><td>连接会话标识</td></tr>
+                            <tr><td><span class="inline">heartbeat_timeout_sec</span></td><td>在线超时阈值</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </section>
+
+            <section id="contract" data-tab-panel="contract">
+              <h2>4. 协议与 Topic</h2>
+              <p>
+                Topic 设计建议采用统一前缀 <span class="inline">tenant/{tenantId}/device/{deviceId}/...</span>。
+                这样在 EMQX ACL、日志检索、问题排查、设备隔离和命令投递上都更清晰。
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>用途</th>
+                    <th>Topic 示例</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>上行遥测</td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/up</span></td>
+                    <td>设备发往平台的标准数据</td>
+                  </tr>
+                  <tr>
+                    <td>下行命令</td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/down</span></td>
+                    <td>平台发往设备的控制命令</td>
+                  </tr>
+                  <tr>
+                    <td>ACK 回执</td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/ack</span></td>
+                    <td>设备对命令或事件的确认</td>
+                  </tr>
+                  <tr>
+                    <td>事件通知</td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/event</span></td>
+                    <td>设备异常、状态变化、补充事件</td>
+                  </tr>
+                  <tr>
+                    <td>在线状态</td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/status</span></td>
+                    <td>在线、离线、心跳、会话状态</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <h3 style="margin-top:18px">消息模型</h3>
+              <p>
+                第一版建议统一使用 JSON，不要先上 Protobuf。原因很直接：设备联调、日志排查、回放排错和协议演进都更容易。
+                消息体必须包含固定头部和业务 payload，版本字段用于兼容演进。
+              </p>
+              <div class="grid-2">
+                <div class="panel">
+                  <h3>必备字段</h3>
+                  <ul>
+                    <li><span class="inline">msgId</span></li>
+                    <li><span class="inline">tenantId</span></li>
+                    <li><span class="inline">deviceId</span></li>
+                    <li><span class="inline">ts</span></li>
+                    <li><span class="inline">type</span></li>
+                    <li><span class="inline">version</span></li>
+                    <li><span class="inline">payload</span></li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>建议字段</h3>
+                  <ul>
+                    <li><span class="inline">traceId</span></li>
+                    <li><span class="inline">productId</span></li>
+                    <li><span class="inline">region</span></li>
+                    <li><span class="inline">seq</span></li>
+                    <li><span class="inline">schemaVersion</span></li>
+                  </ul>
+                </div>
+              </div>
+              <pre>{
+  "msgId": "b7a0d8c8-4f8b-4b1e-9d7d-3ad4d7fe1d2a",
+  "tenantId": "t1",
+  "deviceId": "d1",
+  "ts": 1717670000000,
+  "type": "telemetry",
+  "version": "v1",
+  "traceId": "trace-001",
+  "payload": {
+    "temp": 23.4,
+    "humi": 60.1
+  }
+}</pre>
+              <div class="callout">
+                版本兼容策略建议定为：<strong>向后兼容优先</strong>。新增字段只增不删，接入服务负责兼容旧版本，不要让设备升级绑定后端发布节奏。
+              </div>
+
+              <h3 style="margin-top:18px">命令状态机</h3>
+              <div class="diagram">
+                <div class="mermaid">
+stateDiagram-v2
+  [*] --> pending
+  pending --> dispatched
+  dispatched --> sent
+  sent --> acked
+  dispatched --> timeout
+  sent --> timeout
+  pending --> failed
+  dispatched --> failed
+  sent --> failed
+  acked --> [*]
+  timeout --> [*]
+  failed --> [*]
+                </div>
+              </div>
+            </section>
+
+            <section id="storage" data-tab-panel="storage">
+              <h2>5. 存储设计</h2>
+              <p>
+                存储设计也拆成子标签页，分别说明 Kafka、TDengine、PostgreSQL 和幂等去重策略。
+              </p>
+              <div class="tabs-shell mini-tabs" data-tab-group="storage">
+                <div class="tab-bar" role="tablist">
+                  <button class="tab-btn active" data-tab-target="kafka" type="button">Kafka</button>
+                  <button class="tab-btn" data-tab-target="tdengine" type="button">TDengine</button>
+                  <button class="tab-btn" data-tab-target="postgres" type="button">PostgreSQL</button>
+                  <button class="tab-btn" data-tab-target="dedup" type="button">幂等与去重</button>
+                </div>
+                <div class="tab-panels">
+                  <section data-tab-panel="kafka" class="active">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>Kafka 设计</h3>
+                        <ul>
+                          <li>Topic 按业务域拆，不按设备拆。</li>
+                          <li>推荐：<span class="inline">iot.telemetry</span>、<span class="inline">iot.event</span>、<span class="inline">iot.command</span>、<span class="inline">iot.dlq</span>。</li>
+                          <li>分区键优先 <span class="inline">deviceId</span>，保证同设备有序。</li>
+                          <li>失败重试后进入 DLQ，原始消息和失败原因要保留。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>语义约束</h3>
+                        <ul>
+                          <li>默认接受 <span class="inline">at-least-once</span>。</li>
+                          <li>消费端必须幂等。</li>
+                          <li>支持重试、DLQ 和人工重放。</li>
+                          <li>保留 traceId，便于全链路追踪。</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+                  <section data-tab-panel="tdengine">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>TDengine 建模</h3>
+                        <ul>
+                          <li>采用超级表 + 标签。</li>
+                          <li>标签建议：<span class="inline">tenantId</span>、<span class="inline">deviceId</span>、<span class="inline">productId</span>、<span class="inline">region</span>、<span class="inline">deviceType</span>。</li>
+                          <li>固定列放高频稳定字段，扩展字段放 <span class="inline">ext JSON</span>。</li>
+                          <li>原始数据建议保留 30 到 90 天，聚合数据保留更久。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>建模原则</h3>
+                        <ul>
+                          <li>高频稳定字段用固定列。</li>
+                          <li>扩展差异字段用 JSON。</li>
+                          <li>原始数据和聚合数据分开存。</li>
+                          <li>避免把所有点位做成超宽动态表。</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+                  <section data-tab-panel="postgres">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>PostgreSQL 表域</h3>
+                        <ul>
+                          <li>承载租户、用户、角色、设备、命令、告警和状态数据。</li>
+                          <li>适合复杂事务、条件查询和状态流转。</li>
+                          <li>建议统一作为业务元数据主库。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>核心表域建议</h3>
+                        <ul>
+                          <li><span class="inline">tenant / user / role / permission</span></li>
+                          <li><span class="inline">product / device / device_secret / device_cert</span></li>
+                          <li><span class="inline">command / command_ack / alarm</span></li>
+                          <li><span class="inline">device_state / message_dedup / rule_config</span></li>
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+                  <section data-tab-panel="dedup">
+                    <div class="grid-2">
+                      <div class="panel">
+                        <h3>幂等策略</h3>
+                        <ul>
+                          <li>以 <span class="inline">msgId + deviceId + ts</span> 组合进行去重。</li>
+                          <li>消费端和入库端都要支持幂等写入。</li>
+                          <li>重复消息不应引发重复告警或重复命令状态变更。</li>
+                        </ul>
+                      </div>
+                      <div class="panel">
+                        <h3>建议实现</h3>
+                        <ul>
+                          <li>Kafka 消费前先查去重表或缓存。</li>
+                          <li>写入时用唯一键约束兜底。</li>
+                          <li>失败原因进入 DLQ，支持人工重放。</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </section>
+
+            <section id="security" data-tab-panel="security">
+              <h2>6. 安全与多租户</h2>
+              <p>
+                权限控制建议采用两层设计：EMQX 负责设备接入鉴权和 Topic ACL，查询管理服务负责租户、用户、角色和设备权限。
+                第一版用逻辑多租户隔离即可，不需要物理隔离。
+              </p>
+              <div class="grid-2">
+                <div class="panel">
+                  <h3>设备侧</h3>
+                  <ul>
+                    <li>支持预注册和激活流程。</li>
+                    <li>第一版优先设备 ID + Secret，条件成熟后可升级到证书方案。</li>
+                    <li>设备上线必须绑定租户和产品上下文。</li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>租户侧</h3>
+                  <ul>
+                    <li>所有记录必须带 <span class="inline">tenantId</span>。</li>
+                    <li>查询接口必须强制按租户过滤。</li>
+                    <li>Topic、日志、Kafka 消息都应携带租户标识。</li>
+                    <li>第一版采用逻辑隔离，不做物理隔离。</li>
+                  </ul>
+                </div>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>边界</th>
+                    <th>负责内容</th>
+                    <th>备注</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>EMQX</td>
+                    <td>设备能否连上来、能发哪些 Topic、能订阅哪些 Topic</td>
+                    <td>适合做接入侧第一道防线</td>
+                  </tr>
+                  <tr>
+                    <td>业务服务</td>
+                    <td>用户能看哪些设备、能否下发命令、能否管理租户</td>
+                    <td>按租户上下文进行鉴权</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section id="ops" data-tab-panel="ops">
+              <h2>7. 运维与可观测性</h2>
+              <p>
+                推荐第一版采用单地域单集群，业务服务无状态化，依托 Kubernetes 做部署和扩缩容。
+                网关只负责薄层鉴权、限流、路由，不承载复杂业务逻辑。
+              </p>
+              <div class="grid-2">
+                <div class="panel">
+                  <h3>可观测性</h3>
+                  <ul>
+                    <li>日志要结构化输出，包含 <span class="inline">tenantId</span>、<span class="inline">deviceId</span>、<span class="inline">msgId</span>、<span class="inline">traceId</span>。</li>
+                    <li>指标建议覆盖接入成功率、Kafka 堆积、TDengine 入库失败率、在线数。</li>
+                    <li>链路追踪至少覆盖 MQTT 接收 → Kafka → 入库。</li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>部署建议</h3>
+                  <ul>
+                    <li>Go 服务做无状态部署。</li>
+                    <li>EMQX、Kafka、TDengine、PostgreSQL 按各自集群能力扩容。</li>
+                    <li>配置先用 ConfigMap / Secret + 环境变量。</li>
+                    <li>不优先引入独立配置中心。</li>
+                  </ul>
+                </div>
+              </div>
+              <h3 style="margin-top:18px">运维拓扑</h3>
+              <div class="diagram">
+                <div class="mermaid">
+flowchart LR
+  D[设备] --> E[EMQX]
+  E --> I[Go ingress]
+  I --> K[Kafka]
+  K --> W[Go worker]
+  W --> T[TDengine]
+  W --> P[PostgreSQL]
+  G[API Gateway/Ingress] --> A[Go admin]
+  A --> P
+  A --> T
+  M[监控/日志/Tracing] -.-> I
+  M -.-> A
+  M -.-> W
+                </div>
+              </div>
+            </section>
+
+            <section id="repo" data-tab-panel="repo">
+              <h2>8. Go 仓库结构</h2>
+              <p>
+                当前仓库已经包含三个可启动入口和若干核心契约包，适合继续在此基础上扩展，而不是重新拆仓。
+              </p>
+              <pre>mqtt/
+├── cmd/
+│   ├── ingress/          # 接入处理服务入口
+│   ├── admin/            # 查询管理服务入口
+│   └── worker/           # 后台消费者、补偿任务、DLQ 重放
+├── internal/
+│   ├── bootstrap/
+│   ├── contracts/
+│   ├── platform/
+│   └── server/
+├── migrations/
+├── deploy/
+└── docs/</pre>
+              <div class="grid-2">
+                <div class="panel">
+                  <h3>当前代码结构</h3>
+                  <ul>
+                    <li><span class="inline">cmd/ingress/main.go</span></li>
+                    <li><span class="inline">cmd/admin/main.go</span></li>
+                    <li><span class="inline">cmd/worker/main.go</span></li>
+                    <li><span class="inline">internal/contracts/*</span></li>
+                    <li><span class="inline">internal/bootstrap/run.go</span></li>
+                    <li><span class="inline">internal/server/health.go</span></li>
+                    <li><span class="inline">internal/platform/platform.go</span></li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>后续建议补齐</h3>
+                  <ul>
+                    <li><span class="inline">internal/transport/</span>：HTTP / MQTT 传输层</li>
+                    <li><span class="inline">internal/service/</span>：业务编排层</li>
+                    <li><span class="inline">internal/repo/</span>：数据访问层</li>
+                    <li><span class="inline">internal/consumer/</span>：Kafka 消费逻辑</li>
+                    <li><span class="inline">pkg/contracts/</span>：协议契约</li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+            <section id="delivery" data-tab-panel="delivery">
+              <h2>9. 交付路线</h2>
+              <p>
+                第一版的正确姿势不是把所有平台能力做完，而是先把主链路做稳，再一点一点补齐可扩展能力。
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>阶段</th>
+                    <th>交付内容</th>
+                    <th>验收关注点</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Phase 1</td>
+                    <td>设备预注册、MQTT 鉴权、上行遥测、Kafka、TDengine</td>
+                    <td>链路可用、消息不丢、写入可追踪</td>
+                  </tr>
+                  <tr>
+                    <td>Phase 2</td>
+                    <td>下行命令、ACK、命令状态机、在线状态、基础告警</td>
+                    <td>控制闭环完成，状态一致性可解释</td>
+                  </tr>
+                  <tr>
+                    <td>Phase 3</td>
+                    <td>DLQ、重放、聚合报表、设备影子、规则增强</td>
+                    <td>平台具备可运维和可扩展能力</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="callout">
+                交付节奏建议：先把“设备接入、消息可靠流转、时序存储、命令闭环”跑稳，再进入平台化和规模化演进。
+              </div>
+            </section>
+
+            <section id="decision" data-tab-panel="decision">
+              <h2>10. 风险与决策</h2>
+              <div class="grid-2">
+                <div class="panel">
+                  <h3>主要风险</h3>
+                  <ul>
+                    <li>设备侧协议不统一，导致接入层兼容复杂。</li>
+                    <li>消息重复和乱序引发告警、命令和状态错判。</li>
+                    <li>过早拆分服务导致排障成本升高。</li>
+                    <li>时序与业务元数据边界不清，后期查询和建模返工。</li>
+                  </ul>
+                </div>
+                <div class="panel">
+                  <h3>已定决策</h3>
+                  <ul>
+                    <li>设备直连 EMQX。</li>
+                    <li>Go 订阅 MQTT 后写 Kafka。</li>
+                    <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
+                    <li>TDengine 采用超级表 + 标签。</li>
+                    <li>业务库选 PostgreSQL。</li>
+                    <li>第一版采用逻辑多租户隔离。</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="alert">
+                规则判断建议保持轻量，避免第一版引入独立规则引擎；先把协议、幂等和状态闭环做扎实，后面再扩展编排和分析能力。
+              </div>
+              <div class="danger">
+                不建议第一版就做：复杂事件溯源、Schema Registry、多地域双活、过度拆分的微服务矩阵。
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="footer">
+          这份合并版文档适合作为团队评审、立项沟通和后续实施拆解的单一入口；如果需要，我可以继续把它拆成 API 文档、MQTT Schema、数据库表结构和初始化目录四份更细的实施文档。
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal" id="diagram-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="diagram-modal-title">
+      <div class="modal-head">
+        <div class="modal-title" id="diagram-modal-title">图示放大查看</div>
+        <button class="modal-close" id="diagram-modal-close" type="button">关闭</button>
+      </div>
+      <div class="modal-body" id="diagram-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    function initTabs(groupEl) {
+      const buttonBar = groupEl.querySelector(':scope > .tab-bar');
+      const panelRoot = groupEl.querySelector(':scope > .tab-panels');
+      const buttons = buttonBar ? Array.from(buttonBar.querySelectorAll(':scope > [data-tab-target]')) : [];
+      const panels = panelRoot ? Array.from(panelRoot.querySelectorAll(':scope > [data-tab-panel]')) : [];
+
+      if (!buttons.length) {
+        panels.forEach((panel) => panel.classList.add('active'));
+        groupEl._activateTab = () => {};
+        groupEl._getActiveTab = () => null;
+        return;
+      }
+
+      function activate(tabName) {
+        buttons.forEach((button) => {
+          const active = button.dataset.tabTarget === tabName;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        panels.forEach((panel) => {
+          panel.classList.toggle('active', panel.dataset.tabPanel === tabName);
+        });
+      }
+
+      groupEl._activateTab = activate;
+      groupEl._getActiveTab = () => {
+        const activeButton = buttons.find((button) => button.classList.contains('active'));
+        return activeButton ? activeButton.dataset.tabTarget : null;
+      };
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          activate(button.dataset.tabTarget);
+          if (groupEl.dataset.tabGroup === 'main') {
+            history.replaceState(null, '', `#${button.dataset.tabTarget}`);
+          }
+        });
+      });
+
+      const defaultActive = buttons.find((button) => button.classList.contains('active')) || buttons[0];
+      if (groupEl.dataset.tabGroup === 'main') {
+        const hash = location.hash.replace('#', '');
+        const initial = buttons.find((button) => button.dataset.tabTarget === hash) || defaultActive;
+        if (initial) activate(initial.dataset.tabTarget);
+      } else if (defaultActive) {
+        activate(defaultActive.dataset.tabTarget);
+      }
+    }
+
+    document.querySelectorAll('[data-tab-group]').forEach(initTabs);
+
+    const mainTabs = document.querySelector('[data-tab-group="main"]');
+    const tocLinks = document.querySelectorAll('.toc a[href^="#"]');
+    tocLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        const targetId = link.getAttribute('href').slice(1);
+        if (!targetId) {
+          return;
+        }
+        event.preventDefault();
+        if (mainTabs && typeof mainTabs._activateTab === 'function') {
+          mainTabs._activateTab(targetId);
+        }
+        history.replaceState(null, '', `#${targetId}`);
+        const targetSection = document.getElementById(targetId);
+        if (targetSection) {
+          requestAnimationFrame(() => {
+            targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }
+      });
+    });
+
+    if (window.mermaid) {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'loose',
+        flowchart: { useMaxWidth: true, htmlLabels: true },
+        sequence: { useMaxWidth: true }
+      });
+      mermaid.run({ querySelector: '.mermaid' });
+    }
+
+    const diagramModal = document.getElementById('diagram-modal');
+    const diagramModalBody = document.getElementById('diagram-modal-body');
+    const diagramModalClose = document.getElementById('diagram-modal-close');
+    function closeDiagramModal() {
+      diagramModal.classList.remove('open');
+      diagramModal.setAttribute('aria-hidden', 'true');
+      diagramModalBody.innerHTML = '';
+    }
+
+    function openDiagramModal(source) {
+      diagramModalBody.innerHTML = '';
+      const cloned = source.cloneNode(true);
+      cloned.style.cursor = 'zoom-out';
+      cloned.title = '点击还原';
+      cloned.addEventListener('click', closeDiagramModal);
+      diagramModalBody.appendChild(cloned);
+      diagramModal.classList.add('open');
+      diagramModal.setAttribute('aria-hidden', 'false');
+    }
+
+    window.openDiagramById = function openDiagramById(id) {
+      const source = document.getElementById(id);
+      if (source) {
+        openDiagramModal(source);
+      }
+    };
+
+    function findDiagramFromEvent(event) {
+      const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+      for (const node of path) {
+        if (node instanceof Element && node.matches('.diagram .mermaid')) {
+          return node;
+        }
+      }
+      let node = event.target;
+      while (node && node instanceof Element) {
+        if (node.matches('.diagram .mermaid')) {
+          return node;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    document.addEventListener('click', (event) => {
+      const diagram = findDiagramFromEvent(event);
+      if (!diagram) {
+        return;
+      }
+      openDiagramModal(diagram);
+    });
+
+    diagramModalClose.addEventListener('click', closeDiagramModal);
+    diagramModal.addEventListener('click', (event) => {
+      if (event.target === diagramModal) closeDiagramModal();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && diagramModal.classList.contains('open')) {
+        closeDiagramModal();
+      }
+    });
+  </script>
+</body>
+</html>

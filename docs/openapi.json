@@ -1,0 +1,46 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MQTT IoT Platform API",
+    "version": "v1"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "responses": {
+          "200": { "description": "ok" }
+        }
+      }
+    },
+    "/api/v1/tenants": {
+      "get": { "responses": { "200": { "description": "list tenants" } } },
+      "post": { "responses": { "201": { "description": "create tenant" } } }
+    },
+    "/api/v1/devices": {
+      "get": { "responses": { "200": { "description": "list devices" } } },
+      "post": { "responses": { "201": { "description": "create device" } } }
+    },
+    "/api/v1/devices/{tenantId}/{deviceId}": {
+      "get": { "responses": { "200": { "description": "device detail" } } }
+    },
+    "/api/v1/devices/{tenantId}/{deviceId}/status": {
+      "get": { "responses": { "200": { "description": "device status" } } }
+    },
+    "/api/v1/devices/{tenantId}/{deviceId}/telemetry": {
+      "get": { "responses": { "200": { "description": "device telemetry" } } }
+    },
+    "/api/v1/telemetry": {
+      "post": { "responses": { "202": { "description": "ingest telemetry" } } }
+    },
+    "/api/v1/commands": {
+      "get": { "responses": { "200": { "description": "list commands" } } },
+      "post": { "responses": { "201": { "description": "create command" } } }
+    },
+    "/api/v1/commands/{id}": {
+      "get": { "responses": { "200": { "description": "command detail" } } }
+    },
+    "/api/v1/commands/{id}/ack": {
+      "post": { "responses": { "200": { "description": "ack command" } } }
+    }
+  }
+}

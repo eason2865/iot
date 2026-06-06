@@ -1,7 +1,7 @@
 # IoT Platform
 
 <p align="center">
-  <img src="docs/images/hero.svg" alt="IoT Platform hero" />
+  <img src="docs/images/hero-2.0.0.svg" alt="IoT Platform hero" />
 </p>
 
 <p align="center">
@@ -36,11 +36,11 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 ## 一图看懂
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="IoT platform architecture" />
+  <img src="docs/images/architecture-2.0.0.svg" alt="IoT platform architecture" />
 </p>
 
 <p align="center">
-  <img src="docs/images/command-cycle.svg" alt="IoT platform command lifecycle" />
+  <img src="docs/images/command-cycle-2.0.0.svg" alt="IoT platform command lifecycle" />
 </p>
 
 ## 核心特性

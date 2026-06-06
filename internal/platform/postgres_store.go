@@ -113,6 +113,8 @@ func (s *PostgresStore) createTenant(t Tenant) (Tenant, error) {
 	return t, nil
 }
 
+func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) { return s.createTenant(t) }
+
 func (s *PostgresStore) listTenants() []Tenant {
 	rows, err := s.db.Query(`SELECT id, name FROM tenants ORDER BY id`)
 	if err != nil {
@@ -128,6 +130,8 @@ func (s *PostgresStore) listTenants() []Tenant {
 	}
 	return out
 }
+
+func (s *PostgresStore) ListTenants() []Tenant { return s.listTenants() }
 
 func (s *PostgresStore) createDevice(d Device) (Device, error) {
 	tx, err := s.db.Begin()
@@ -160,6 +164,8 @@ func (s *PostgresStore) createDevice(d Device) (Device, error) {
 	return d, nil
 }
 
+func (s *PostgresStore) CreateDevice(d Device) (Device, error) { return s.createDevice(d) }
+
 func (s *PostgresStore) listDevices() []Device {
 	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, secret, created_at FROM devices ORDER BY tenant_id, device_id`)
 	if err != nil {
@@ -176,6 +182,8 @@ func (s *PostgresStore) listDevices() []Device {
 	return out
 }
 
+func (s *PostgresStore) ListDevices() []Device { return s.listDevices() }
+
 func (s *PostgresStore) getDevice(tenantID, deviceID string) (Device, bool) {
 	var d Device
 	err := s.db.QueryRow(`SELECT tenant_id, device_id, product_id, secret, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
@@ -184,6 +192,10 @@ func (s *PostgresStore) getDevice(tenantID, deviceID string) (Device, bool) {
 		return Device{}, false
 	}
 	return d, true
+}
+
+func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
+	return s.getDevice(tenantID, deviceID)
 }
 
 func (s *PostgresStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
@@ -230,6 +242,10 @@ func (s *PostgresStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord
 	return rec, nil
 }
 
+func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
+	return s.recordTelemetry(env)
+}
+
 func (s *PostgresStore) listTelemetry(tenantID, deviceID string) []TelemetryRecord {
 	rows, err := s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
 		FROM telemetry_records WHERE tenant_id = $1 AND device_id = $2 ORDER BY received_at ASC`, tenantID, deviceID)
@@ -249,6 +265,10 @@ func (s *PostgresStore) listTelemetry(tenantID, deviceID string) []TelemetryReco
 	return out
 }
 
+func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
+	return s.listTelemetry(tenantID, deviceID)
+}
+
 func (s *PostgresStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
 	var status DeviceStatus
 	var lastSeen sql.NullTime
@@ -264,6 +284,10 @@ func (s *PostgresStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus
 		}
 	}
 	return status, true
+}
+
+func (s *PostgresStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
+	return s.getDeviceStatus(tenantID, deviceID)
 }
 
 func (s *PostgresStore) createCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
@@ -302,6 +326,10 @@ func (s *PostgresStore) createCommand(tenantID, deviceID string, payload json.Ra
 	return cmd, nil
 }
 
+func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
+	return s.createCommand(tenantID, deviceID, payload)
+}
+
 func (s *PostgresStore) ackCommand(id, tenantID, deviceID string) (Command, error) {
 	cmd, exists := s.getCommand(id)
 	if !exists {
@@ -324,6 +352,10 @@ func (s *PostgresStore) ackCommand(id, tenantID, deviceID string) (Command, erro
 	return cmd, nil
 }
 
+func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
+	return s.ackCommand(id, tenantID, deviceID)
+}
+
 func (s *PostgresStore) listCommands() []Command {
 	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at FROM commands ORDER BY created_at DESC`)
 	if err != nil {
@@ -342,6 +374,8 @@ func (s *PostgresStore) listCommands() []Command {
 	return out
 }
 
+func (s *PostgresStore) ListCommands() []Command { return s.listCommands() }
+
 func (s *PostgresStore) getCommand(id string) (Command, bool) {
 	var cmd Command
 	var payload []byte
@@ -353,6 +387,8 @@ func (s *PostgresStore) getCommand(id string) (Command, bool) {
 	cmd.Payload = json.RawMessage(payload)
 	return cmd, true
 }
+
+func (s *PostgresStore) GetCommand(id string) (Command, bool) { return s.getCommand(id) }
 
 func translateSQLError(err error, kind string) error {
 	if err == nil {

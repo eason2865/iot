@@ -215,12 +215,13 @@
       <h1>物联网平台技术方案</h1>
       <p class="lead">
         这是一个面向工业设备接入、数据采集、状态管理和业务控制的物联网平台项目，
-        采用 Go + EMQX + Kafka + TDengine + PostgreSQL 的组合，支撑设备接入、消息流转、
-        时序存储、命令下发和多租户管理等核心能力。
+        采用 go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的组合，
+        支撑设备接入、消息流转、核心业务拆分、时序存储、命令下发和多租户管理等能力。
       </p>
       <div class="chips">
-        <span class="chip">技术栈：Go / MQTT / EMQX / Kafka / TDengine / PostgreSQL</span>
-        <span class="chip">架构风格：少拆服务、强边界、先可用、可演进</span>
+        <span class="chip">技术栈：go-zero / gRPC / protobuf / etcd / MQTT / EMQX / Kafka</span>
+        <span class="chip">存储分工：TDengine / PostgreSQL</span>
+        <span class="chip">架构风格：先拆核心业务服务，保持边界清晰</span>
         <span class="chip">多租户：逻辑隔离优先</span>
         <span class="chip">可靠性：默认 at-least-once</span>
       </div>
@@ -255,7 +256,7 @@
               </p>
               <div class="callout">
                 推荐范围：<strong>设备预注册、设备接入鉴权、MQTT 上行遥测、Kafka 解耦、TDengine 入库与查询、
-                下行命令与 ACK、在线状态查询、基础告警。</strong>
+                下行命令与 ACK、在线状态查询、基础告警，以及先拆一个核心业务微服务。</strong>
               </div>
               <div class="grid-2" style="margin-top:16px">
                 <div class="panel">
@@ -288,9 +289,9 @@
             <section id="architecture" data-tab-panel="architecture">
               <h2>2. 总体架构</h2>
               <p>
-                平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，接入服务做鉴权和标准化，
-                将事件写入 Kafka，再由 worker 异步落 TDengine 和 PostgreSQL；管理后台和外部系统通过
-                REST API 查询元数据、命令状态、在线状态和历史数据。
+                平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，ingress 做鉴权和标准化，
+                将事件写入 Kafka，再由 worker 异步落 TDengine 和 PostgreSQL；管理后台通过 go-zero REST
+                调用 core-rpc，核心业务通过 gRPC + protobuf + etcd 独立提供租户、设备、遥测和命令能力。
               </p>
               <div class="diagram">
                 <div class="mermaid">
@@ -302,8 +303,10 @@ graph TD
   W --> T[TDengine]
   W --> P[PostgreSQL]
   U[管理后台/外部系统] --> A[Go admin]
-  A --> P
-  A --> T
+  A --> R[core-rpc]
+  R --> P
+  R --> T
+  R --> M[etcd]
   I -->|命令下发| E
   E -->|ACK/状态| I
                 </div>
@@ -316,6 +319,7 @@ graph TD
                     <li><strong>Kafka</strong>：接入解耦、削峰、重试、DLQ、重放。</li>
                     <li><strong>TDengine</strong>：时序写入、时序查询、聚合分析。</li>
                     <li><strong>PostgreSQL</strong>：业务元数据、命令、告警、权限、当前态。</li>
+                    <li><strong>go-zero + gRPC + protobuf + etcd</strong>：拆分核心业务服务、统一接口契约和服务发现。</li>
                   </ul>
                 </div>
                 <div class="panel">
@@ -337,6 +341,7 @@ flowchart LR
     G[API Gateway/Ingress]
     I[Go ingress]
     A[Go admin]
+    R[core-rpc]
     W[Go worker]
   end
   subgraph EDGE[接入基础设施]
@@ -361,8 +366,10 @@ flowchart LR
   W --> T
   W --> P
   G --> A
-  A --> P
-  A --> T
+  A --> R
+  R --> P
+  R --> T
+  R --> Z[etcd]
   PR -. scrape .-> I
   PR -. scrape .-> A
   PR -. scrape .-> W
@@ -426,8 +433,8 @@ sequenceDiagram
                       <div class="panel">
                         <h3>下行命令步骤</h3>
                         <ul>
-                          <li>管理后台创建命令，admin 写 PostgreSQL 并生成 <span class="inline">commandId</span>。</li>
-                          <li>ingress 按租户与设备上下文发布下行消息。</li>
+                          <li>管理后台创建命令，admin 调用 core-rpc 写业务状态并生成 <span class="inline">commandId</span>。</li>
+                          <li>core-rpc 统一处理命令、租户和设备等核心业务，再由 ingress 按租户与设备上下文发布下行消息。</li>
                           <li>设备收到命令后返回 ACK。</li>
                           <li>命令状态更新为 <span class="inline">pending / dispatched / sent / acked / timeout / failed</span>。</li>
                         </ul>
@@ -438,19 +445,22 @@ sequenceDiagram
 sequenceDiagram
   participant U as 管理后台
   participant A as Go admin
+  participant R as core-rpc
   participant P as PostgreSQL
   participant I as Go ingress
   participant E as EMQX
   participant D as Device
   U->>A: POST /commands
-  A->>P: insert command(pending)
+  A->>R: create command
+  R->>P: insert command(pending)
   A-->>U: commandId
   A->>I: dispatch request
   I->>E: publish /down
   E->>D: deliver command
   D->>E: publish /ack
   E->>I: ack callback
-  I->>P: update command status
+  I->>R: update command status
+  R->>P: persist command status
                         </div>
                       </div>
                     </div>
@@ -817,15 +827,19 @@ flowchart LR
   W --> T[TDengine]
   W --> P[PostgreSQL]
   G[API Gateway/Ingress] --> A[Go admin]
-  A --> P
-  A --> T
+  A --> R[core-rpc]
+  R --> P
+  R --> T
+  R --> Z[etcd]
   PR[Prometheus] -. scrape .-> I
   PR -. scrape .-> A
+  PR -. scrape .-> R
   PR -. scrape .-> W
   PR -. scrape .-> DM
   GF[Grafana] --> PR
   M[日志/Tracing] -.-> I
   M -.-> A
+  M -.-> R
   M -.-> W
                 </div>
               </div>
@@ -834,14 +848,18 @@ flowchart LR
             <section id="repo" data-tab-panel="repo">
               <h2>8. Go 仓库结构</h2>
               <p>
-                当前仓库已经包含三个可启动入口和若干核心契约包，适合继续在此基础上扩展，而不是重新拆仓。
+                当前仓库已经包含五个可启动入口和若干核心契约包，适合继续在此基础上演进，而不是重新拆仓。
               </p>
               <pre>iot/
 ├── cmd/
+│   ├── admin/            # go-zero REST 网关
+│   ├── core-rpc/         # 核心业务 gRPC 服务
+│   ├── demo/             # 造流与 ACK 模拟器
 │   ├── ingress/          # 接入处理服务入口
-│   ├── admin/            # 查询管理服务入口
 │   └── worker/           # 后台消费者、补偿任务、DLQ 重放
 ├── internal/
+│   ├── adminapi/
+│   ├── core/
 │   ├── bootstrap/
 │   ├── contracts/
 │   ├── platform/
@@ -853,9 +871,13 @@ flowchart LR
                 <div class="panel">
                   <h3>当前代码结构</h3>
                   <ul>
-                    <li><span class="inline">cmd/ingress/main.go</span></li>
                     <li><span class="inline">cmd/admin/main.go</span></li>
+                    <li><span class="inline">cmd/core-rpc/main.go</span></li>
+                    <li><span class="inline">cmd/demo/main.go</span></li>
+                    <li><span class="inline">cmd/ingress/main.go</span></li>
                     <li><span class="inline">cmd/worker/main.go</span></li>
+                    <li><span class="inline">internal/adminapi/*</span></li>
+                    <li><span class="inline">internal/core/*</span></li>
                     <li><span class="inline">internal/contracts/*</span></li>
                     <li><span class="inline">internal/bootstrap/run.go</span></li>
                     <li><span class="inline">internal/server/health.go</span></li>
@@ -865,11 +887,11 @@ flowchart LR
                 <div class="panel">
                   <h3>后续建议补齐</h3>
                   <ul>
-                    <li><span class="inline">internal/transport/</span>：HTTP / MQTT 传输层</li>
-                    <li><span class="inline">internal/service/</span>：业务编排层</li>
-                    <li><span class="inline">internal/repo/</span>：数据访问层</li>
-                    <li><span class="inline">internal/consumer/</span>：Kafka 消费逻辑</li>
-                    <li><span class="inline">pkg/contracts/</span>：协议契约</li>
+                    <li><span class="inline">internal/transport/</span>：HTTP / MQTT 传输层进一步细化</li>
+                    <li><span class="inline">internal/service/</span>：核心业务编排层可继续拆分</li>
+                    <li><span class="inline">internal/repo/</span>：数据访问层可逐步抽离</li>
+                    <li><span class="inline">internal/consumer/</span>：Kafka 消费逻辑进一步沉淀</li>
+                    <li><span class="inline">proto/</span>：gRPC 契约持续演进</li>
                   </ul>
                 </div>
               </div>
@@ -927,7 +949,7 @@ flowchart LR
                   <h3>已定决策</h3>
                   <ul>
                     <li>设备直连 EMQX。</li>
-                    <li>Go 订阅 MQTT 后写 Kafka。</li>
+                    <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>
                     <li>业务库选 PostgreSQL。</li>

@@ -8,11 +8,13 @@ resources:
   - secret.yaml
   - configmap.yaml
   - init-sql-configmap.yaml
+  - etcd.yaml
   - postgres.yaml
   - kafka.yaml
   - emqx.yaml
   - tdengine.yaml
   - admin.yaml
+  - core-rpc.yaml
   - ingress.yaml
   - worker.yaml
   - demo.yaml

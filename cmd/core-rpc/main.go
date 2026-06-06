@@ -3,11 +3,11 @@ package main
 import (
 	"log"
 
-	"iot/internal/adminapi"
+	"iot/internal/core"
 )
 
 func main() {
-	if err := adminapi.Run(); err != nil {
+	if err := core.Run(); err != nil {
 		log.Fatal(err)
 	}
 }

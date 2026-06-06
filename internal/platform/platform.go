@@ -157,7 +157,7 @@ func (a *App) openapiHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, openAPISpec())
+	writeJSON(w, http.StatusOK, OpenAPISpec())
 }
 
 func (a *App) mqttEnvelopeSchemaHandler(w http.ResponseWriter, r *http.Request) {
@@ -165,10 +165,10 @@ func (a *App) mqttEnvelopeSchemaHandler(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, mqttEnvelopeSchema())
+	writeJSON(w, http.StatusOK, MQTTEnvelopeSchema())
 }
 
-func openAPISpec() map[string]any {
+func OpenAPISpec() map[string]any {
 	return map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
@@ -227,7 +227,7 @@ func openAPISpec() map[string]any {
 	}
 }
 
-func mqttEnvelopeSchema() map[string]any {
+func MQTTEnvelopeSchema() map[string]any {
 	return map[string]any{
 		"$schema":  "https://json-schema.org/draft/2020-12/schema",
 		"title":    "MQTT Telemetry Envelope",
@@ -553,6 +553,8 @@ func (s *memoryStore) createTenant(t Tenant) (Tenant, error) {
 	return t, nil
 }
 
+func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) { return s.createTenant(t) }
+
 func (s *memoryStore) listTenants() []Tenant {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -562,6 +564,8 @@ func (s *memoryStore) listTenants() []Tenant {
 	}
 	return out
 }
+
+func (s *memoryStore) ListTenants() []Tenant { return s.listTenants() }
 
 func (s *memoryStore) createDevice(d Device) (Device, error) {
 	s.mu.Lock()
@@ -579,6 +583,8 @@ func (s *memoryStore) createDevice(d Device) (Device, error) {
 	return d, nil
 }
 
+func (s *memoryStore) CreateDevice(d Device) (Device, error) { return s.createDevice(d) }
+
 func (s *memoryStore) listDevices() []Device {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -589,11 +595,17 @@ func (s *memoryStore) listDevices() []Device {
 	return out
 }
 
+func (s *memoryStore) ListDevices() []Device { return s.listDevices() }
+
 func (s *memoryStore) getDevice(tenantID, deviceID string) (Device, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	device, ok := s.devices[deviceKey(tenantID, deviceID)]
 	return device, ok
+}
+
+func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
+	return s.getDevice(tenantID, deviceID)
 }
 
 func (s *memoryStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
@@ -621,6 +633,10 @@ func (s *memoryStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord, 
 		LastSeenAt: time.Now().UTC(),
 	}
 	return rec, nil
+}
+
+func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
+	return s.recordTelemetry(env)
 }
 
 func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
@@ -652,6 +668,10 @@ func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawM
 	return cmd, nil
 }
 
+func (s *memoryStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
+	return s.createCommand(tenantID, deviceID, payload)
+}
+
 func (s *memoryStore) ackCommand(id, tenantID, deviceID string) (Command, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -672,6 +692,10 @@ func (s *memoryStore) ackCommand(id, tenantID, deviceID string) (Command, error)
 	return cmd, nil
 }
 
+func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
+	return s.ackCommand(id, tenantID, deviceID)
+}
+
 func (s *memoryStore) listCommands() []Command {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -682,12 +706,16 @@ func (s *memoryStore) listCommands() []Command {
 	return out
 }
 
+func (s *memoryStore) ListCommands() []Command { return s.listCommands() }
+
 func (s *memoryStore) getCommand(id string) (Command, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	cmd, ok := s.commands[id]
 	return cmd, ok
 }
+
+func (s *memoryStore) GetCommand(id string) (Command, bool) { return s.getCommand(id) }
 
 func (s *memoryStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
 	s.mu.RLock()
@@ -703,6 +731,10 @@ func (s *memoryStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus, 
 	return status, true
 }
 
+func (s *memoryStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
+	return s.getDeviceStatus(tenantID, deviceID)
+}
+
 func (s *memoryStore) listTelemetry(tenantID, deviceID string) []TelemetryRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -711,4 +743,8 @@ func (s *memoryStore) listTelemetry(tenantID, deviceID string) []TelemetryRecord
 	out := make([]TelemetryRecord, len(src))
 	copy(out, src)
 	return out
+}
+
+func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
+	return s.listTelemetry(tenantID, deviceID)
 }

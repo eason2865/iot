@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package core.v1;
+
+option go_package = "iot/proto/core/v1;corev1";
+
+import "google/protobuf/timestamp.proto";
+
+message Tenant {
+  string id = 1;
+  string name = 2;
+}
+
+message Device {
+  string tenant_id = 1;
+  string device_id = 2;
+  string product_id = 3;
+  string secret = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message DeviceStatus {
+  string tenant_id = 1;
+  string device_id = 2;
+  bool online = 3;
+  google.protobuf.Timestamp last_seen_at = 4;
+}
+
+message TelemetryRecord {
+  string msg_id = 1;
+  string tenant_id = 2;
+  string device_id = 3;
+  int64 ts = 4;
+  string type = 5;
+  string version = 6;
+  bytes payload = 7;
+  google.protobuf.Timestamp received_at = 8;
+}
+
+message Command {
+  string id = 1;
+  string tenant_id = 2;
+  string device_id = 3;
+  string status = 4;
+  bytes payload = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message CreateTenantRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message CreateDeviceRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+  string product_id = 3;
+  string secret = 4;
+}
+
+message GetDeviceRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+}
+
+message GetDeviceResponse {
+  Device device = 1;
+}
+
+message GetDeviceStatusRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+}
+
+message GetDeviceStatusResponse {
+  DeviceStatus status = 1;
+}
+
+message ListTenantsRequest {}
+
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+}
+
+message ListDevicesRequest {}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+}
+
+message ListTelemetryRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+}
+
+message ListTelemetryResponse {
+  repeated TelemetryRecord records = 1;
+}
+
+message IngestTelemetryRequest {
+  string msg_id = 1;
+  string tenant_id = 2;
+  string device_id = 3;
+  int64 ts = 4;
+  string type = 5;
+  string version = 6;
+  bytes payload = 7;
+}
+
+message IngestTelemetryResponse {
+  TelemetryRecord record = 1;
+}
+
+message RecordTelemetryRequest {
+  TelemetryRecord telemetry = 1;
+}
+
+message RecordTelemetryResponse {
+  TelemetryRecord record = 1;
+}
+
+message CreateCommandRequest {
+  string tenant_id = 1;
+  string device_id = 2;
+  bytes payload = 3;
+}
+
+message CreateCommandResponse {
+  Command command = 1;
+}
+
+message ListCommandsRequest {}
+
+message ListCommandsResponse {
+  repeated Command commands = 1;
+}
+
+message GetCommandRequest {
+  string id = 1;
+}
+
+message GetCommandResponse {
+  Command command = 1;
+}
+
+message AckCommandRequest {
+  string id = 1;
+  string tenant_id = 2;
+  string device_id = 3;
+}
+
+message AckCommandResponse {
+  Command command = 1;
+}
+
+service CoreService {
+  rpc CreateTenant (CreateTenantRequest) returns (Tenant);
+  rpc ListTenants (ListTenantsRequest) returns (ListTenantsResponse);
+  rpc CreateDevice (CreateDeviceRequest) returns (Device);
+  rpc ListDevices (ListDevicesRequest) returns (ListDevicesResponse);
+  rpc GetDevice (GetDeviceRequest) returns (GetDeviceResponse);
+  rpc GetDeviceStatus (GetDeviceStatusRequest) returns (GetDeviceStatusResponse);
+  rpc ListTelemetry (ListTelemetryRequest) returns (ListTelemetryResponse);
+  rpc IngestTelemetry (IngestTelemetryRequest) returns (IngestTelemetryResponse);
+  rpc RecordTelemetry (RecordTelemetryRequest) returns (RecordTelemetryResponse);
+  rpc CreateCommand (CreateCommandRequest) returns (CreateCommandResponse);
+  rpc ListCommands (ListCommandsRequest) returns (ListCommandsResponse);
+  rpc GetCommand (GetCommandRequest) returns (GetCommandResponse);
+  rpc AckCommand (AckCommandRequest) returns (AckCommandResponse);
+}

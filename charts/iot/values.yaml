@@ -12,6 +12,8 @@ externalDependencies:
   kafkaBrokers: host.docker.internal:9092
   emqxUrl: tcp://host.docker.internal:1883
   tdengineDsn: root:taosdata@http(host.docker.internal:6041)/iot
+  etcdHosts: host.docker.internal:2379
+  etcdKey: iot/core-rpc
   wait:
     postgresHost: host.docker.internal
     postgresPort: 5432
@@ -21,8 +23,13 @@ externalDependencies:
     emqxPort: 1883
     tdengineHost: host.docker.internal
     tdenginePort: 6041
+    etcdHost: host.docker.internal
+    etcdPort: 2379
 
 admin:
+  enabled: true
+
+coreRpc:
   enabled: true
 
 ingress:

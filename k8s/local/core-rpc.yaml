@@ -1,28 +1,28 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: admin
+  name: core-rpc
 spec:
   selector:
-    app: admin
+    app: core-rpc
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+    - name: grpc
+      port: 9001
+      targetPort: 9001
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: admin
+  name: core-rpc
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: admin
+      app: core-rpc
   template:
     metadata:
       labels:
-        app: admin
+        app: core-rpc
     spec:
       initContainers:
         - name: wait-for-deps
@@ -31,27 +31,25 @@ spec:
             - sh
             - -c
             - >
-              until nc -z etcd 2379;
-              do echo waiting for etcd; sleep 2; done
+              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z etcd 2379;
+              do echo waiting for postgres/kafka/etcd; sleep 2; done
       containers:
-        - name: admin
+        - name: core-rpc
           image: iot-app:metrics2
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/admin"]
+          command: ["/usr/local/bin/core-rpc"]
           envFrom:
             - configMapRef:
                 name: iot-common-config
           ports:
-            - containerPort: 8080
+            - containerPort: 9001
           readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 15
             periodSeconds: 10

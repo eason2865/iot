@@ -9,6 +9,7 @@ CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
 COMMON_HELM_ARGS="
   --set externalDependencies.enabled=true
   --set admin.enabled=true
+  --set coreRpc.enabled=true
   --set ingress.enabled=true
   --set worker.enabled=true
   --set postgres.enabled=false
@@ -32,6 +33,7 @@ wait_for_docker_deps() {
       nc -z host.docker.internal 9092
       nc -z host.docker.internal 1883
       nc -z host.docker.internal 6041
+      nc -z host.docker.internal 2379
       echo external-deps-ok'
 }
 
@@ -54,6 +56,7 @@ helm upgrade --install "$RELEASE" "$CHART" \
   $COMMON_HELM_ARGS
 
 wait_for_deployment admin
+wait_for_deployment core-rpc
 wait_for_deployment ingress
 wait_for_deployment worker
 
@@ -65,6 +68,7 @@ Helm deployment is ready.
 
 This script deploys application services only:
   - admin
+  - core-rpc
   - ingress
   - worker
 

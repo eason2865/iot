@@ -12,11 +12,15 @@ data:
   KAFKA_BROKERS: {{ .Values.externalDependencies.kafkaBrokers | quote }}
   EMQX_URL: {{ .Values.externalDependencies.emqxUrl | quote }}
   TDENGINE_DSN: {{ .Values.externalDependencies.tdengineDsn | quote }}
+  CORE_RPC_ETCD_HOSTS: {{ .Values.externalDependencies.etcdHosts | quote }}
+  CORE_RPC_ETCD_KEY: {{ .Values.externalDependencies.etcdKey | quote }}
   {{- else }}
   POSTGRES_DSN: postgres://iot:iot123@postgres:5432/iot?sslmode=disable
   KAFKA_BROKERS: kafka:9092
   EMQX_URL: tcp://emqx:1883
   TDENGINE_DSN: root:taosdata@http(tdengine:6041)/iot
+  CORE_RPC_ETCD_HOSTS: etcd:2379
+  CORE_RPC_ETCD_KEY: iot/core-rpc
   {{- end }}
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
@@ -24,6 +28,7 @@ data:
   EMQX_CLIENT_ID: iot-ingress
   TDENGINE_TABLE: telemetry
   LISTEN_ADDR: :8080
+  CORE_RPC_LISTEN_ON: :9001
 {{- if .Values.postgres.enabled }}
 ---
 apiVersion: v1

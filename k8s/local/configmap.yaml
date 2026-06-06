@@ -15,3 +15,6 @@ data:
   TDENGINE_DSN: root:taosdata@http(tdengine:6041)/iot
   TDENGINE_TABLE: telemetry
   LISTEN_ADDR: :8080
+  CORE_RPC_ETCD_HOSTS: etcd:2379
+  CORE_RPC_ETCD_KEY: iot/core-rpc
+  CORE_RPC_LISTEN_ON: :9001

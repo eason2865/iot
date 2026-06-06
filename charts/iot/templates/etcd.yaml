@@ -1,0 +1,68 @@
+{{- if not .Values.externalDependencies.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: etcd
+  ports:
+    - name: client
+      port: 2379
+      targetPort: 2379
+    - name: peer
+      port: 2380
+      targetPort: 2380
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etcd
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:v3.5.17
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/etcd
+            - --name
+            - etcd-1
+            - --data-dir
+            - /etcd-data
+            - --listen-client-urls
+            - http://0.0.0.0:2379
+            - --advertise-client-urls
+            - http://etcd:2379
+            - --listen-peer-urls
+            - http://0.0.0.0:2380
+            - --initial-advertise-peer-urls
+            - http://etcd:2380
+            - --initial-cluster
+            - etcd-1=http://etcd:2380
+            - --initial-cluster-token
+            - iot-etcd
+            - --initial-cluster-state
+            - new
+          ports:
+            - containerPort: 2379
+            - containerPort: 2380
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /etcd-data
+      volumes:
+        - name: etcd-data
+          emptyDir: {}
+{{- end }}

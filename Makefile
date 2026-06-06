@@ -1,6 +1,6 @@
 .PHONY: all test fmt fmt-check build clean helm-local
 
-BINS := admin demo ingress worker
+BINS := admin core-rpc demo ingress worker
 
 all: fmt-check test build
 

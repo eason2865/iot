@@ -1,33 +1,33 @@
-{{- if .Values.admin.enabled }}
+{{- if .Values.coreRpc.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: admin
+  name: core-rpc
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   selector:
-    app: admin
+    app: core-rpc
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+    - name: grpc
+      port: 9001
+      targetPort: 9001
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: admin
+  name: core-rpc
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: admin
+      app: core-rpc
   template:
     metadata:
       labels:
-        app: admin
+        app: core-rpc
     spec:
       initContainers:
         - name: wait-for-deps
@@ -37,33 +37,33 @@ spec:
             - -c
             {{- if .Values.externalDependencies.enabled }}
             - >
-              until nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
-              do echo waiting for docker etcd; sleep 2; done
+              until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
+              && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
+              && nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
+              do echo waiting for docker postgres/kafka/etcd; sleep 2; done
             {{- else }}
             - >
-              until nc -z etcd 2379;
-              do echo waiting for etcd; sleep 2; done
+              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z etcd 2379;
+              do echo waiting for postgres/kafka/etcd; sleep 2; done
             {{- end }}
       containers:
-        - name: admin
+        - name: core-rpc
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/admin"]
+          command: ["/usr/local/bin/core-rpc"]
           envFrom:
             - configMapRef:
                 name: iot-common-config
           ports:
-            - containerPort: 8080
+            - containerPort: 9001
           readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 15
             periodSeconds: 10
 {{- end }}

@@ -1,18 +1,27 @@
 package platform
 
 import (
+	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/trace"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
+
+const requestIDHeader = "X-Request-Id"
 
 type structuredLogWriter struct {
 	service string
@@ -45,6 +54,7 @@ func (w *structuredLogWriter) Write(p []byte) (int, error) {
 
 func ConfigureStdLogger(serviceName string) {
 	log.SetFlags(0)
+	logx.AddGlobalFields(logx.Field("service", serviceName))
 	log.SetOutput(&structuredLogWriter{
 		service: serviceName,
 		out:     os.Stdout,
@@ -91,4 +101,78 @@ func TraceConfig(serviceName string) trace.Config {
 
 func StartTracing(serviceName string) {
 	trace.StartAgent(TraceConfig(serviceName))
+}
+
+type requestIDContextKey struct{}
+
+func NewRequestID() string {
+	var buf [16]byte
+	if _, err := crand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
+}
+
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(requestIDContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func ContextWithRequestID(ctx context.Context, requestID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		requestID = NewRequestID()
+	}
+	ctx = context.WithValue(ctx, requestIDContextKey{}, requestID)
+	return logx.ContextWithFields(ctx, logx.Field("requestId", requestID))
+}
+
+func EnsureRequestID(ctx context.Context, requestID string) (context.Context, string) {
+	if existing := RequestIDFromContext(ctx); existing != "" {
+		return ContextWithRequestID(ctx, existing), existing
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		requestID = NewRequestID()
+	}
+	return ContextWithRequestID(ctx, requestID), requestID
+}
+
+func RequestIDHTTPMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, requestID := EnsureRequestID(r.Context(), r.Header.Get(requestIDHeader))
+		w.Header().Set(requestIDHeader, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func UnaryClientRequestIDInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption) error {
+		ctx, requestID := EnsureRequestID(ctx, "")
+		ctx = metadata.AppendToOutgoingContext(ctx, strings.ToLower(requestIDHeader), requestID)
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+func UnaryServerRequestIDInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		requestID := ""
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if values := md.Get(strings.ToLower(requestIDHeader)); len(values) > 0 {
+				requestID = values[0]
+			}
+		}
+		ctx, requestID = EnsureRequestID(ctx, requestID)
+		_ = grpc.SetHeader(ctx, metadata.Pairs(strings.ToLower(requestIDHeader), requestID))
+		return handler(ctx, req)
+	}
 }

@@ -28,6 +28,11 @@
 - 标准输出日志已改为结构化 JSON 风格，减少后续排障时的人工 grep 成本
 - README 已新增“观测”小节，说明 `/metrics`、trace 和日志约定
 
+## 2026-06-06 requestId 透传补强
+- HTTP 请求会自动补 `X-Request-Id`，并在 `admin -> core-rpc` 的 gRPC 调用链里继续传递
+- `demo` 发往 `admin` 的请求会带上 request id 和 trace 上下文，便于联调和压测时串联链路
+- `platform` 新增 requestId middleware / gRPC interceptor / context helper，供各服务统一复用
+
 ## 当前状态
 - 已根据用户确认的架构决策，整理出两份方案 HTML，并合并为一份合并版：`物联网平台技术方案.html`
 - 合并版补充了主架构图、部署图、上行/下行/告警时序图、命令状态机，并按模块做成标签页，便于阅览
@@ -74,7 +79,7 @@
 - Kafka 按业务域拆 topic，分区键优先 `deviceId`
 - TDengine 使用超级表 + 标签
 - 业务库选 PostgreSQL
-- 第一版采用逻辑多租户隔离
+- 采用逻辑多租户隔离
 - `admin` 负责元数据与命令管理，`ingress` 负责 MQTT -> Kafka，`worker` 负责 Kafka -> TDengine / EMQX
 
 ## 文档位置

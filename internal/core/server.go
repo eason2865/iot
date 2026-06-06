@@ -57,6 +57,7 @@ func Run() error {
 	}, func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
 	})
+	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor())
 
 	server.Start()
 	return nil

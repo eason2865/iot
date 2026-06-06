@@ -127,7 +127,7 @@ func (a *App) routes() http.Handler {
 }
 
 func (a *App) observeHTTP(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return RequestIDHTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/metrics" {
 			next.ServeHTTP(w, r)
 			return
@@ -138,7 +138,7 @@ func (a *App) observeHTTP(next http.Handler) http.Handler {
 		if a.metrics != nil {
 			a.metrics.ObserveHTTPRequest(routeLabel(r.URL.Path), r.Method, rw.status, time.Since(start))
 		}
-	})
+	}))
 }
 
 func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {

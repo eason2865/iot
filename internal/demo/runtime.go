@@ -16,6 +16,9 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"iot/internal/platform"
 )
 
@@ -130,6 +133,7 @@ func (c *httpAdminClient) CreateCommand(ctx context.Context, tenantID, deviceID 
 }
 
 func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, out any) error {
+	ctx, requestID := platform.EnsureRequestID(ctx, "")
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -139,6 +143,14 @@ func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, ou
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-Id", requestID)
+
+	ctx, span := otel.Tracer("demo-http").Start(req.Context(), "admin-api POST "+req.URL.Path,
+		oteltrace.WithSpanKind(oteltrace.SpanKindClient))
+	defer span.End()
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	req = req.WithContext(ctx)
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err

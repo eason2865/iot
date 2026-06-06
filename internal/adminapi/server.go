@@ -50,6 +50,7 @@ func Run() error {
 			Timeout:    true,
 		},
 	})
+	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
 	defer httpServer.Stop()
 
 	api := &Server{rpc: corev1.NewCoreServiceClient(client.Conn())}
@@ -68,7 +69,8 @@ func newRPCClient() (zrpc.Client, error) {
 	conf.Timeout = 5000
 	var lastErr error
 	for attempt := 0; attempt < 30; attempt++ {
-		client, err := zrpc.NewClient(conf)
+		client, err := zrpc.NewClient(conf,
+			zrpc.WithUnaryClientInterceptor(platform.UnaryClientRequestIDInterceptor()))
 		if err == nil {
 			return client, nil
 		}

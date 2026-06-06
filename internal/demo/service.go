@@ -104,8 +104,9 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			ID:   tenantID,
 			Name: fmt.Sprintf("Demo Tenant %d", ti+1),
 		}
+		tenantCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
 		if s.admin != nil {
-			if err := s.admin.CreateTenant(ctx, tenant.ID, tenant.Name); err != nil {
+			if err := s.admin.CreateTenant(tenantCtx, tenant.ID, tenant.Name); err != nil {
 				if s.metrics != nil {
 					s.metrics.IncDemo("topology", "error")
 				}
@@ -125,7 +126,8 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			}
 			tenant.Devices = append(tenant.Devices, dev)
 			if s.admin != nil {
-				if err := s.admin.CreateDevice(ctx, dev.TenantID, dev.DeviceID, dev.ProductID); err != nil {
+				deviceCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
+				if err := s.admin.CreateDevice(deviceCtx, dev.TenantID, dev.DeviceID, dev.ProductID); err != nil {
 					if s.metrics != nil {
 						s.metrics.IncDemo("topology", "error")
 					}
@@ -234,7 +236,8 @@ func (s *Service) EmitCommand(ctx context.Context) error {
 		return nil
 	}
 	payload := json.RawMessage(fmt.Sprintf(`{"switch":"toggle","nonce":%d}`, s.rng.Int63()))
-	_, err := s.admin.CreateCommand(ctx, tenant.ID, device.DeviceID, payload)
+	commandCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
+	_, err := s.admin.CreateCommand(commandCtx, tenant.ID, device.DeviceID, payload)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.IncDemo("command", "error")

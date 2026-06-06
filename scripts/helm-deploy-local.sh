@@ -6,6 +6,18 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
+COMMON_HELM_ARGS="
+  --set externalDependencies.enabled=true
+  --set admin.enabled=true
+  --set ingress.enabled=true
+  --set worker.enabled=true
+  --set postgres.enabled=false
+  --set kafka.enabled=false
+  --set emqx.enabled=false
+  --set tdengine.enabled=false
+  --set demo.enabled=false
+  --set prometheus.enabled=false
+"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -38,7 +50,8 @@ helm upgrade --install "$RELEASE" "$CHART" \
   -n "$NAMESPACE" \
   --create-namespace \
   --wait \
-  --timeout "$TIMEOUT"
+  --timeout "$TIMEOUT" \
+  $COMMON_HELM_ARGS
 
 wait_for_deployment admin
 wait_for_deployment ingress
@@ -49,6 +62,11 @@ kubectl get pods -n "$NAMESPACE"
 cat <<EOF
 
 Helm deployment is ready.
+
+This script deploys application services only:
+  - admin
+  - ingress
+  - worker
 
 Useful local forwards:
   scripts/port-forward-local-monitoring.sh

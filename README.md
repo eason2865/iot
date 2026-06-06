@@ -280,7 +280,9 @@ kubectl rollout status deploy/worker -n iot
 scripts/helm-deploy-local.sh
 ```
 
-默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/demo 的 k8s 资源，并通过 `host.docker.internal` 连接 Docker 服务。
+该脚本会强制 apps-only 部署，只安装 `admin`、`ingress`、`worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
+
+默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 `host.docker.internal` 连接 Docker 服务。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 
@@ -339,37 +341,27 @@ helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout
 scripts/helm-deploy-local.sh
 ```
 
+脚本默认只部署应用本身：
+
+- `admin`
+- `ingress`
+- `worker`
+
 脚本默认会先从 k8s Pod 内检查外部 PostgreSQL、Kafka、EMQX、TDengine 端口是否可达。若目标环境使用云服务或 CI 不需要这个检查，可以关闭：
 
 ```bash
 CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 ```
 
-默认值面向“Docker 数据中间件/Prometheus/Grafana/demo + Helm 业务服务”的本地拓扑。若需要把依赖也部署进 k8s，可以在 values 中打开：
+当前 Helm 部署只允许包含应用本身和共享配置。PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana、demo 都作为外部依赖或本地 Docker 服务，不进入业务 Helm release。
 
-```yaml
-externalDependencies:
-  enabled: false
-postgres:
-  enabled: true
-kafka:
-  enabled: true
-emqx:
-  enabled: true
-tdengine:
-  enabled: true
-demo:
-  enabled: true
+如果你已经用旧的 `kubectl apply -k k8s/local` 或旧 Helm values 起过同名/依赖资源，先清理旧资源再装：
+
+```bash
+helm uninstall iot -n iot --ignore-not-found
+kubectl delete pvc postgres-data kafka-data emqx-data tdengine-data -n iot --ignore-not-found
+scripts/helm-deploy-local.sh
 ```
-
-Prometheus 默认不由业务 Helm chart 部署；如果确实想把 Prometheus 也部署进 k8s，可以打开：
-
-```yaml
-prometheus:
-  enabled: true
-```
-
-如果你已经用 `kubectl apply -k k8s/local` 起过同名资源，先清理旧 Deployment/Service/ConfigMap/Secret 再装 Helm，避免同名冲突；不需要删除 PVC。
 
 ## 开发建议
 
@@ -378,7 +370,7 @@ prometheus:
 - TDengine 负责时序数据，PostgreSQL 负责业务元数据和状态
 - 命令状态机建议保持 `pending -> dispatched -> sent -> acked / timeout / failed`
 - 第一版保持逻辑多租户隔离，避免过早引入复杂分库分表
-- Demo 模拟器适合在 K8s 中作为独立 Deployment 横向扩容，用于持续造流和链路回归
+- Demo 模拟器当前作为外部造流服务运行，不进入业务 Helm release
 
 ## 路线图
 

@@ -268,15 +268,6 @@
                     <li>支持逻辑多租户隔离和基础权限控制。</li>
                   </ul>
                 </div>
-                <div class="panel">
-                  <h3>非目标</h3>
-                  <ul>
-                    <li>第一版不做复杂规则引擎。</li>
-                    <li>第一版不做完整设备影子。</li>
-                    <li>第一版不做多地域双活。</li>
-                    <li>第一版不引入 Schema Registry / 配置中心。</li>
-                  </ul>
-                </div>
               </div>
               <div class="kpi">
                 <div class="panel"><strong>主链路</strong><span class="muted">接入 → 解耦 → 入库 → 查询</span></div>
@@ -757,7 +748,7 @@ stateDiagram-v2
                     <li>所有记录必须带 <span class="inline">tenantId</span>。</li>
                     <li>查询接口必须强制按租户过滤。</li>
                     <li>Topic、日志、Kafka 消息都应携带租户标识。</li>
-                    <li>第一版采用逻辑隔离，不做物理隔离。</li>
+                    <li>第一版采用逻辑隔离，物理隔离留到后续按需演进。</li>
                   </ul>
                 </div>
               </div>
@@ -975,7 +966,7 @@ flowchart LR
                   <ul>
                     <li>设备直连 EMQX。</li>
                     <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
-                    <li>现阶段只保留一个核心微服务拆分点 `core-rpc`，不做多服务矩阵。</li>
+                    <li>现阶段只保留一个核心微服务拆分点 `core-rpc`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>
                     <li>业务库选 PostgreSQL。</li>
@@ -987,7 +978,7 @@ flowchart LR
                 规则判断建议保持轻量，避免第一版引入独立规则引擎；先把协议、幂等和状态闭环做扎实，后面再扩展编排和分析能力。
               </div>
               <div class="danger">
-                不建议第一版就做：复杂事件溯源、Schema Registry、多地域双活、过度拆分的微服务矩阵，或者把时序和业务元数据混在一起建模。
+                第一版应优先把协议、幂等、状态闭环和时序/元数据边界做稳，再逐步扩展复杂事件溯源、Schema Registry 和多地域能力。
               </div>
             </section>
           </div>

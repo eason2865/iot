@@ -938,18 +938,44 @@ flowchart LR
               <div class="grid-2">
                 <div class="panel">
                   <h3>主要风险</h3>
-                  <ul>
-                    <li>设备侧协议不统一，导致接入层兼容复杂。</li>
-                    <li>消息重复和乱序引发告警、命令和状态错判。</li>
-                    <li>过早拆分服务导致排障成本升高。</li>
-                    <li>时序与业务元数据边界不清，后期查询和建模返工。</li>
-                  </ul>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>风险</th>
+                        <th>现状判断</th>
+                        <th>治理动作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>设备侧协议不统一</td>
+                        <td>长期存在</td>
+                        <td>统一 Envelope、加版本号、补设备适配器层和字段校验。</td>
+                      </tr>
+                      <tr>
+                        <td>消息重复和乱序</td>
+                        <td>默认会发生</td>
+                        <td>按设备维度幂等、去重键、状态机校验、分区键固定为 deviceId。</td>
+                      </tr>
+                      <tr>
+                        <td>过早拆分服务</td>
+                        <td>当前可控</td>
+                        <td>当前只拆 `core-rpc` 一层，保留统一日志、trace、错误码和发布节奏。</td>
+                      </tr>
+                      <tr>
+                        <td>时序与元数据边界不清</td>
+                        <td>长期存在</td>
+                        <td>TDengine 只放时序事实，PostgreSQL 放业务元数据和当前态，查询边界写进文档。</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
                 <div class="panel">
                   <h3>已定决策</h3>
                   <ul>
                     <li>设备直连 EMQX。</li>
                     <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
+                    <li>现阶段只保留一个核心微服务拆分点 `core-rpc`，不做多服务矩阵。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>
                     <li>业务库选 PostgreSQL。</li>
@@ -961,7 +987,7 @@ flowchart LR
                 规则判断建议保持轻量，避免第一版引入独立规则引擎；先把协议、幂等和状态闭环做扎实，后面再扩展编排和分析能力。
               </div>
               <div class="danger">
-                不建议第一版就做：复杂事件溯源、Schema Registry、多地域双活、过度拆分的微服务矩阵。
+                不建议第一版就做：复杂事件溯源、Schema Registry、多地域双活、过度拆分的微服务矩阵，或者把时序和业务元数据混在一起建模。
               </div>
             </section>
           </div>

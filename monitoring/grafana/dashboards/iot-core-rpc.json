@@ -22,9 +22,31 @@
   "links": [],
   "panels": [
     {
+      "id": 1,
+      "type": "row",
+      "title": "Core RPC 健康",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "gRPC QPS",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
       },
       "fieldConfig": {
         "defaults": {
@@ -32,13 +54,186 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "id": 1,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "gRPC Error QPS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "gRPC p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le)) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Core Up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(up{job=\"core-rpc\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "gRPC Requests by Method",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
           "calcs": [
@@ -46,6 +241,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -54,17 +253,24 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method, code)",
           "refId": "A"
         }
-      ],
-      "title": "gRPC Requests / sec",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 7,
+      "type": "timeseries",
+      "title": "gRPC p95 Latency by Method",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
@@ -72,13 +278,6 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
       "options": {
         "legend": {
           "calcs": [
@@ -86,6 +285,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -97,14 +300,21 @@
           "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le, method))",
           "refId": "A"
         }
-      ],
-      "title": "gRPC p95 Latency",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Core Business RPCs",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
@@ -112,13 +322,6 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
       "options": {
         "legend": {
           "calcs": [
@@ -126,6 +329,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -134,70 +341,57 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code=\"OK\"}[5m])) by (method)",
-          "refId": "A"
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/CreateTenant|.*/CreateDevice\",code=\"OK\"}[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "topology"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) by (method, code)",
-          "refId": "B"
-        }
-      ],
-      "title": "OK vs Error",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/CreateCommand\",code=\"OK\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "create command"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {},
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) or vector(0)",
-          "refId": "A"
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/AckCommand\",code=\"OK\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "ack command"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/IngestTelemetry|.*/RecordTelemetry\",code=\"OK\"}[5m])) or vector(0)",
+          "refId": "D",
+          "legendFormat": "telemetry"
         }
-      ],
-      "title": "Error QPS",
-      "type": "stat"
+      ]
     }
   ],
-  "refresh": "5s",
+  "refresh": "10s",
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
     "iot",
-    "core-rpc"
+    "go-zero",
+    "demo"
   ],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "IoT Core RPC",
   "uid": "iot-core-rpc",
   "version": 1,

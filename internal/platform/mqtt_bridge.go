@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"log"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -18,9 +19,10 @@ type MQTTBridgeConfig struct {
 }
 
 type MQTTBridge struct {
-	client  mqtt.Client
-	filter  string
-	metrics *Metrics
+	client       mqtt.Client
+	filter       string
+	metrics      *Metrics
+	publishSlots chan struct{}
 }
 
 func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) *MQTTBridge {
@@ -43,11 +45,13 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
 	opts.SetConnectRetryInterval(2 * time.Second)
-	bridge := &MQTTBridge{filter: filter, metrics: metrics}
+	bridge := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, 64)}
 	opts.OnConnect = func(_ mqtt.Client) {
+		log.Printf("mqtt bridge connected: filter=%s", filter)
 		token := bridge.client.Subscribe(filter, 0, func(_ mqtt.Client, msg mqtt.Message) {
 			env, err := contracts.ParseEnvelope(msg.Payload())
 			if err != nil {
+				log.Printf("mqtt bridge parse error: topic=%s err=%v", msg.Topic(), err)
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
@@ -63,17 +67,36 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 				Payload:    env.Payload,
 				ReceivedAt: time.Now().UTC(),
 			}
-			if err := publisher.publishTelemetry(rec); err != nil {
+			select {
+			case bridge.publishSlots <- struct{}{}:
+				go func() {
+					defer func() { <-bridge.publishSlots }()
+					if err := publisher.publishTelemetry(rec); err != nil {
+						log.Printf("mqtt bridge publish telemetry error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, err)
+						if bridge.metrics != nil {
+							bridge.metrics.IncMQTTBridge("error")
+						}
+						return
+					}
+					if bridge.metrics != nil {
+						bridge.metrics.IncMQTTBridge("ok")
+					}
+				}()
+			default:
+				log.Printf("mqtt bridge publish backlog full: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
 				return
 			}
-			if bridge.metrics != nil {
-				bridge.metrics.IncMQTTBridge("ok")
-			}
 		})
 		token.Wait()
+		if err := token.Error(); err != nil {
+			log.Printf("mqtt bridge subscribe error: filter=%s err=%v", filter, err)
+			if bridge.metrics != nil {
+				bridge.metrics.IncMQTTBridge("error")
+			}
+		}
 	}
 	bridge.client = mqtt.NewClient(opts)
 	return bridge

@@ -22,9 +22,31 @@
   "links": [],
   "panels": [
     {
+      "id": 1,
+      "type": "row",
+      "title": "Admin API 流量与质量",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "HTTP QPS",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
       },
       "fieldConfig": {
         "defaults": {
@@ -32,13 +54,186 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "id": 1,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_http_requests_total{job=\"admin\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "HTTP 5xx QPS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_http_requests_total{job=\"admin\",status=\"5xx\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Command Created",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(iot_commands_total{job=\"admin\",kind=\"created\",result=\"ok\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Command ACKed",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(iot_commands_total{job=\"admin\",kind=\"acked\",result=\"ok\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "HTTP Requests by Route / Status",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
           "calcs": [
@@ -46,6 +241,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -57,14 +256,21 @@
           "expr": "sum(rate(iot_http_requests_total{job=\"admin\"}[5m])) by (route, status)",
           "refId": "A"
         }
-      ],
-      "title": "Admin HTTP Requests by Route",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP p95 Latency by Route",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
@@ -72,13 +278,6 @@
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
       "options": {
         "legend": {
           "calcs": [
@@ -86,6 +285,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -97,157 +300,170 @@
           "expr": "histogram_quantile(0.95, sum(rate(iot_http_request_duration_seconds_bucket{job=\"admin\"}[5m])) by (le, route))",
           "refId": "A"
         }
-      ],
-      "title": "Admin HTTP p95 Latency by Route",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Business Operation Counters",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {},
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(iot_tenants_total{job=\"admin\",result=\"ok\"})",
-          "refId": "A"
-        }
-      ],
-      "title": "Tenants Created",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 8
-      },
-      "id": 4,
-      "options": {},
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(iot_devices_total{job=\"admin\",result=\"ok\"})",
-          "refId": "A"
-        }
-      ],
-      "title": "Devices Created",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
         "x": 12,
-        "y": 8
+        "y": 12,
+        "w": 12,
+        "h": 7
       },
-      "id": 5,
-      "options": {},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(iot_telemetry_ingested_total{job=\"admin\",result=\"ok\"})",
-          "refId": "A"
+          "expr": "sum(rate(iot_tenants_total{job=\"admin\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "tenant ok"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_devices_total{job=\"admin\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "device ok"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_commands_total{job=\"admin\",kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "command created"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_commands_total{job=\"admin\",kind=\"acked\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "D",
+          "legendFormat": "command acked"
         }
-      ],
-      "title": "Telemetry Accepted",
-      "type": "stat"
+      ]
     },
     {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Admin Error Breakdown",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 7
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 8
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
-      "id": 6,
-      "options": {},
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(iot_commands_total{job=\"admin\",kind=\"created\",result=\"ok\"})",
+          "expr": "sum(rate(iot_http_requests_total{job=\"admin\",status=~\"4xx|5xx\"}[5m])) by (route, status) or vector(0)",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_tenants_total{job=\"admin\",result=\"error\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "tenant error"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_devices_total{job=\"admin\",result=\"error\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "device error"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_commands_total{job=\"admin\",result=\"error\"}[5m])) by (kind) or vector(0)",
+          "refId": "D"
         }
-      ],
-      "title": "Commands Created",
-      "type": "stat"
+      ]
     }
   ],
-  "refresh": "5s",
+  "refresh": "10s",
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
     "iot",
-    "api"
+    "go-zero",
+    "demo"
   ],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "IoT Admin API",
-  "uid": "iot-api",
+  "uid": "iot-admin-api",
   "version": 1,
   "weekStart": ""
 }

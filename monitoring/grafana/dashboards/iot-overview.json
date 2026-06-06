@@ -22,23 +22,322 @@
   "links": [],
   "panels": [
     {
+      "id": 1,
+      "type": "row",
+      "title": "业务总览",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "服务在线数",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "id": 1,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(up{job=~\"admin|core-rpc|ingress|worker|demo-docker\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Demo 租户数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(iot_demo_topology_tenants{job=\"demo-docker\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Demo 设备数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(iot_demo_topology_devices{job=\"demo-docker\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "遥测入库速率",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_tdengine_write_total{result=\"ok\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "命令创建速率",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "ACK 成功率",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_worker_total{kind=\"ack\",result=\"ok\"}[5m])) / clamp_min(sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])), 1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "链路吞吐",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "遥测链路吞吐：设备 -> MQTT -> Kafka -> Worker -> TDengine",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
           "calcs": [
@@ -46,6 +345,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -54,31 +357,68 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total[5m])) by (job)",
-          "refId": "A"
+          "expr": "sum(rate(iot_demo_events_total{job=\"demo-docker\",kind=\"telemetry\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "demo publish"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_mqtt_bridge_total{result=\"ok\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "mqtt bridge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_kafka_publish_total{kind=\"telemetry\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "kafka telemetry"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_worker_total{kind=\"telemetry\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "D",
+          "legendFormat": "worker telemetry"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_tdengine_write_total{result=\"ok\"}[5m])) or vector(0)",
+          "refId": "E",
+          "legendFormat": "tdengine write"
         }
-      ],
-      "title": "HTTP Requests / sec",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 10,
+      "type": "timeseries",
+      "title": "命令闭环：创建 -> 下发 -> 设备 ACK -> Worker ACK",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 7
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "ops"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
       "options": {
         "legend": {
           "calcs": [
@@ -86,6 +426,104 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_demo_events_total{job=\"demo-docker\",kind=\"command\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "demo create command"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "admin/core created"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_worker_total{kind=\"command\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "worker downlink"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_demo_events_total{job=\"demo-docker\",kind=\"ack\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "D",
+          "legendFormat": "demo ack publish"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_worker_total{kind=\"ack\",result=\"ok\"}[5m])) or vector(0)",
+          "refId": "E",
+          "legendFormat": "worker ack consumed"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "稳定性与延迟",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "HTTP / gRPC p95 延迟",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -95,118 +533,40 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.95, sum(rate(iot_http_request_duration_seconds_bucket[5m])) by (le, job))",
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP p95 Latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps"
+          "refId": "A",
+          "legendFormat": "{{job}} HTTP p95"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_telemetry_ingested_total[5m])) by (job)",
-          "refId": "A"
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le))",
+          "refId": "B",
+          "legendFormat": "core-rpc gRPC p95"
         }
-      ],
-      "title": "Telemetry Ingested / sec",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 13,
+      "type": "timeseries",
+      "title": "错误速率汇总",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 8,
-        "w": 12,
         "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(rate(iot_commands_total{kind=\"created\"}[5m])) by (job)",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(rate(iot_commands_total{kind=\"acked\"}[5m])) by (job)",
-          "refId": "B"
-        }
-      ],
-      "title": "Commands Created vs Acked",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
+        "y": 21,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "ops"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
-      "id": 5,
       "options": {
         "legend": {
           "calcs": [
@@ -214,6 +574,10 @@
           ],
           "displayMode": "table",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
       },
       "targets": [
@@ -222,30 +586,75 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method)",
-          "refId": "A"
+          "expr": "sum(rate(iot_http_requests_total{status=~\"4xx|5xx\"}[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "http 4xx/5xx"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_grpc_requests_total{code!=\"OK\"}[5m])) or vector(0)",
+          "refId": "B",
+          "legendFormat": "grpc non-ok"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_demo_events_total{result=\"error\"}[5m])) or vector(0)",
+          "refId": "C",
+          "legendFormat": "demo error"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_kafka_publish_total{result=\"error\"}[5m])) or vector(0)",
+          "refId": "D",
+          "legendFormat": "kafka publish error"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_worker_total{result=\"error\"}[5m])) or vector(0)",
+          "refId": "E",
+          "legendFormat": "worker error"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_tdengine_write_total{result=\"error\"}[5m])) or vector(0)",
+          "refId": "F",
+          "legendFormat": "tdengine error"
         }
-      ],
-      "title": "Core RPC Requests / sec",
-      "type": "timeseries"
+      ]
     }
   ],
-  "refresh": "5s",
+  "refresh": "10s",
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
     "iot",
-    "overview"
+    "go-zero",
+    "demo"
   ],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "IoT Overview",
   "uid": "iot-overview",
   "version": 1,

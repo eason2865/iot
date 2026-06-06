@@ -1,5 +1,34 @@
 # AI Handover
 
+## 2026-06-06 Grafana 业务监控与 demo 造流闭环
+- 已按 IoT 业务闭环重新整理 Grafana dashboard：
+  - `IoT Overview`：服务在线数、demo 拓扑规模、遥测入库速率、命令创建速率、ACK 成功率、上行链路、命令闭环、HTTP/gRPC 延迟和错误汇总
+  - `IoT Admin API`：Admin HTTP QPS、5xx、命令创建/ACK、路由级延迟、业务操作计数和错误拆解
+  - `IoT Core RPC`：core-rpc gRPC QPS、错误 QPS、p95、方法拆分和核心业务 RPC
+  - `IoT Pipeline`：demo 造流、MQTT bridge、Kafka publish、worker、TDengine 和 pipeline 错误
+- 已补 Prometheus 指标：
+  - demo 拓扑 gauge：`iot_demo_topology_tenants`、`iot_demo_topology_devices`、`iot_demo_topology_agents`
+  - demo ACK 事件：`iot_demo_events_total{kind="ack",result="ok|error"}`
+  - 常见 ok/error 标签组合预置为 0，避免 Grafana 在无错误时显示 `No data`
+- 已增强 demo：拓扑初始化后写入拓扑 gauge，设备侧 ACK 发布会统计成功/失败。
+- 已增强 MQTT/Kafka 链路：
+  - Kafka 写入增加 5 秒超时，避免本地 Kafka/metadata 异常导致 MQTT 回调永久卡住
+  - MQTT bridge 增加连接、订阅、解析、发布失败日志
+  - MQTT bridge 改为异步限流发布 telemetry 到 Kafka，避免 Paho 消息回调被 Kafka 写入阻塞
+- 已修复本地 Docker + k8s 依赖寻址：
+  - Helm values / 部署脚本改为默认使用 Docker Desktop 网关 `192.168.65.254`
+  - Docker etcd advertise client URL 改为 `http://192.168.65.254:2379`
+  - Kafka 容器已用 `KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://192.168.65.254:9092` 重建
+  - 应用镜像 tag 已统一为 `iot-app:2.0`，避免 `IfNotPresent` 复用旧镜像导致新代码没有进入 k8s
+- 已重新部署并验证：
+  - `go test ./...` 通过
+  - `helm lint charts/iot` 通过
+  - `scripts/helm-deploy-local.sh` 部署通过
+  - Prometheus targets：`admin`、`core-rpc`、`ingress`、`worker`、`demo-docker` 全部 `up`
+  - demo 拓扑：5 个租户、50 台设备
+  - 当前 1 分钟错误窗口：demo error、worker error、admin 5xx、core-rpc non-OK 均为 0
+  - 5 分钟业务窗口已确认有数据：demo telemetry/command/ack、MQTT bridge、Kafka telemetry publish、worker telemetry/command/ack、TDengine write、HTTP/gRPC p95
+
 ## 2026-06-06 go-zero 核心微服务拆分
 - 已按用户确认的推荐方案落地：保留现有接入/消费链路，同时将核心业务拆出为 `core-rpc`，`admin` 改为 go-zero REST 网关并通过 gRPC 调用核心服务
 - 已新增 `proto/core/v1/core.proto` 及生成代码，服务发现和注册使用 etcd，核心服务和 admin 均已接入 go-zero / grpc / protobuf / etcd

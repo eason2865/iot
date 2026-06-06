@@ -87,7 +87,9 @@ func (p *KafkaPublisher) publishTelemetry(record TelemetryRecord) error {
 		}
 		return err
 	}
-	err = p.telemetryWriter.WriteMessages(context.Background(), kafka.Message{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = p.telemetryWriter.WriteMessages(ctx, kafka.Message{
 		Key:   []byte(record.DeviceID),
 		Value: value,
 	})
@@ -118,7 +120,9 @@ func (p *KafkaPublisher) publishCommand(cmd Command) error {
 		}
 		return err
 	}
-	err = p.commandWriter.WriteMessages(context.Background(), kafka.Message{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = p.commandWriter.WriteMessages(ctx, kafka.Message{
 		Key:   []byte(cmd.DeviceID),
 		Value: value,
 	})

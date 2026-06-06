@@ -32,6 +32,12 @@ spec:
       labels:
         app: core-rpc
     spec:
+      {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
+      hostAliases:
+        - ip: {{ .Values.externalDependencies.hostGatewayIP | quote }}
+          hostnames:
+            - host.docker.internal
+      {{- end }}
       initContainers:
         - name: wait-for-deps
           image: busybox:1.36

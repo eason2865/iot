@@ -73,6 +73,7 @@ type tenantAgent struct {
 	tenantID string
 	bus      Bus
 	devices  []string
+	metrics  *platform.Metrics
 }
 
 func NewService(cfg Config, admin AdminAPI, factory BusFactory, rng *rand.Rand) *Service {
@@ -154,6 +155,7 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			tenantID: tenant.ID,
 			bus:      bus,
 			devices:  make([]string, 0, len(tenant.Devices)),
+			metrics:  s.metrics,
 		}
 		for _, dev := range tenant.Devices {
 			agent.devices = append(agent.devices, dev.DeviceID)
@@ -163,6 +165,13 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			return err
 		}
 		s.agents[tenant.ID] = agent
+	}
+	if s.metrics != nil {
+		totalDevices := 0
+		for _, tenant := range s.tenants {
+			totalDevices += len(tenant.Devices)
+		}
+		s.metrics.SetDemoTopology(len(s.tenants), totalDevices, len(s.agents))
 	}
 
 	return nil
@@ -369,6 +378,9 @@ func (a *tenantAgent) subscribe() error {
 		}
 		ackTopic, err := contracts.BuildDeviceTopic(downlink.TenantID, downlink.DeviceID, "ack")
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncDemo("ack", "error")
+			}
 			return
 		}
 		ack := platform.CommandAckMessage{
@@ -379,9 +391,20 @@ func (a *tenantAgent) subscribe() error {
 		}
 		body, err := json.Marshal(ack)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncDemo("ack", "error")
+			}
 			return
 		}
-		_ = a.bus.Publish(ackTopic, body)
+		if err := a.bus.Publish(ackTopic, body); err != nil {
+			if a.metrics != nil {
+				a.metrics.IncDemo("ack", "error")
+			}
+			return
+		}
+		if a.metrics != nil {
+			a.metrics.IncDemo("ack", "ok")
+		}
 	})
 }
 

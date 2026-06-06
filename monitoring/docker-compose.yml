@@ -15,7 +15,7 @@ services:
       - --listen-client-urls
       - http://0.0.0.0:2379
       - --advertise-client-urls
-      - http://host.docker.internal:2379
+      - http://192.168.65.254:2379
       - --listen-peer-urls
       - http://0.0.0.0:2380
       - --initial-advertise-peer-urls
@@ -65,7 +65,7 @@ services:
       - prometheus
 
   demo:
-    image: iot-app:metrics2
+    image: iot-app:2.0
     container_name: iot-demo
     restart: unless-stopped
     command: ["/usr/local/bin/demo"]

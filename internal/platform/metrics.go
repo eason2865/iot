@@ -27,6 +27,9 @@ type Metrics struct {
 	workerTotal            *prometheus.CounterVec
 	tdengineWriteTotal     *prometheus.CounterVec
 	demoEventsTotal        *prometheus.CounterVec
+	demoTopologyTenants    prometheus.Gauge
+	demoTopologyDevices    prometheus.Gauge
+	demoTopologyAgents     prometheus.Gauge
 }
 
 func NewMetrics() *Metrics {
@@ -87,6 +90,18 @@ func NewMetrics() *Metrics {
 			Name: "iot_demo_events_total",
 			Help: "Demo simulator event counts.",
 		}, []string{"kind", "result"}),
+		demoTopologyTenants: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "iot_demo_topology_tenants",
+			Help: "Number of tenants prepared by the demo simulator.",
+		}),
+		demoTopologyDevices: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "iot_demo_topology_devices",
+			Help: "Number of devices prepared by the demo simulator.",
+		}),
+		demoTopologyAgents: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "iot_demo_topology_agents",
+			Help: "Number of active tenant MQTT agents in the demo simulator.",
+		}),
 	}
 
 	registry.MustRegister(
@@ -105,7 +120,11 @@ func NewMetrics() *Metrics {
 		m.workerTotal,
 		m.tdengineWriteTotal,
 		m.demoEventsTotal,
+		m.demoTopologyTenants,
+		m.demoTopologyDevices,
+		m.demoTopologyAgents,
 	)
+	m.seedSeries()
 	return m
 }
 
@@ -198,6 +217,62 @@ func (m *Metrics) IncTDengineWrite(result string) {
 
 func (m *Metrics) IncDemo(kind, result string) {
 	incCounterVec(m.demoEventsTotal, kind, result)
+}
+
+func (m *Metrics) SetDemoTopology(tenants, devices, agents int) {
+	if m == nil {
+		return
+	}
+	m.demoTopologyTenants.Set(float64(tenants))
+	m.demoTopologyDevices.Set(float64(devices))
+	m.demoTopologyAgents.Set(float64(agents))
+}
+
+func (m *Metrics) seedSeries() {
+	if m == nil {
+		return
+	}
+	results := []string{"ok", "error"}
+	for _, result := range results {
+		m.tenantsTotal.WithLabelValues(result).Add(0)
+		m.devicesTotal.WithLabelValues(result).Add(0)
+		m.telemetryIngestedTotal.WithLabelValues(result).Add(0)
+		m.mqttBridgeTotal.WithLabelValues(result).Add(0)
+		m.tdengineWriteTotal.WithLabelValues(result).Add(0)
+	}
+	for _, kind := range []string{"created", "acked"} {
+		for _, result := range results {
+			m.commandsTotal.WithLabelValues(kind, result).Add(0)
+		}
+	}
+	for _, kind := range []string{"telemetry", "command"} {
+		for _, result := range results {
+			m.kafkaPublishTotal.WithLabelValues(kind, result).Add(0)
+		}
+	}
+	for _, kind := range []string{"telemetry", "command", "ack"} {
+		for _, result := range results {
+			m.workerTotal.WithLabelValues(kind, result).Add(0)
+		}
+	}
+	for _, kind := range []string{"topology", "telemetry", "command", "ack"} {
+		for _, result := range results {
+			m.demoEventsTotal.WithLabelValues(kind, result).Add(0)
+		}
+	}
+	for _, method := range []string{
+		"/core.v1.CoreService/CreateTenant",
+		"/core.v1.CoreService/CreateDevice",
+		"/core.v1.CoreService/ListTenants",
+		"/core.v1.CoreService/ListDevices",
+		"/core.v1.CoreService/IngestTelemetry",
+		"/core.v1.CoreService/CreateCommand",
+		"/core.v1.CoreService/AckCommand",
+	} {
+		for _, code := range []string{"OK", "InvalidArgument", "NotFound", "AlreadyExists", "Internal"} {
+			m.grpcRequestsTotal.WithLabelValues(method, code).Add(0)
+		}
+	}
 }
 
 func incCounterVec(vec *prometheus.CounterVec, labels ...string) {

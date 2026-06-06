@@ -1,5 +1,5 @@
 images:
-  app: iot-app:metrics2
+  app: iot-app:2.0
   postgres: postgres:15-alpine
   kafka: bitnamilegacy/kafka:latest
   emqx: emqx/emqx-enterprise:latest
@@ -8,22 +8,23 @@ images:
 
 externalDependencies:
   enabled: true
-  postgresDsn: postgres://iot:iot123@host.docker.internal:5432/iot?sslmode=disable
-  kafkaBrokers: host.docker.internal:9092
-  emqxUrl: tcp://host.docker.internal:1883
-  tdengineDsn: root:taosdata@http(host.docker.internal:6041)/iot
-  etcdHosts: host.docker.internal:2379
+  hostGatewayIP: 192.168.65.254
+  postgresDsn: postgres://iot:iot123@192.168.65.254:5432/iot?sslmode=disable
+  kafkaBrokers: 192.168.65.254:9092
+  emqxUrl: tcp://192.168.65.254:1883
+  tdengineDsn: root:taosdata@http(192.168.65.254:6041)/iot
+  etcdHosts: 192.168.65.254:2379
   etcdKey: iot/core-rpc
   wait:
-    postgresHost: host.docker.internal
+    postgresHost: 192.168.65.254
     postgresPort: 5432
-    kafkaHost: host.docker.internal
+    kafkaHost: 192.168.65.254
     kafkaPort: 9092
-    emqxHost: host.docker.internal
+    emqxHost: 192.168.65.254
     emqxPort: 1883
-    tdengineHost: host.docker.internal
+    tdengineHost: 192.168.65.254
     tdenginePort: 6041
-    etcdHost: host.docker.internal
+    etcdHost: 192.168.65.254
     etcdPort: 2379
 
 admin:

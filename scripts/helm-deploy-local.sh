@@ -6,7 +6,8 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
-APP_IMAGE="${APP_IMAGE:-iot-app:metrics2}"
+APP_IMAGE="${APP_IMAGE:-iot-app:2.0}"
+DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 COMMON_HELM_ARGS="
   --set externalDependencies.enabled=true
   --set admin.enabled=true
@@ -29,12 +30,13 @@ wait_for_docker_deps() {
     --restart=Never \
     --image=busybox:1.36 \
     -n "$NAMESPACE" \
+    --env="DOCKER_GATEWAY_HOST=$DOCKER_GATEWAY_HOST" \
     -- sh -c 'set -e
-      nc -z host.docker.internal 5432
-      nc -z host.docker.internal 9092
-      nc -z host.docker.internal 1883
-      nc -z host.docker.internal 6041
-      nc -z host.docker.internal 2379
+      nc -z "$DOCKER_GATEWAY_HOST" 5432
+      nc -z "$DOCKER_GATEWAY_HOST" 9092
+      nc -z "$DOCKER_GATEWAY_HOST" 1883
+      nc -z "$DOCKER_GATEWAY_HOST" 6041
+      nc -z "$DOCKER_GATEWAY_HOST" 2379
       echo external-deps-ok'
 }
 

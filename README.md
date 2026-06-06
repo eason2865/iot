@@ -302,10 +302,10 @@ iot/
 
 ```bash
 docker inspect kafka --format '{{range .Config.Env}}{{println .}}{{end}}' | grep KAFKA_CFG_ADVERTISED_LISTENERS
-# 期望：KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://host.docker.internal:9092
+# 期望：KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://192.168.65.254:9092
 ```
 
-如果 Kafka 仍是 `localhost:9092`，k8s Pod 会被 Kafka 元数据引导去连 Pod 自己的 localhost，`worker` 会启动失败。
+如果 Kafka 仍是 `localhost:9092` 或不可被 k8s Pod 解析的 hostname，Pod 会被 Kafka 元数据引导到错误地址，`core-rpc` / `ingress` / `worker` 的 Kafka 写入或消费会失败。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
 
 安装业务服务：
 
@@ -326,7 +326,7 @@ scripts/helm-deploy-local.sh
 该脚本会强制 apps-only 部署，只安装 `admin`、`ingress`、`worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
 现在脚本同样会部署并等待 `core-rpc`，它是 `admin` 的 gRPC 核心依赖。
 
-默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 `host.docker.internal` 连接 Docker 服务。
+默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 Docker Desktop 网关 IP 连接 Docker 服务。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 

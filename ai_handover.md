@@ -40,13 +40,14 @@
 - 本地 port-forward 脚本已加入 `core-rpc -> 18091:9101`，方便 Docker Prometheus 抓取
 
 ## 2026-06-06 README 图片与发布 tag 调整
-- README 顶部、总体架构和命令闭环三张 SVG 已重画为无版本后缀文件：
-  - `docs/images/hero.svg`
+- README 顶部图已改为直接引用技术方案 HTML 中的总体架构 Mermaid 图生成的静态 SVG
+- README 命令闭环图已改为直接引用技术方案 HTML 中的命令时序 Mermaid 图生成的静态 SVG
+- 当前 README 图片只保留：
   - `docs/images/architecture.svg`
   - `docs/images/command-cycle.svg`
-- 已删除旧的版本化 SVG 图片，README 也不再引用版本化图片名
+- 已删除旧的版本化 SVG 图片和手画顶部图，README 也不再引用版本化图片名
 - README 图片和文档说明已去掉发布版本字样，仅保留架构能力描述
-- 旧版本化 tag 需要删除，当前最新提交需要重新打新 tag 并推送
+- 旧版本化 tag 已删除，当前最新提交已重新打新 tag 并推送
 
 ## 当前状态
 - 已根据用户确认的架构决策，整理出两份方案 HTML，并合并为一份合并版：`物联网平台技术方案.html`

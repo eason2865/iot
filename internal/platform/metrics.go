@@ -1,18 +1,23 @@
 package platform
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 type Metrics struct {
 	registry               *prometheus.Registry
 	httpRequestsTotal      *prometheus.CounterVec
 	httpRequestDuration    *prometheus.HistogramVec
+	grpcRequestsTotal      *prometheus.CounterVec
+	grpcRequestDuration    *prometheus.HistogramVec
 	tenantsTotal           *prometheus.CounterVec
 	devicesTotal           *prometheus.CounterVec
 	telemetryIngestedTotal *prometheus.CounterVec
@@ -37,6 +42,15 @@ func NewMetrics() *Metrics {
 			Help:    "HTTP request duration in seconds.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"route", "method", "status"}),
+		grpcRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "iot_grpc_requests_total",
+			Help: "Total number of gRPC requests handled by the service.",
+		}, []string{"method", "code"}),
+		grpcRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "iot_grpc_request_duration_seconds",
+			Help:    "gRPC request duration in seconds.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"method", "code"}),
 		tenantsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "iot_tenants_total",
 			Help: "Tenant operation counts.",
@@ -80,6 +94,8 @@ func NewMetrics() *Metrics {
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		m.httpRequestsTotal,
 		m.httpRequestDuration,
+		m.grpcRequestsTotal,
+		m.grpcRequestDuration,
 		m.tenantsTotal,
 		m.devicesTotal,
 		m.telemetryIngestedTotal,
@@ -105,6 +121,34 @@ func (m *Metrics) Handler() http.Handler {
 		return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	}
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+
+func (m *Metrics) HTTPMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			start := time.Now()
+			rw := &observedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			m.ObserveHTTPRequest(routeLabel(r.URL.Path), r.Method, rw.status, time.Since(start))
+		})
+	}
+}
+
+func (m *Metrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		code := status.Code(err).String()
+		if m != nil {
+			m.grpcRequestsTotal.WithLabelValues(info.FullMethod, code).Inc()
+			m.grpcRequestDuration.WithLabelValues(info.FullMethod, code).Observe(time.Since(start).Seconds())
+		}
+		return resp, err
+	}
 }
 
 func (m *Metrics) ObserveHTTPRequest(route, method string, status int, duration time.Duration) {

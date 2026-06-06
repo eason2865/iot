@@ -12,6 +12,9 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
+    - name: metrics
+      port: 9100
+      targetPort: 9100
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -54,6 +57,7 @@ spec:
                 name: iot-common-config
           ports:
             - containerPort: 8080
+            - containerPort: 9100
           readinessProbe:
             httpGet:
               path: /healthz

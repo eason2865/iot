@@ -10,13 +10,16 @@ data:
     scrape_configs:
       - job_name: admin
         static_configs:
-          - targets: ['admin:8080']
+          - targets: ['admin:9100']
       - job_name: ingress
         static_configs:
           - targets: ['ingress:8080']
       - job_name: worker
         static_configs:
           - targets: ['worker:8080']
+      - job_name: core-rpc
+        static_configs:
+          - targets: ['core-rpc:9101']
       - job_name: demo
         static_configs:
           - targets: ['demo:8080']

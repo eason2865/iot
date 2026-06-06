@@ -54,11 +54,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total[5m])) by (job)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method)",
           "refId": "A"
         }
       ],
-      "title": "HTTP Requests / sec",
+      "title": "gRPC Requests / sec",
       "type": "timeseries"
     },
     {
@@ -94,11 +94,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(iot_http_request_duration_seconds_bucket[5m])) by (le, job))",
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le, method))",
           "refId": "A"
         }
       ],
-      "title": "HTTP p95 Latency",
+      "title": "gRPC p95 Latency",
       "type": "timeseries"
     },
     {
@@ -134,11 +134,19 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_telemetry_ingested_total[5m])) by (job)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code=\"OK\"}[5m])) by (method)",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) by (method, code)",
+          "refId": "B"
         }
       ],
-      "title": "Telemetry Ingested / sec",
+      "title": "OK vs Error",
       "type": "timeseries"
     },
     {
@@ -148,7 +156,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -159,75 +167,19 @@
         "y": 8
       },
       "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
+      "options": {},
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_commands_total{kind=\"created\"}[5m])) by (job)",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(rate(iot_commands_total{kind=\"acked\"}[5m])) by (job)",
-          "refId": "B"
-        }
-      ],
-      "title": "Commands Created vs Acked",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m]))",
           "refId": "A"
         }
       ],
-      "title": "Core RPC Requests / sec",
-      "type": "timeseries"
+      "title": "Error QPS",
+      "type": "stat"
     }
   ],
   "refresh": "5s",
@@ -235,7 +187,7 @@
   "style": "dark",
   "tags": [
     "iot",
-    "overview"
+    "core-rpc"
   ],
   "templating": {
     "list": []
@@ -246,8 +198,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "IoT Overview",
-  "uid": "iot-overview",
+  "title": "IoT Core RPC",
+  "uid": "iot-core-rpc",
   "version": 1,
   "weekStart": ""
 }

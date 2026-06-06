@@ -6,6 +6,7 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
+APP_IMAGE="${APP_IMAGE:-iot-app:metrics2}"
 COMMON_HELM_ARGS="
   --set externalDependencies.enabled=true
   --set admin.enabled=true
@@ -37,6 +38,12 @@ wait_for_docker_deps() {
       echo external-deps-ok'
 }
 
+load_local_image() {
+  if command -v kind >/dev/null 2>&1; then
+    kind load docker-image "$APP_IMAGE"
+  fi
+}
+
 wait_for_deployment() {
   name="$1"
   if kubectl get deployment "$name" -n "$NAMESPACE" >/dev/null 2>&1; then
@@ -48,12 +55,16 @@ if [ "$CHECK_EXTERNAL_DEPS" = "1" ]; then
   wait_for_docker_deps
 fi
 
+load_local_image
+
 helm upgrade --install "$RELEASE" "$CHART" \
   -n "$NAMESPACE" \
   --create-namespace \
   --wait \
   --timeout "$TIMEOUT" \
   $COMMON_HELM_ARGS
+
+kubectl rollout restart deployment/admin deployment/core-rpc deployment/ingress deployment/worker -n "$NAMESPACE"
 
 wait_for_deployment admin
 wait_for_deployment core-rpc

@@ -1,6 +1,9 @@
 package core
 
 import (
+	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +20,7 @@ import (
 
 func Run() error {
 	platform.ConfigureStdLogger("core-rpc")
+	metrics := platform.NewMetrics()
 	store, closer, err := buildStore(5 * time.Minute)
 	if err != nil {
 		return err
@@ -57,7 +61,9 @@ func Run() error {
 	}, func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
 	})
-	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor())
+	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor(), metrics.UnaryServerInterceptor())
+
+	go serveCoreRPCMetrics(metrics.Handler(), coreRPCPrometheusHost(), coreRPCPrometheusPort(), envOrDefault("CORE_RPC_PROMETHEUS_PATH", "/metrics"))
 
 	server.Start()
 	return nil
@@ -114,4 +120,30 @@ func rpcListenOn() string {
 		}
 	}
 	return ":9001"
+}
+
+func coreRPCPrometheusHost() string {
+	if host := os.Getenv("CORE_RPC_PROMETHEUS_HOST"); host != "" {
+		return host
+	}
+	return "0.0.0.0"
+}
+
+func coreRPCPrometheusPort() int {
+	if port := os.Getenv("CORE_RPC_PROMETHEUS_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			return p
+		}
+	}
+	return 9101
+}
+
+func serveCoreRPCMetrics(handler http.Handler, host string, port int, path string) {
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	addr := fmt.Sprintf("%s:%d", host, port)
+	log.Printf("starting core-rpc metrics server at %s%s", addr, path)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Printf("core-rpc metrics server stopped: %v", err)
+	}
 }

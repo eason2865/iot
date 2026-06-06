@@ -2,12 +2,15 @@ package platform_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc"
 
 	"iot/internal/platform"
 )
@@ -83,7 +86,8 @@ func TestCommandAckFlow(t *testing.T) {
 }
 
 func TestMetricsEndpointExposesTraffic(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "admin"})
+	metrics := platform.NewMetrics()
+	app := platform.New(platform.Config{ServiceName: "admin", Metrics: metrics})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -99,6 +103,12 @@ func TestMetricsEndpointExposesTraffic(t *testing.T) {
 		"payload": map[string]any{
 			"temp": 25,
 		},
+	})
+
+	_, _ = metrics.UnaryServerInterceptor()(context.Background(), nil, &grpc.UnaryServerInfo{
+		FullMethod: "/iot.core.v1.CoreService/CreateTenant",
+	}, func(ctx context.Context, req any) (any, error) {
+		return nil, nil
 	})
 
 	resp, err := http.Get(ts.URL + "/metrics")
@@ -119,6 +129,9 @@ func TestMetricsEndpointExposesTraffic(t *testing.T) {
 	}
 	if !strings.Contains(text, "iot_telemetry_ingested_total") {
 		t.Fatalf("metrics body missing iot_telemetry_ingested_total")
+	}
+	if !strings.Contains(text, "iot_grpc_requests_total") {
+		t.Fatalf("metrics body missing iot_grpc_requests_total")
 	}
 }
 

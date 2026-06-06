@@ -9,6 +9,9 @@ spec:
     - name: grpc
       port: 9001
       targetPort: 9001
+    - name: metrics
+      port: 9101
+      targetPort: 9101
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -43,6 +46,7 @@ spec:
                 name: iot-common-config
           ports:
             - containerPort: 9001
+            - containerPort: 9101
           readinessProbe:
             tcpSocket:
               port: 9001

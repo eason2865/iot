@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -22,7 +24,8 @@ import (
 )
 
 type Server struct {
-	rpc corev1.CoreServiceClient
+	rpc     corev1.CoreServiceClient
+	metrics *platform.Metrics
 }
 
 func Run() error {
@@ -33,6 +36,7 @@ func Run() error {
 	defer client.Conn().Close()
 
 	platform.ConfigureStdLogger("admin-api")
+	metrics := platform.NewMetrics()
 	httpServer := rest.MustNewServer(rest.RestConf{
 		ServiceConf: service.ServiceConf{
 			Name:      "admin-api",
@@ -51,9 +55,15 @@ func Run() error {
 		},
 	})
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
+	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
 	defer httpServer.Stop()
 
-	api := &Server{rpc: corev1.NewCoreServiceClient(client.Conn())}
+	go serveAdminMetrics(metrics.Handler(), adminMetricsHost(), adminMetricsPort(), envOrDefault("ADMIN_METRICS_PATH", "/metrics"))
+
+	api := &Server{
+		rpc:     corev1.NewCoreServiceClient(client.Conn()),
+		metrics: metrics,
+	}
 	httpServer.AddRoutes(api.routes())
 	httpServer.Start()
 	return nil
@@ -331,6 +341,32 @@ func (s *Server) ackCommandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, commandFromPB(resp.GetCommand()))
+}
+
+func adminMetricsHost() string {
+	if host := os.Getenv("ADMIN_METRICS_HOST"); host != "" {
+		return host
+	}
+	return "0.0.0.0"
+}
+
+func adminMetricsPort() int {
+	if port := os.Getenv("ADMIN_METRICS_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			return p
+		}
+	}
+	return 9100
+}
+
+func serveAdminMetrics(handler http.Handler, host string, port int, path string) {
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	addr := fmt.Sprintf("%s:%d", host, port)
+	log.Printf("starting admin metrics server at %s%s", addr, path)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Printf("admin metrics server stopped: %v", err)
+	}
 }
 
 func splitDevicePath(path string) (string, string, bool) {

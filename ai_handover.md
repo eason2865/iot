@@ -1,6 +1,6 @@
 # AI Handover
 
-## 2026-06-06 2.0.0 go-zero 核心微服务拆分
+## 2026-06-06 go-zero 核心微服务拆分
 - 已按用户确认的推荐方案落地：保留现有接入/消费链路，同时将核心业务拆出为 `core-rpc`，`admin` 改为 go-zero REST 网关并通过 gRPC 调用核心服务
 - 已新增 `proto/core/v1/core.proto` 及生成代码，服务发现和注册使用 etcd，核心服务和 admin 均已接入 go-zero / grpc / protobuf / etcd
 - 已补齐本地 Docker etcd：`monitoring/docker-compose.yml` 新增 etcd 服务，Helm / 本地 k8s / 启动脚本也同步支持
@@ -19,7 +19,7 @@
   - `go test ./...` 通过
   - 本地 Helm 部署通过
   - 端到端 smoke test 通过：创建 tenant、device、telemetry、command、ACK 全链路正常
-- 当前版本目标为 `2.0.0`，后续需要做的事情是完成最终 commit、打 tag、push 到远端
+- 最新代码已经完成本地构建、Helm 部署和 Prometheus targets 验证，发布 tag 已按用户要求重新调整
 
 ## 2026-06-06 观测能力补强
 - 已启用 go-zero 的 REST / gRPC tracing middleware，并通过 `core/trace.StartAgent` 接入 OpenTelemetry
@@ -32,6 +32,21 @@
 - HTTP 请求会自动补 `X-Request-Id`，并在 `admin -> core-rpc` 的 gRPC 调用链里继续传递
 - `demo` 发往 `admin` 的请求会带上 request id 和 trace 上下文，便于联调和压测时串联链路
 - `platform` 新增 requestId middleware / gRPC interceptor / context helper，供各服务统一复用
+
+## 2026-06-06 core-rpc 监控补齐
+- `core-rpc` 已启用独立 Prometheus 端口 `9101`，可通过 `/metrics` 暴露 gRPC 请求量、延迟和状态码统计
+- 本地 Prometheus / k8s local / Helm charts 的 scrape 配置均已补上 `core-rpc`
+- Grafana 新增 `IoT Core RPC` 仪表盘，并在 `IoT Overview` 中补了一块 `core-rpc` 请求速率视图
+- 本地 port-forward 脚本已加入 `core-rpc -> 18091:9101`，方便 Docker Prometheus 抓取
+
+## 2026-06-06 README 图片与发布 tag 调整
+- README 顶部、总体架构和命令闭环三张 SVG 已重画为无版本后缀文件：
+  - `docs/images/hero.svg`
+  - `docs/images/architecture.svg`
+  - `docs/images/command-cycle.svg`
+- 已删除旧的版本化 SVG 图片，README 也不再引用版本化图片名
+- README 图片和文档说明已去掉发布版本字样，仅保留架构能力描述
+- 旧版本化 tag 需要删除，当前最新提交需要重新打新 tag 并推送
 
 ## 当前状态
 - 已根据用户确认的架构决策，整理出两份方案 HTML，并合并为一份合并版：`物联网平台技术方案.html`
@@ -164,6 +179,7 @@
   - 云服务或 CI 环境可用 `CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh` 跳过本地端口检查
 - 已新增本地监控转发脚本：`scripts/port-forward-local-monitoring.sh`
   - `admin` -> `localhost:18080`
+  - `admin-metrics` -> `localhost:18090`
   - `ingress` -> `localhost:18081`
   - `worker` -> `localhost:18082`
 - 已新增 Docker Prometheus 配置：`monitoring/prometheus/prometheus.yml`
@@ -184,6 +200,7 @@
 - 当前 Grafana 容器：`iot-grafana`，地址 `http://localhost:3000`，账号 `admin` / `admin`
 - 当前需要保持的本地端口转发：
   - `kubectl port-forward --address 0.0.0.0 svc/admin 18080:8080 -n iot`
+  - `kubectl port-forward --address 0.0.0.0 svc/admin 18090:9100 -n iot`
   - `kubectl port-forward --address 0.0.0.0 svc/ingress 18081:8080 -n iot`
   - `kubectl port-forward --address 0.0.0.0 svc/worker 18082:8080 -n iot`
 - 已验证：

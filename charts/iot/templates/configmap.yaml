@@ -28,7 +28,13 @@ data:
   EMQX_CLIENT_ID: iot-ingress
   TDENGINE_TABLE: telemetry
   LISTEN_ADDR: :8080
+  ADMIN_METRICS_HOST: 0.0.0.0
+  ADMIN_METRICS_PORT: "9100"
+  ADMIN_METRICS_PATH: /metrics
   CORE_RPC_LISTEN_ON: :9001
+  CORE_RPC_PROMETHEUS_HOST: 0.0.0.0
+  CORE_RPC_PROMETHEUS_PORT: "9101"
+  CORE_RPC_PROMETHEUS_PATH: /metrics
 {{- if .Values.postgres.enabled }}
 ---
 apiVersion: v1

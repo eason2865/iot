@@ -333,21 +333,28 @@ graph TD
               <div class="diagram">
                 <div class="mermaid">
 flowchart LR
-  subgraph K8S[Kubernetes 单地域集群]
+  subgraph K8S[Kubernetes 单地域集群 / Helm]
     G[API Gateway/Ingress]
     I[Go ingress]
     A[Go admin]
     W[Go worker]
   end
-  subgraph EDGE[接入层]
+  subgraph EDGE[接入基础设施]
     E[EMQX]
   end
-  subgraph BUS[消息与存储]
+  subgraph BUS[消息与存储基础设施]
     K[Kafka]
     T[TDengine]
     P[PostgreSQL]
+    DM[demo 模拟器]
+  end
+  subgraph OBS[可观测性平台]
+    PR[Prometheus]
+    GF[Grafana]
   end
   D[设备] --> E
+  DM --> E
+  DM --> A
   E --> I
   I --> K
   K --> W
@@ -356,6 +363,11 @@ flowchart LR
   G --> A
   A --> P
   A --> T
+  PR -. scrape .-> I
+  PR -. scrape .-> A
+  PR -. scrape .-> W
+  PR -. scrape .-> DM
+  GF --> PR
                 </div>
               </div>
             </section>
@@ -766,6 +778,8 @@ stateDiagram-v2
               <h2>7. 运维与可观测性</h2>
               <p>
                 推荐第一版采用单地域单集群，业务服务无状态化，依托 Kubernetes 做部署和扩缩容。
+                数据接入、消息、时序库、业务库和可观测性平台可以使用自建集群或云托管服务；
+                Go 业务服务由 Helm 部署到 Kubernetes，服务自身只负责暴露健康检查和指标端点，保持交付边界清晰。
                 网关只负责薄层鉴权、限流、路由，不承载复杂业务逻辑。
               </p>
               <div class="grid-2">
@@ -774,6 +788,8 @@ stateDiagram-v2
                   <ul>
                     <li>日志要结构化输出，包含 <span class="inline">tenantId</span>、<span class="inline">deviceId</span>、<span class="inline">msgId</span>、<span class="inline">traceId</span>。</li>
                     <li>指标建议覆盖接入成功率、Kafka 堆积、TDengine 入库失败率、在线数。</li>
+                    <li>业务服务暴露 <span class="inline">/metrics</span>，由 Prometheus 或兼容采集器抓取。</li>
+                    <li>Prometheus 和 Grafana 作为独立可观测性平台，可按环境选择自建或云托管。</li>
                     <li>链路追踪至少覆盖 MQTT 接收 → Kafka → 入库。</li>
                   </ul>
                 </div>
@@ -781,7 +797,8 @@ stateDiagram-v2
                   <h3>部署建议</h3>
                   <ul>
                     <li>Go 服务做无状态部署。</li>
-                    <li>EMQX、Kafka、TDengine、PostgreSQL 按各自集群能力扩容。</li>
+                    <li>EMQX、Kafka、TDengine、PostgreSQL、Prometheus、Grafana 可按环境选择自建、托管服务或云服务。</li>
+                    <li>业务 Helm chart 聚焦无状态 Go 服务；监控平台通过 scrape 配置或服务发现接入。</li>
                     <li>配置先用 ConfigMap / Secret + 环境变量。</li>
                     <li>不优先引入独立配置中心。</li>
                   </ul>
@@ -792,6 +809,8 @@ stateDiagram-v2
                 <div class="mermaid">
 flowchart LR
   D[设备] --> E[EMQX]
+  DM[demo 模拟器] --> E
+  DM --> A
   E --> I[Go ingress]
   I --> K[Kafka]
   K --> W[Go worker]
@@ -800,7 +819,12 @@ flowchart LR
   G[API Gateway/Ingress] --> A[Go admin]
   A --> P
   A --> T
-  M[监控/日志/Tracing] -.-> I
+  PR[Prometheus] -. scrape .-> I
+  PR -. scrape .-> A
+  PR -. scrape .-> W
+  PR -. scrape .-> DM
+  GF[Grafana] --> PR
+  M[日志/Tracing] -.-> I
   M -.-> A
   M -.-> W
                 </div>
@@ -812,7 +836,7 @@ flowchart LR
               <p>
                 当前仓库已经包含三个可启动入口和若干核心契约包，适合继续在此基础上扩展，而不是重新拆仓。
               </p>
-              <pre>mqtt/
+              <pre>iot/
 ├── cmd/
 │   ├── ingress/          # 接入处理服务入口
 │   ├── admin/            # 查询管理服务入口

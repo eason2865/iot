@@ -1,0 +1,6 @@
+apiVersion: v2
+name: iot
+description: Local IoT platform stack for admin, ingress, worker, demo, and dependencies
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

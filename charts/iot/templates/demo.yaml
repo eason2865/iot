@@ -1,0 +1,85 @@
+{{- if .Values.demo.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: demo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - >
+              until nc -z admin 8080 && nc -z emqx 1883;
+              do echo waiting for admin/emqx; sleep 2; done
+      containers:
+        - name: demo
+          image: {{ .Values.images.app }}
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/demo"]
+          env:
+            - name: DEMO_ADMIN_URL
+              value: http://admin:8080
+            - name: DEMO_MQTT_URL
+              value: tcp://emqx:1883
+            - name: DEMO_TENANT_COUNT
+              value: "5"
+            - name: DEMO_DEVICES_PER_TENANT
+              value: "10"
+            - name: DEMO_TENANT_PREFIX
+              value: demo
+            - name: DEMO_PRODUCT_ID
+              value: product-demo
+            - name: DEMO_TICK_INTERVAL
+              value: 250ms
+            - name: DEMO_TELEMETRY_BURST_MIN
+              value: "1"
+            - name: DEMO_TELEMETRY_BURST_MAX
+              value: "5"
+            - name: DEMO_COMMAND_BURST_MIN
+              value: "1"
+            - name: DEMO_COMMAND_BURST_MAX
+              value: "3"
+            - name: LISTEN_ADDR
+              value: :8080
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+{{- end }}

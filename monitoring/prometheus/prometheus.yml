@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: admin
+    static_configs:
+      - targets:
+          - host.docker.internal:18080
+
+  - job_name: ingress
+    static_configs:
+      - targets:
+          - host.docker.internal:18081
+
+  - job_name: worker
+    static_configs:
+      - targets:
+          - host.docker.internal:18082
+
+  - job_name: demo-docker
+    static_configs:
+      - targets:
+          - host.docker.internal:18084

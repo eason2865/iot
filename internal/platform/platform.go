@@ -9,17 +9,22 @@ import (
 	"sync"
 	"time"
 
-	"mqtt/internal/contracts"
+	"iot/internal/contracts"
 )
 
 type Config struct {
-	ServiceName      string
+	ServiceName        string
 	DeviceHeartbeatTTL time.Duration
+	Store              Store
+	Publisher          Publisher
+	Metrics            *Metrics
 }
 
 type App struct {
 	serviceName string
-	store       *memoryStore
+	store       Store
+	publisher   Publisher
+	metrics     *Metrics
 	ttl         time.Duration
 	router      http.Handler
 }
@@ -31,9 +36,20 @@ func New(cfg Config) *App {
 	}
 	app := &App{
 		serviceName: cfg.ServiceName,
-		store:       newMemoryStore(ttl),
+		store:       cfg.Store,
+		publisher:   cfg.Publisher,
 		ttl:         ttl,
 	}
+	if app.store == nil {
+		app.store = newMemoryStore(ttl)
+	}
+	if app.publisher == nil {
+		app.publisher = noopPublisher{}
+	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = NewMetrics()
+	}
+	app.metrics = cfg.Metrics
 	app.router = app.routes()
 	return app
 }
@@ -63,24 +79,24 @@ type DeviceStatus struct {
 }
 
 type TelemetryRecord struct {
-	MsgID     string          `json:"msgId"`
-	TenantID  string          `json:"tenantId"`
-	DeviceID  string          `json:"deviceId"`
-	Ts        int64           `json:"ts"`
-	Type      string          `json:"type"`
-	Version   string          `json:"version"`
-	Payload   json.RawMessage `json:"payload"`
-	ReceivedAt time.Time      `json:"receivedAt"`
+	MsgID      string          `json:"msgId"`
+	TenantID   string          `json:"tenantId"`
+	DeviceID   string          `json:"deviceId"`
+	Ts         int64           `json:"ts"`
+	Type       string          `json:"type"`
+	Version    string          `json:"version"`
+	Payload    json.RawMessage `json:"payload"`
+	ReceivedAt time.Time       `json:"receivedAt"`
 }
 
 type Command struct {
-	ID        string          `json:"id"`
-	TenantID  string          `json:"tenantId"`
-	DeviceID  string          `json:"deviceId"`
+	ID        string                  `json:"id"`
+	TenantID  string                  `json:"tenantId"`
+	DeviceID  string                  `json:"deviceId"`
 	Status    contracts.CommandStatus `json:"status"`
-	Payload   json.RawMessage `json:"payload"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	Payload   json.RawMessage         `json:"payload"`
+	CreatedAt time.Time               `json:"createdAt"`
+	UpdatedAt time.Time               `json:"updatedAt"`
 }
 
 const (
@@ -98,6 +114,7 @@ type apiError struct {
 func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.healthHandler)
+	mux.Handle("/metrics", a.metrics.Handler())
 	mux.HandleFunc("/openapi.json", a.openapiHandler)
 	mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)
 	mux.HandleFunc("/api/v1/tenants", a.handleTenants)
@@ -106,7 +123,22 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/v1/commands", a.handleCommands)
 	mux.HandleFunc("/api/v1/commands/", a.handleCommandByID)
 	mux.HandleFunc("/api/v1/devices/", a.handleDeviceByID)
-	return mux
+	return a.observeHTTP(mux)
+}
+
+func (a *App) observeHTTP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rw := &observedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		if a.metrics != nil {
+			a.metrics.ObserveHTTPRequest(routeLabel(r.URL.Path), r.Method, rw.status, time.Since(start))
+		}
+	})
 }
 
 func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +219,7 @@ func openAPISpec() map[string]any {
 					},
 				},
 				"TelemetryEnvelope": map[string]any{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"msgId", "tenantId", "deviceId", "ts", "type", "version", "payload"},
 				},
 			},
@@ -197,22 +229,22 @@ func openAPISpec() map[string]any {
 
 func mqttEnvelopeSchema() map[string]any {
 	return map[string]any{
-		"$schema": "https://json-schema.org/draft/2020-12/schema",
-		"title":   "MQTT Telemetry Envelope",
-		"type":    "object",
+		"$schema":  "https://json-schema.org/draft/2020-12/schema",
+		"title":    "MQTT Telemetry Envelope",
+		"type":     "object",
 		"required": []string{"msgId", "tenantId", "deviceId", "ts", "type", "version", "payload"},
 		"properties": map[string]any{
-			"msgId":    map[string]any{"type": "string"},
-			"tenantId": map[string]any{"type": "string"},
-			"deviceId": map[string]any{"type": "string"},
-			"ts":       map[string]any{"type": "integer"},
-			"type":     map[string]any{"type": "string"},
-			"version":  map[string]any{"type": "string"},
-			"traceId":  map[string]any{"type": "string"},
+			"msgId":     map[string]any{"type": "string"},
+			"tenantId":  map[string]any{"type": "string"},
+			"deviceId":  map[string]any{"type": "string"},
+			"ts":        map[string]any{"type": "integer"},
+			"type":      map[string]any{"type": "string"},
+			"version":   map[string]any{"type": "string"},
+			"traceId":   map[string]any{"type": "string"},
 			"productId": map[string]any{"type": "string"},
-			"region":   map[string]any{"type": "string"},
-			"seq":      map[string]any{"type": "integer"},
-			"payload":  map[string]any{"type": "object"},
+			"region":    map[string]any{"type": "string"},
+			"seq":       map[string]any{"type": "integer"},
+			"payload":   map[string]any{"type": "object"},
 		},
 	}
 }
@@ -231,8 +263,14 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 		}
 		tenant, err := a.store.createTenant(req)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncTenant("error")
+			}
 			writeError(w, http.StatusConflict, err.Error())
 			return
+		}
+		if a.metrics != nil {
+			a.metrics.IncTenant("ok")
 		}
 		writeJSON(w, http.StatusCreated, tenant)
 	case http.MethodGet:
@@ -266,8 +304,14 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 			Secret:    req.Secret,
 		})
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncDevice("error")
+			}
 			writeError(w, http.StatusConflict, err.Error())
 			return
+		}
+		if a.metrics != nil {
+			a.metrics.IncDevice("ok")
 		}
 		writeJSON(w, http.StatusCreated, device)
 	case http.MethodGet:
@@ -289,8 +333,21 @@ func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	record, err := a.store.recordTelemetry(env)
 	if err != nil {
+		if a.metrics != nil {
+			a.metrics.IncTelemetry("error")
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if err := a.publisher.publishTelemetry(record); err != nil {
+		if a.metrics != nil {
+			a.metrics.IncTelemetry("error")
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if a.metrics != nil {
+		a.metrics.IncTelemetry("ok")
 	}
 	writeJSON(w, http.StatusAccepted, record)
 }
@@ -313,8 +370,21 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 		}
 		cmd, err := a.store.createCommand(req.TenantID, req.DeviceID, req.Payload)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncCommand("created", "error")
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if err := a.publisher.publishCommand(cmd); err != nil {
+			if a.metrics != nil {
+				a.metrics.IncCommand("created", "error")
+			}
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if a.metrics != nil {
+			a.metrics.IncCommand("created", "ok")
 		}
 		writeJSON(w, http.StatusCreated, cmd)
 	case http.MethodGet:
@@ -352,8 +422,14 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 		}
 		cmd, err := a.store.ackCommand(id, req.TenantID, req.DeviceID)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.IncCommand("acked", "error")
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if a.metrics != nil {
+			a.metrics.IncCommand("acked", "ok")
 		}
 		writeJSON(w, http.StatusOK, cmd)
 		return
@@ -429,16 +505,26 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, apiError{Error: msg})
 }
 
+type observedResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *observedResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
 type memoryStore struct {
 	mu sync.RWMutex
 
 	ttl time.Duration
 
-	tenants  map[string]Tenant
-	devices  map[string]Device
-	statuses map[string]DeviceStatus
-	telemetry map[string][]TelemetryRecord
-	commands map[string]Command
+	tenants    map[string]Tenant
+	devices    map[string]Device
+	statuses   map[string]DeviceStatus
+	telemetry  map[string][]TelemetryRecord
+	commands   map[string]Command
 	commandSeq int64
 }
 

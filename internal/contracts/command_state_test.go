@@ -3,7 +3,7 @@ package contracts_test
 import (
 	"testing"
 
-	"mqtt/internal/contracts"
+	"iot/internal/contracts"
 )
 
 func TestAdvanceCommandStatus(t *testing.T) {

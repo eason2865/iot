@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"mqtt/internal/bootstrap"
+	"iot/internal/bootstrap"
 )
 
 func main() {

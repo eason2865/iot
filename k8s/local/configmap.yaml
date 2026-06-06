@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iot-common-config
+data:
+  POSTGRES_USER: iot
+  POSTGRES_DB: iot
+  POSTGRES_DSN: postgres://iot:iot123@postgres:5432/iot?sslmode=disable
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_TELEMETRY_TOPIC: iot.telemetry
+  KAFKA_COMMAND_TOPIC: iot.command
+  EMQX_URL: tcp://emqx:1883
+  EMQX_TOPIC_FILTER: tenant/+/device/+/telemetry
+  EMQX_CLIENT_ID: iot-ingress
+  TDENGINE_DSN: root:taosdata@http(tdengine:6041)/iot
+  TDENGINE_TABLE: telemetry
+  LISTEN_ADDR: :8080

@@ -1,0 +1,59 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: iot-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: iot-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: light
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+  demo:
+    image: iot-app:metrics2
+    container_name: iot-demo
+    restart: unless-stopped
+    command: ["/usr/local/bin/demo"]
+    ports:
+      - "18084:8080"
+    environment:
+      DEMO_ADMIN_URL: http://host.docker.internal:18080
+      DEMO_MQTT_URL: tcp://host.docker.internal:1883
+      DEMO_TENANT_COUNT: "5"
+      DEMO_DEVICES_PER_TENANT: "10"
+      DEMO_TENANT_PREFIX: demo
+      DEMO_PRODUCT_ID: product-demo
+      DEMO_TICK_INTERVAL: 250ms
+      DEMO_TELEMETRY_BURST_MIN: "1"
+      DEMO_TELEMETRY_BURST_MAX: "5"
+      DEMO_COMMAND_BURST_MIN: "1"
+      DEMO_COMMAND_BURST_MAX: "3"
+      LISTEN_ADDR: :8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - prometheus

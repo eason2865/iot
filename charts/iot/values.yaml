@@ -1,0 +1,60 @@
+images:
+  app: iot-app:metrics2
+  postgres: postgres:15-alpine
+  kafka: bitnamilegacy/kafka:latest
+  emqx: emqx/emqx-enterprise:latest
+  tdengine: tdengine/tdengine:latest
+  prometheus: prom/prometheus:v2.55.1
+
+externalDependencies:
+  enabled: true
+  postgresDsn: postgres://iot:iot123@host.docker.internal:5432/iot?sslmode=disable
+  kafkaBrokers: host.docker.internal:9092
+  emqxUrl: tcp://host.docker.internal:1883
+  tdengineDsn: root:taosdata@http(host.docker.internal:6041)/iot
+  wait:
+    postgresHost: host.docker.internal
+    postgresPort: 5432
+    kafkaHost: host.docker.internal
+    kafkaPort: 9092
+    emqxHost: host.docker.internal
+    emqxPort: 1883
+    tdengineHost: host.docker.internal
+    tdenginePort: 6041
+
+admin:
+  enabled: true
+
+ingress:
+  enabled: true
+
+worker:
+  enabled: true
+
+demo:
+  enabled: false
+
+postgres:
+  enabled: false
+  storage: 1Gi
+
+kafka:
+  enabled: false
+  storage: 1Gi
+
+emqx:
+  enabled: false
+  storage: 1Gi
+
+tdengine:
+  enabled: false
+  storage: 1Gi
+
+prometheus:
+  enabled: false
+  nodePort: 30900
+  retention: 7d
+  extraScrapeTargets:
+    - jobName: demo-docker
+      targets:
+        - host.docker.internal:18084

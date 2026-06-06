@@ -1,0 +1,38 @@
+# Local handover and agent scratch files
+ai_handover.md
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Build outputs
+bin/
+dist/
+build/
+coverage.out
+coverage.html
+
+# Generated presentation/report workspaces
+outputs/
+
+# Logs and runtime data
+*.log
+tmp/
+temp/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go workspace/cache files
+*.test
+
+# Local dependency folders from tooling
+node_modules/

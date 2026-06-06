@@ -1,0 +1,76 @@
+{{- if .Values.emqx.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: emqx
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+    - name: dashboard
+      port: 18083
+      targetPort: 18083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emqx
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: emqx
+  template:
+    metadata:
+      labels:
+        app: emqx
+    spec:
+      containers:
+        - name: emqx
+          image: {{ .Values.images.emqx }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 1883
+            - containerPort: 18083
+            - containerPort: 8083
+            - containerPort: 8084
+            - containerPort: 8883
+          readinessProbe:
+            tcpSocket:
+              port: 1883
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 1883
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /opt/emqx/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: emqx-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: emqx-data
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.emqx.storage }}
+{{- end }}

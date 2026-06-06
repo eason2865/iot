@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mqtt/internal/server"
+	"iot/internal/server"
 )
 
 func TestHealthHandler(t *testing.T) {

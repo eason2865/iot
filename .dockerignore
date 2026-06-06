@@ -1,0 +1,14 @@
+.git
+.github
+ai_handover.md
+outputs/
+tmp/
+temp/
+*.log
+.env
+.env.*
+README.md
+docs/
+monitoring/
+k8s/
+charts/

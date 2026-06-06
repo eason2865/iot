@@ -1,0 +1,73 @@
+{{- if .Values.tdengine.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: tdengine
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: tdengine
+  ports:
+    - name: taosd
+      port: 6030
+      targetPort: 6030
+    - name: restful
+      port: 6041
+      targetPort: 6041
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tdengine
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tdengine
+  template:
+    metadata:
+      labels:
+        app: tdengine
+    spec:
+      containers:
+        - name: tdengine
+          image: {{ .Values.images.tdengine }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6030
+            - containerPort: 6041
+          readinessProbe:
+            tcpSocket:
+              port: 6030
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 6030
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/taos
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tdengine-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tdengine-data
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.tdengine.storage }}
+{{- end }}

@@ -1,0 +1,89 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 5s
+    scrape_configs:
+      - job_name: admin
+        static_configs:
+          - targets: ['admin:8080']
+      - job_name: ingress
+        static_configs:
+          - targets: ['ingress:8080']
+      - job_name: worker
+        static_configs:
+          - targets: ['worker:8080']
+      {{- if .Values.demo.enabled }}
+      - job_name: demo
+        static_configs:
+          - targets: ['demo:8080']
+      {{- end }}
+      {{- range .Values.prometheus.extraScrapeTargets }}
+      - job_name: {{ .jobName | quote }}
+        static_configs:
+          - targets:
+            {{- range .targets }}
+              - {{ . | quote }}
+            {{- end }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  type: NodePort
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: {{ .Values.prometheus.nodePort }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.images.prometheus }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.prometheus.retention }}
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: storage
+          emptyDir: {}
+{{- end }}

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mqtt/internal/platform"
+	"iot/internal/platform"
 )
 
 func TestDocsEndpoints(t *testing.T) {

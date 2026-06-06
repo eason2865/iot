@@ -25,6 +25,19 @@ CREATE TABLE IF NOT EXISTS device_state (
   PRIMARY KEY (tenant_id, device_id)
 );
 
+CREATE TABLE IF NOT EXISTS telemetry_records (
+  id BIGSERIAL PRIMARY KEY,
+  msg_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  ts BIGINT NOT NULL,
+  type TEXT NOT NULL,
+  version TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (msg_id, tenant_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS commands (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -67,4 +80,5 @@ CREATE TABLE IF NOT EXISTS message_dedup (
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_commands_tenant_device ON commands(tenant_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tenant_id, device_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alarms_tenant_device ON alarms(tenant_id, device_id);

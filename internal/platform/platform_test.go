@@ -3,11 +3,13 @@ package platform_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"mqtt/internal/platform"
+	"iot/internal/platform"
 )
 
 func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
@@ -77,6 +79,46 @@ func TestCommandAckFlow(t *testing.T) {
 	getJSON(t, ts.URL+"/api/v1/commands/"+created.ID, &got)
 	if got.Status != platform.CommandStatusAcked {
 		t.Fatalf("command status = %q, want %q", got.Status, platform.CommandStatusAcked)
+	}
+}
+
+func TestMetricsEndpointExposesTraffic(t *testing.T) {
+	app := platform.New(platform.Config{ServiceName: "admin"})
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
+
+	createTenant(t, ts.URL, "tenant-m", "Tenant M")
+	createDevice(t, ts.URL, "tenant-m", "device-m", "product-m")
+	postJSON(t, ts.URL+"/api/v1/telemetry", map[string]any{
+		"msgId":    "msg-m",
+		"tenantId": "tenant-m",
+		"deviceId": "device-m",
+		"ts":       1717670000000,
+		"type":     "telemetry",
+		"version":  "v1",
+		"payload": map[string]any{
+			"temp": 25,
+		},
+	})
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("io.ReadAll() error = %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "iot_http_requests_total") {
+		t.Fatalf("metrics body missing iot_http_requests_total")
+	}
+	if !strings.Contains(text, "iot_telemetry_ingested_total") {
+		t.Fatalf("metrics body missing iot_telemetry_ingested_total")
 	}
 }
 

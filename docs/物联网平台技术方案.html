@@ -250,7 +250,7 @@
             <section id="overview" data-tab-panel="overview" class="active">
               <h2>1. 总览与目标</h2>
               <p>
-                第一版的重点不是把平台能力一次做满，而是先把物联网最关键的业务闭环打稳：
+                本方案的重点不是把平台能力一次做满，而是先把物联网最关键的业务闭环打稳：
                 设备接入、身份鉴权、上行遥测、消息解耦、时序落库、查询、下行控制、ACK 回执、
                 在线状态和基础告警。
               </p>
@@ -316,7 +316,7 @@ graph TD
                 <div class="panel">
                   <h3>架构原则</h3>
                   <ul>
-                    <li>第一版优先简单，服务数量尽量少。</li>
+                    <li>架构优先简单，服务数量尽量少。</li>
                     <li>端到端默认按 <span class="inline">at-least-once</span> 设计。</li>
                     <li>所有写路径都预留幂等能力。</li>
                     <li>所有数据都携带 <span class="inline">tenantId</span>。</li>
@@ -561,7 +561,7 @@ sequenceDiagram
 
               <h3 style="margin-top:18px">消息模型</h3>
               <p>
-                第一版建议统一使用 JSON，不要先上 Protobuf。原因很直接：设备联调、日志排查、回放排错和协议演进都更容易。
+                建议统一使用 JSON，不要先上 Protobuf。原因很直接：设备联调、日志排查、回放排错和协议演进都更容易。
                 消息体必须包含固定头部和业务 payload，版本字段用于兼容演进。
               </p>
               <div class="grid-2">
@@ -731,14 +731,14 @@ stateDiagram-v2
               <h2>6. 安全与多租户</h2>
               <p>
                 权限控制建议采用两层设计：EMQX 负责设备接入鉴权和 Topic ACL，查询管理服务负责租户、用户、角色和设备权限。
-                第一版用逻辑多租户隔离即可，不需要物理隔离。
+                采用逻辑多租户隔离即可，物理隔离留到后续按需演进。
               </p>
               <div class="grid-2">
                 <div class="panel">
                   <h3>设备侧</h3>
                   <ul>
                     <li>支持预注册和激活流程。</li>
-                    <li>第一版优先设备 ID + Secret，条件成熟后可升级到证书方案。</li>
+                    <li>鉴权优先设备 ID + Secret，条件成熟后可升级到证书方案。</li>
                     <li>设备上线必须绑定租户和产品上下文。</li>
                   </ul>
                 </div>
@@ -748,7 +748,7 @@ stateDiagram-v2
                     <li>所有记录必须带 <span class="inline">tenantId</span>。</li>
                     <li>查询接口必须强制按租户过滤。</li>
                     <li>Topic、日志、Kafka 消息都应携带租户标识。</li>
-                    <li>第一版采用逻辑隔离，物理隔离留到后续按需演进。</li>
+                    <li>采用逻辑隔离，物理隔离留到后续按需演进。</li>
                   </ul>
                 </div>
               </div>
@@ -778,7 +778,7 @@ stateDiagram-v2
             <section id="ops" data-tab-panel="ops">
               <h2>7. 运维与可观测性</h2>
               <p>
-                推荐第一版采用单地域单集群，业务服务无状态化，依托 Kubernetes 做部署和扩缩容。
+                推荐采用单地域单集群，业务服务无状态化，依托 Kubernetes 做部署和扩缩容。
                 数据接入、消息、时序库、业务库和可观测性平台可以使用自建集群或云托管服务；
                 Go 业务服务由 Helm 部署到 Kubernetes，服务自身只负责暴露健康检查和指标端点，保持交付边界清晰。
                 网关只负责薄层鉴权、限流、路由，不承载复杂业务逻辑。
@@ -891,7 +891,7 @@ flowchart LR
             <section id="delivery" data-tab-panel="delivery">
               <h2>9. 交付路线</h2>
               <p>
-                第一版的正确姿势不是把所有平台能力做完，而是先把主链路做稳，再一点一点补齐可扩展能力。
+                正确姿势不是把所有平台能力做完，而是先把主链路做稳，再一点一点补齐可扩展能力。
               </p>
               <table>
                 <thead>
@@ -966,19 +966,19 @@ flowchart LR
                   <ul>
                     <li>设备直连 EMQX。</li>
                     <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
-                    <li>现阶段只保留一个核心微服务拆分点 `core-rpc`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
+                    <li>当前只保留一个核心微服务拆分点 `core-rpc`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>
                     <li>业务库选 PostgreSQL。</li>
-                    <li>第一版采用逻辑多租户隔离。</li>
+                    <li>采用逻辑多租户隔离。</li>
                   </ul>
                 </div>
               </div>
               <div class="alert">
-                规则判断建议保持轻量，避免第一版引入独立规则引擎；先把协议、幂等和状态闭环做扎实，后面再扩展编排和分析能力。
+                规则判断建议保持轻量，避免引入独立规则引擎；先把协议、幂等和状态闭环做扎实，后面再扩展编排和分析能力。
               </div>
               <div class="danger">
-                第一版应优先把协议、幂等、状态闭环和时序/元数据边界做稳，再逐步扩展复杂事件溯源、Schema Registry 和多地域能力。
+                应优先把协议、幂等、状态闭环和时序/元数据边界做稳，再逐步扩展复杂事件溯源、Schema Registry 和多地域能力。
               </div>
             </section>
           </div>

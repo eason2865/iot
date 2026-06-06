@@ -1,80 +1,119 @@
-<svg width="1200" height="420" viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+<svg width="1200" height="440" viewBox="0 0 1200 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">IoT Platform Hero</title>
-  <desc id="desc">A hero illustration for the IoT platform showing MQTT, Kafka, EMQX, TDengine, PostgreSQL, and the admin service.</desc>
+  <desc id="desc">Hero illustration for the IoT platform showing go-zero, gRPC, protobuf, etcd, EMQX, Kafka, TDengine, and PostgreSQL.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#09111f"/>
-      <stop offset="55%" stop-color="#0f2746"/>
-      <stop offset="100%" stop-color="#113a5c"/>
+      <stop offset="0%" stop-color="#07101d"/>
+      <stop offset="58%" stop-color="#0c2342"/>
+      <stop offset="100%" stop-color="#123f62"/>
     </linearGradient>
     <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1d3557" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#0e1f33" stop-opacity="0.95"/>
+      <stop offset="0%" stop-color="#142840" stop-opacity="0.97"/>
+      <stop offset="100%" stop-color="#0b1626" stop-opacity="0.97"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#4dd0e1"/>
-      <stop offset="100%" stop-color="#80f0b5"/>
+      <stop offset="0%" stop-color="#68e0cf"/>
+      <stop offset="100%" stop-color="#8cf3a8"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#17324f"/>
+      <stop offset="100%" stop-color="#0e1e33"/>
     </linearGradient>
     <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000000" flood-opacity="0.34"/>
     </filter>
   </defs>
 
-  <rect width="1200" height="420" rx="28" fill="url(#bg)"/>
-  <circle cx="118" cy="78" r="56" fill="#4dd0e1" opacity="0.10"/>
-  <circle cx="1060" cy="340" r="92" fill="#80f0b5" opacity="0.08"/>
-  <circle cx="990" cy="84" r="18" fill="#80f0b5" opacity="0.7"/>
-  <circle cx="1035" cy="118" r="10" fill="#4dd0e1" opacity="0.7"/>
-  <circle cx="1085" cy="94" r="8" fill="#ffffff" opacity="0.8"/>
+  <rect width="1200" height="440" rx="30" fill="url(#bg)"/>
+  <circle cx="106" cy="70" r="54" fill="#68e0cf" opacity="0.12"/>
+  <circle cx="1080" cy="78" r="26" fill="#8cf3a8" opacity="0.18"/>
+  <circle cx="1085" cy="350" r="98" fill="#68e0cf" opacity="0.08"/>
+  <circle cx="980" cy="112" r="10" fill="#ffffff" opacity="0.86"/>
+  <circle cx="1035" cy="88" r="7" fill="#68e0cf" opacity="0.9"/>
 
-  <rect x="56" y="56" width="1088" height="308" rx="24" fill="url(#panel)" stroke="#4dd0e1" stroke-opacity="0.18" filter="url(#shadow)"/>
+  <rect x="52" y="54" width="1096" height="332" rx="28" fill="url(#panel)" stroke="#68e0cf" stroke-opacity="0.16" filter="url(#shadow)"/>
 
-  <text x="96" y="132" fill="#ffffff" font-size="54" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700">
-    IoT Platform
+  <text x="96" y="126" fill="#ffffff" font-size="56" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" font-weight="800">
+    IoT Platform 2.0
   </text>
-  <text x="96" y="178" fill="#cfe7ff" font-size="24" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
-    面向设备接入、遥测采集、命令下发、状态查询和多租户管理的开源平台骨架
+  <text x="96" y="170" fill="#cde2fb" font-size="24" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
+    go-zero + gRPC + protobuf + etcd 的物联网平台骨架
   </text>
-  <rect x="96" y="212" width="230" height="8" rx="4" fill="url(#accent)"/>
-  <text x="96" y="272" fill="#d9e6f2" font-size="18" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
-    MQTT + EMQX + Kafka + TDengine + PostgreSQL
+  <rect x="96" y="196" width="250" height="8" rx="4" fill="url(#accent)"/>
+  <text x="96" y="246" fill="#dce8f3" font-size="18" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
+    核心拆分：admin 网关 + core-rpc 核心服务
   </text>
-  <text x="96" y="302" fill="#9ec3e8" font-size="16" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
-    Go 服务拆分：admin / ingress / worker / demo
+  <text x="96" y="276" fill="#a9c7e6" font-size="16" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
+    本地 Docker 已补齐 etcd，Helm / k8s / 文档流程全部对齐
   </text>
 
-  <g transform="translate(610 106)">
-    <rect x="0" y="0" width="460" height="190" rx="22" fill="#081426" stroke="#4dd0e1" stroke-opacity="0.20"/>
-    <g font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" text-anchor="middle">
-      <rect x="26" y="28" width="110" height="52" rx="14" fill="#12304a"/>
-      <text x="81" y="59" fill="#e9f6ff" font-size="18">设备</text>
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
+    <rect x="96" y="304" width="172" height="34" rx="17" fill="url(#chip)" stroke="#68e0cf" stroke-opacity="0.18"/>
+    <text x="182" y="326" text-anchor="middle" fill="#eff7ff" font-size="15">go-zero / REST</text>
 
-      <rect x="180" y="28" width="110" height="52" rx="14" fill="#14385a"/>
-      <text x="235" y="59" fill="#e9f6ff" font-size="18">EMQX</text>
+    <rect x="282" y="304" width="150" height="34" rx="17" fill="url(#chip)" stroke="#68e0cf" stroke-opacity="0.18"/>
+    <text x="357" y="326" text-anchor="middle" fill="#eff7ff" font-size="15">gRPC / proto</text>
 
-      <rect x="334" y="28" width="100" height="52" rx="14" fill="#173f66"/>
-      <text x="384" y="59" fill="#e9f6ff" font-size="18">Kafka</text>
+    <rect x="446" y="304" width="146" height="34" rx="17" fill="url(#chip)" stroke="#68e0cf" stroke-opacity="0.18"/>
+    <text x="519" y="326" text-anchor="middle" fill="#eff7ff" font-size="15">etcd 发现</text>
 
-      <rect x="26" y="112" width="126" height="52" rx="14" fill="#16314d"/>
-      <text x="89" y="143" fill="#e9f6ff" font-size="18">ingress</text>
-
-      <rect x="174" y="112" width="110" height="52" rx="14" fill="#15375b"/>
-      <text x="229" y="143" fill="#e9f6ff" font-size="18">worker</text>
-
-      <rect x="306" y="112" width="72" height="52" rx="14" fill="#1a4d69"/>
-      <text x="342" y="143" fill="#e9f6ff" font-size="18">TD</text>
-
-      <rect x="394" y="112" width="52" height="52" rx="14" fill="#1d5f72"/>
-      <text x="420" y="143" fill="#e9f6ff" font-size="18">PG</text>
-    </g>
-    <path d="M136 54 H178" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
-    <path d="M290 54 H330" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
-    <path d="M112 80 V112" stroke="#4dd0e1" stroke-width="3" stroke-linecap="round"/>
-    <path d="M235 80 V112" stroke="#4dd0e1" stroke-width="3" stroke-linecap="round"/>
-    <path d="M384 80 V112" stroke="#4dd0e1" stroke-width="3" stroke-linecap="round"/>
+    <rect x="606" y="304" width="142" height="34" rx="17" fill="url(#chip)" stroke="#68e0cf" stroke-opacity="0.18"/>
+    <text x="677" y="326" text-anchor="middle" fill="#eff7ff" font-size="15">MQTT / EMQX</text>
   </g>
 
-  <text x="96" y="352" fill="#a7bdd6" font-size="14" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
-    开源仓库 / Release 1.0.0 / 本地 Docker + Helm 友好
+  <g transform="translate(640 94)" filter="url(#shadow)" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif" text-anchor="middle">
+    <rect x="0" y="0" width="474" height="226" rx="24" fill="#081425" stroke="#68e0cf" stroke-opacity="0.18"/>
+
+    <g>
+      <rect x="20" y="26" width="86" height="50" rx="14" fill="#12334f"/>
+      <text x="63" y="57" fill="#f4fbff" font-size="17">设备</text>
+
+      <rect x="128" y="26" width="90" height="50" rx="14" fill="#143a5a"/>
+      <text x="173" y="57" fill="#f4fbff" font-size="17">EMQX</text>
+
+      <rect x="240" y="26" width="100" height="50" rx="14" fill="#163f64"/>
+      <text x="290" y="57" fill="#f4fbff" font-size="17">ingress</text>
+
+      <rect x="362" y="26" width="92" height="50" rx="14" fill="#17496d"/>
+      <text x="408" y="57" fill="#f4fbff" font-size="17">Kafka</text>
+
+      <rect x="88" y="108" width="102" height="50" rx="14" fill="#15324f"/>
+      <text x="139" y="139" fill="#f4fbff" font-size="17">worker</text>
+
+      <rect x="214" y="108" width="100" height="50" rx="14" fill="#163f64"/>
+      <text x="264" y="139" fill="#f4fbff" font-size="17">TDengine</text>
+
+      <rect x="338" y="108" width="116" height="50" rx="14" fill="#17496d"/>
+      <text x="396" y="139" fill="#f4fbff" font-size="17">PostgreSQL</text>
+
+      <rect x="192" y="170" width="92" height="38" rx="12" fill="#184d67"/>
+      <text x="238" y="194" fill="#f4fbff" font-size="15">core-rpc</text>
+
+      <rect x="300" y="170" width="80" height="38" rx="12" fill="#1d5975"/>
+      <text x="340" y="194" fill="#f4fbff" font-size="15">etcd</text>
+    </g>
+
+    <g stroke="url(#accent)" stroke-width="3" stroke-linecap="round" fill="none">
+      <path d="M106 51 H128"/>
+      <path d="M218 51 H240"/>
+      <path d="M340 51 H362"/>
+      <path d="M290 76 V108"/>
+      <path d="M214 190 H192"/>
+      <path d="M284 190 H300"/>
+      <path d="M189 76 C189 92 216 108 238 108"/>
+    </g>
+    <g fill="#68e0cf">
+      <circle cx="117" cy="51" r="4.5"/>
+      <circle cx="229" cy="51" r="4.5"/>
+      <circle cx="351" cy="51" r="4.5"/>
+      <circle cx="290" cy="93" r="4.5"/>
+      <circle cx="201" cy="190" r="4.5"/>
+      <circle cx="292" cy="190" r="4.5"/>
+      <circle cx="238" cy="108" r="4.5"/>
+    </g>
+  </g>
+
+  <text x="96" y="374" fill="#9db9d8" font-size="14" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
+    Release 2.0.0 · 本地 Docker + Helm + etcd · 先拆核心业务，再持续演进
   </text>
 </svg>

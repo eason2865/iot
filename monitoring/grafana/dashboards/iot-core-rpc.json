@@ -174,7 +174,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m]))",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ],

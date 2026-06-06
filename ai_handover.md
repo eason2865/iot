@@ -49,6 +49,17 @@
 - README 图片和文档说明已去掉发布版本字样，仅保留架构能力描述
 - 旧版本化 tag 已删除，当前最新提交已重新打新 tag 并推送
 
+## 2026-06-06 Grafana 面板无数据排查与修复
+- Prometheus targets 已验证为 `up`：`admin`、`core-rpc`、`ingress`、`worker`、`demo-docker`
+- Grafana `IoT Core RPC` 面板无数据的直接原因是 `iot_grpc_*` 指标在没有 core-rpc 业务调用前不会产生时间序列
+- `demo` 重启后遇到已存在的 tenant/device 会收到 `409 Conflict`，此前会停止拓扑初始化，导致没有持续业务流量；现已将 demo 的 tenant/device 创建改为 409 幂等继续
+- Docker etcd 的 `advertise-client-urls` 已从 `127.0.0.1:2379` 改为 `host.docker.internal:2379`，避免 k8s 内客户端自动同步到不可达地址
+- Grafana `Error QPS` 查询已补 `or vector(0)`，没有错误时显示 0，而不是 `No data`
+- 已重新构建镜像、Helm 部署应用服务、重建 Docker Compose 监控栈，并验证：
+  - `iot_grpc_requests_total` 已出现
+  - core-rpc QPS 查询有值
+  - core-rpc p95 latency 查询有值
+
 ## 当前状态
 - 已根据用户确认的架构决策，整理出两份方案 HTML，并合并为一份合并版：`物联网平台技术方案.html`
 - 合并版补充了主架构图、部署图、上行/下行/告警时序图、命令状态机，并按模块做成标签页，便于阅览

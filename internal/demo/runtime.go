@@ -110,7 +110,7 @@ func newHTTPAdminClient(baseURL string) (*httpAdminClient, error) {
 func (c *httpAdminClient) Close() error { return nil }
 
 func (c *httpAdminClient) CreateTenant(ctx context.Context, id, name string) error {
-	return c.postJSON(ctx, c.baseURL+"/api/v1/tenants", map[string]any{"id": id, "name": name}, nil)
+	return c.postJSON(ctx, c.baseURL+"/api/v1/tenants", map[string]any{"id": id, "name": name}, nil, http.StatusConflict)
 }
 
 func (c *httpAdminClient) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
@@ -119,7 +119,7 @@ func (c *httpAdminClient) CreateDevice(ctx context.Context, tenantID, deviceID, 
 		"deviceId":  deviceID,
 		"productId": productID,
 		"secret":    "demo-secret",
-	}, nil)
+	}, nil, http.StatusConflict)
 }
 
 func (c *httpAdminClient) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
@@ -132,7 +132,7 @@ func (c *httpAdminClient) CreateCommand(ctx context.Context, tenantID, deviceID 
 	return created, err
 }
 
-func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, out any) error {
+func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, out any, okStatuses ...int) error {
 	ctx, requestID := platform.EnsureRequestID(ctx, "")
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -156,6 +156,11 @@ func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, ou
 		return err
 	}
 	defer resp.Body.Close()
+	for _, status := range okStatuses {
+		if resp.StatusCode == status {
+			return nil
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %s", resp.Status)
 	}

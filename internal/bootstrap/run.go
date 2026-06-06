@@ -25,6 +25,9 @@ type runtimeResources struct {
 }
 
 func Run(serviceName string) error {
+	platform.ConfigureStdLogger(serviceName)
+	platform.StartTracing(serviceName)
+
 	resources, err := buildRuntime(serviceName)
 	if err != nil {
 		return err

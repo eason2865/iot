@@ -32,11 +32,23 @@ func Run() error {
 	}
 	defer client.Conn().Close()
 
+	platform.ConfigureStdLogger("admin-api")
 	httpServer := rest.MustNewServer(rest.RestConf{
-		ServiceConf: service.ServiceConf{Name: "admin-api"},
-		Host:        listenHost(),
-		Port:        listenPort(),
-		Timeout:     3000,
+		ServiceConf: service.ServiceConf{
+			Name:      "admin-api",
+			Telemetry: platform.TraceConfig("admin-api"),
+		},
+		Host:    listenHost(),
+		Port:    listenPort(),
+		Timeout: 3000,
+		Middlewares: rest.MiddlewaresConf{
+			Trace:      true,
+			Log:        true,
+			Prometheus: true,
+			Recover:    true,
+			Metrics:    true,
+			Timeout:    true,
+		},
 	})
 	defer httpServer.Stop()
 

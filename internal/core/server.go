@@ -16,6 +16,7 @@ import (
 )
 
 func Run() error {
+	platform.ConfigureStdLogger("core-rpc")
 	store, closer, err := buildStore(5 * time.Minute)
 	if err != nil {
 		return err
@@ -37,11 +38,21 @@ func Run() error {
 	}()
 
 	server := zrpc.MustNewServer(zrpc.RpcServerConf{
-		ServiceConf: service.ServiceConf{Name: "core-rpc"},
-		ListenOn:    rpcListenOn(),
+		ServiceConf: service.ServiceConf{
+			Name:      "core-rpc",
+			Telemetry: platform.TraceConfig("core-rpc"),
+		},
+		ListenOn: rpcListenOn(),
 		Etcd: discov.EtcdConf{
 			Hosts: splitCSV(envOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
 			Key:   envOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
+		},
+		Middlewares: zrpc.ServerMiddlewaresConf{
+			Trace:      true,
+			Recover:    true,
+			Stat:       true,
+			Prometheus: true,
+			Breaker:    true,
 		},
 	}, func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))

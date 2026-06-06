@@ -20,6 +20,9 @@ import (
 )
 
 func Run() error {
+	platform.ConfigureStdLogger("demo")
+	platform.StartTracing("demo")
+
 	metrics := platform.NewMetrics()
 	cfg := Config{
 		TenantCount:       envInt("DEMO_TENANT_COUNT", 5),

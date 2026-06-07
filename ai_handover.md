@@ -1,5 +1,28 @@
 # AI Handover
 
+## 2026-06-07 TDD 全链路回归与测试隔离修复
+- 用户要求用 TDD 验证全部链路、全部功能、全部服务、全部模块；本轮读取 `tdd` 技能后执行红绿回归。
+- 首轮验证结果：
+  - `go test ./... -count=1` 通过。
+  - `helm lint charts/iot` 通过。
+  - 并行执行单设备 E2E 与多租户负载 E2E 均通过，但日志暴露测试隔离问题。
+- 发现并修复的问题：
+  - 并行 E2E 时多个测试 worker 使用不同 Kafka group，会各自消费全局 command/telemetry topic，导致重复下发其他测试的命令，设备重复 ACK，出现 `invalid command transition` 噪声。
+  - 多轮 E2E 复用固定 MQTT client id，上一轮连接尚未完全释放时下一轮会踢掉旧连接，偶发 `Subscribe` 连接噪声。
+- 已按 TDD 增量补强：
+  - `WorkerConfig` 新增 `AckTopicFilters []string`，支持多租户测试或租户分片部署订阅多个 ACK filter；未配置时仍默认 `tenant/+/device/+/ack`。
+  - `WorkerConfig` 新增 `TenantIDs []string` allowlist；未配置时处理全部租户，配置后 telemetry/command 消费只处理指定租户并提交跳过其他租户消息。
+  - E2E/load 测试为每轮生成唯一 MQTT client id，避免连接互踢。
+  - E2E/load 测试为 worker 配置本轮租户 allowlist 和 ACK filter，避免并行/连续运行串扰。
+  - 新增 `internal/platform/worker_test.go`，覆盖 ACK filter 归一化和 worker 租户 allowlist 行为。
+- 最终验证结果：
+  - `go test ./internal/platform -run 'TestNormalizeAckTopicFilters|TestWorkerTenantAllowed' -count=1` 通过。
+  - `go test ./... -count=3` 通过。
+  - `make build` 通过，`admin`、`core-rpc`、`demo`、`ingress`、`worker` 均构建成功。
+  - `helm lint charts/iot` 通过。
+  - 并行执行 `IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=3 -v` 通过。
+  - 并行执行 `IOT_E2E=1 IOT_E2E_LOAD=1 go test ./internal/platform -run TestE2ELoadMultiTenantMultiDevice -count=3 -v` 通过，未再出现 `command not found`、`invalid command transition` 或 ACK 订阅连接错误。
+
 ## 2026-06-07 消息链路生命周期诊断与修复
 - 本轮按 `diagnose` 流程排查 `messages.dropped.no_subscribers=436836`，覆盖连接、发布、订阅、消费、处理、日志、监控和端到端测试。
 - 关键根因已定位：

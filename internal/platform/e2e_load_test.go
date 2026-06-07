@@ -41,6 +41,14 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	emqxURL := envOr("EMQX_URL", "tcp://127.0.0.1:1883")
 	tdengineDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
 	runPrefix := fmt.Sprintf("load-%d", time.Now().UnixNano())
+	clientIDPrefix := "iot-" + runPrefix
+	tenantIDs := make([]string, 0, tenantCount)
+	ackTopicFilters := make([]string, 0, tenantCount)
+	for ti := 0; ti < tenantCount; ti++ {
+		tenantID := fmt.Sprintf("%s-tenant-%d", runPrefix, ti)
+		tenantIDs = append(tenantIDs, tenantID)
+		ackTopicFilters = append(ackTopicFilters, fmt.Sprintf("tenant/%s/device/+/ack", tenantID))
+	}
 
 	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
 	if err != nil {
@@ -81,7 +89,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 
 	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 		BrokerURL:   emqxURL,
-		ClientID:    "iot-load-bridge",
+		ClientID:    clientIDPrefix + "-bridge",
 		TopicFilter: contracts.TelemetryTopicFilter,
 	}, publisher, metrics)
 	worker := platform.NewWorker(platform.WorkerConfig{
@@ -90,8 +98,10 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 		KafkaStartOffset: kafka.LastOffset,
 		TelemetryTopic:   "iot.telemetry",
 		CommandTopic:     "iot.command",
+		AckTopicFilters:  ackTopicFilters,
+		TenantIDs:        tenantIDs,
 		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     "iot-load-worker",
+		MQTTClientID:     clientIDPrefix + "-worker",
 	}, store, tdWriter, metrics)
 
 	runErr := make(chan error, 2)
@@ -120,15 +130,12 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 		return mqttReachable(emqxURL)
 	})
 
-	telemetryClient := mustMQTTClient(t, emqxURL, "iot-load-telemetry")
+	telemetryClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-telemetry")
 	defer telemetryClient.Disconnect(250)
 	agents := make([]func(), 0, tenantCount)
 
-	tenantIDs := make([]string, 0, tenantCount)
 	deviceIDs := make([]string, 0, tenantCount*devicesPerTenant)
-	for ti := 0; ti < tenantCount; ti++ {
-		tenantID := fmt.Sprintf("%s-tenant-%d", runPrefix, ti)
-		tenantIDs = append(tenantIDs, tenantID)
+	for ti, tenantID := range tenantIDs {
 		e2eCreateTenant(t, ts.URL, tenantID, "Load Tenant "+strconv.Itoa(ti))
 		for di := 0; di < devicesPerTenant; di++ {
 			deviceID := fmt.Sprintf("%s-device-%d-%d", runPrefix, ti, di)
@@ -139,7 +146,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 
 	for _, tenantID := range tenantIDs {
 		tenantID := tenantID
-		client := mustMQTTClient(t, emqxURL, "iot-load-agent-"+tenantID)
+		client := mustMQTTClient(t, emqxURL, clientIDPrefix+"-agent-"+tenantID)
 		commandTopic, err := contracts.BuildTenantCommandTopicFilter(tenantID)
 		if err != nil {
 			t.Fatalf("BuildTenantCommandTopicFilter() error = %v", err)

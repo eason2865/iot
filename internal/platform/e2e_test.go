@@ -72,9 +72,14 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
+	tenantID := fmt.Sprintf("tenant-%d", time.Now().UnixNano())
+	deviceID := fmt.Sprintf("device-%d", time.Now().UnixNano())
+	clientIDPrefix := fmt.Sprintf("iot-e2e-%d", time.Now().UnixNano())
+	ackTopicFilter := fmt.Sprintf("tenant/%s/device/+/ack", tenantID)
+
 	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 		BrokerURL:   emqxURL,
-		ClientID:    "iot-e2e-bridge",
+		ClientID:    clientIDPrefix + "-bridge",
 		TopicFilter: contracts.TelemetryTopicFilter,
 	}, publisher, metrics)
 	if bridge == nil {
@@ -86,8 +91,10 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		KafkaStartOffset: kafka.LastOffset,
 		TelemetryTopic:   "iot.telemetry",
 		CommandTopic:     "iot.command",
+		AckTopicFilter:   ackTopicFilter,
+		TenantIDs:        []string{tenantID},
 		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     "iot-e2e-worker",
+		MQTTClientID:     clientIDPrefix + "-worker",
 	}, store, tdWriter, metrics)
 	if worker == nil {
 		t.Fatal("NewWorker() returned nil")
@@ -119,13 +126,10 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return mqttReachable(emqxURL)
 	})
 
-	tenantID := fmt.Sprintf("tenant-%d", time.Now().UnixNano())
-	deviceID := fmt.Sprintf("device-%d", time.Now().UnixNano())
-
 	e2eCreateTenant(t, ts.URL, tenantID, "Tenant E2E")
 	e2eCreateDevice(t, ts.URL, tenantID, deviceID, "product-x")
 
-	telemetryClient := mustMQTTClient(t, emqxURL, "iot-e2e-telemetry")
+	telemetryClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-telemetry")
 	defer telemetryClient.Disconnect(250)
 	telemetryTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixTelemetry)
 	telemetryPayload := map[string]any{
@@ -162,7 +166,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return err == nil && got >= 1
 	})
 
-	commandClient := mustMQTTClient(t, emqxURL, "iot-e2e-device")
+	commandClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-device")
 	defer commandClient.Disconnect(250)
 	commandTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixCommand)
 	commandCh := make(chan commandEnvelope, 1)
@@ -199,7 +203,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		t.Fatalf("command downlink context mismatch: %+v", gotCommand)
 	}
 
-	ackClient := mustMQTTClient(t, emqxURL, "iot-e2e-ack")
+	ackClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-ack")
 	defer ackClient.Disconnect(250)
 	ackTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixAck)
 	publishMQTTJSON(t, ackClient, ackTopic, map[string]any{

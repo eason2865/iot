@@ -20,6 +20,8 @@ type WorkerConfig struct {
 	TelemetryTopic   string
 	CommandTopic     string
 	AckTopicFilter   string
+	AckTopicFilters  []string
+	TenantIDs        []string
 	MQTTBrokerURL    string
 	MQTTClientID     string
 	MQTTUsername     string
@@ -33,13 +35,15 @@ type Worker struct {
 	telemetryReader *kafka.Reader
 	commandReader   *kafka.Reader
 	metrics         *Metrics
+	tenantAllowlist map[string]struct{}
 }
 
 func NewWorker(cfg WorkerConfig, store Store, tdengine *TDengineWriter, metrics *Metrics) *Worker {
 	w := &Worker{
-		store:    store,
-		tdengine: tdengine,
-		metrics:  metrics,
+		store:           store,
+		tdengine:        tdengine,
+		metrics:         metrics,
+		tenantAllowlist: tenantAllowlist(cfg.TenantIDs),
 	}
 	if len(cfg.KafkaBrokers) > 0 {
 		telemetryTopic := cfg.TelemetryTopic
@@ -90,45 +94,64 @@ func NewWorker(cfg WorkerConfig, store Store, tdengine *TDengineWriter, metrics 
 			opts.SetPassword(cfg.MQTTPassword)
 		}
 		opts.SetAutoReconnect(true)
-		ackTopic := cfg.AckTopicFilter
-		if ackTopic == "" {
-			ackTopic = contracts.AckTopicFilter
-		}
+		ackTopics := normalizeAckTopicFilters(cfg)
 		opts.OnConnect = func(client mqtt.Client) {
-			token := client.Subscribe(ackTopic, 1, func(_ mqtt.Client, msg mqtt.Message) {
-				var ack CommandAckMessage
-				if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
-					log.Printf("command ack unmarshal error: %v", err)
-					if w.metrics != nil {
-						w.metrics.IncWorker("ack", "error")
-					}
-					return
+			for _, ackTopic := range ackTopics {
+				token := client.Subscribe(ackTopic, 1, w.handleAckMessage)
+				token.Wait()
+				if err := token.Error(); err != nil {
+					log.Printf("command ack subscribe error: topic=%s err=%v", ackTopic, err)
 				}
-				if ack.CommandID == "" {
-					ack.CommandID = string(msg.Payload())
-				}
-				if w.store != nil {
-					if _, err := w.store.ackCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
-						log.Printf("command ack store error: %v", err)
-						if w.metrics != nil {
-							w.metrics.IncWorker("ack", "error")
-						}
-					} else {
-						log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
-						if w.metrics != nil {
-							w.metrics.IncWorker("ack", "ok")
-						}
-					}
-				}
-			})
-			token.Wait()
-			if err := token.Error(); err != nil {
-				log.Printf("command ack subscribe error: %v", err)
 			}
 		}
 		w.mqtt = mqtt.NewClient(opts)
 	}
 	return w
+}
+
+func normalizeAckTopicFilters(cfg WorkerConfig) []string {
+	if len(cfg.AckTopicFilters) > 0 {
+		topics := make([]string, 0, len(cfg.AckTopicFilters))
+		for _, topic := range cfg.AckTopicFilters {
+			if topic != "" {
+				topics = append(topics, topic)
+			}
+		}
+		if len(topics) > 0 {
+			return topics
+		}
+	}
+	if cfg.AckTopicFilter != "" {
+		return []string{cfg.AckTopicFilter}
+	}
+	return []string{contracts.AckTopicFilter}
+}
+
+func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
+	var ack CommandAckMessage
+	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
+		log.Printf("command ack unmarshal error: %v", err)
+		if w.metrics != nil {
+			w.metrics.IncWorker("ack", "error")
+		}
+		return
+	}
+	if ack.CommandID == "" {
+		ack.CommandID = string(msg.Payload())
+	}
+	if w.store != nil {
+		if _, err := w.store.ackCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
+			log.Printf("command ack store error: %v", err)
+			if w.metrics != nil {
+				w.metrics.IncWorker("ack", "error")
+			}
+		} else {
+			log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
+			if w.metrics != nil {
+				w.metrics.IncWorker("ack", "ok")
+			}
+		}
+	}
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -198,6 +221,10 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			_ = w.telemetryReader.CommitMessages(ctx, msg)
 			continue
 		}
+		if !w.tenantAllowed(rec.TenantID) {
+			_ = w.telemetryReader.CommitMessages(ctx, msg)
+			continue
+		}
 		log.Printf("telemetry consumed: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
 		env := contracts.Envelope{
 			MsgID:    rec.MsgID,
@@ -261,6 +288,10 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			_ = w.commandReader.CommitMessages(ctx, msg)
 			continue
 		}
+		if !w.tenantAllowed(cmd.TenantID) {
+			_ = w.commandReader.CommitMessages(ctx, msg)
+			continue
+		}
 		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
 		if w.mqtt != nil {
 			topic, err := contracts.BuildCommandTopic(cmd.TenantID, cmd.DeviceID)
@@ -305,6 +336,30 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		}
 		_ = w.commandReader.CommitMessages(ctx, msg)
 	}
+}
+
+func tenantAllowlist(tenantIDs []string) map[string]struct{} {
+	if len(tenantIDs) == 0 {
+		return nil
+	}
+	allowlist := make(map[string]struct{}, len(tenantIDs))
+	for _, tenantID := range tenantIDs {
+		if tenantID != "" {
+			allowlist[tenantID] = struct{}{}
+		}
+	}
+	if len(allowlist) == 0 {
+		return nil
+	}
+	return allowlist
+}
+
+func (w *Worker) tenantAllowed(tenantID string) bool {
+	if w == nil || len(w.tenantAllowlist) == 0 {
+		return true
+	}
+	_, ok := w.tenantAllowlist[tenantID]
+	return ok
 }
 
 func sleepBeforeKafkaRetry(ctx context.Context) {

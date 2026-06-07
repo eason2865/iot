@@ -11,11 +11,13 @@ import (
 )
 
 type MQTTBridgeConfig struct {
-	BrokerURL   string
-	ClientID    string
-	Username    string
-	Password    string
-	TopicFilter string
+	BrokerURL          string
+	ClientID           string
+	Username           string
+	Password           string
+	TopicFilter        string
+	PublishConcurrency int
+	PublishSlotTimeout time.Duration
 }
 
 type MQTTBridge struct {
@@ -31,7 +33,15 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 	}
 	filter := cfg.TopicFilter
 	if filter == "" {
-		filter = "tenant/+/device/+/telemetry"
+		filter = contracts.TelemetryTopicFilter
+	}
+	publishConcurrency := cfg.PublishConcurrency
+	if publishConcurrency <= 0 {
+		publishConcurrency = 64
+	}
+	publishSlotTimeout := cfg.PublishSlotTimeout
+	if publishSlotTimeout <= 0 {
+		publishSlotTimeout = 30 * time.Second
 	}
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.BrokerURL)
@@ -45,10 +55,10 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
 	opts.SetConnectRetryInterval(2 * time.Second)
-	bridge := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, 64)}
+	bridge := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, publishConcurrency)}
 	opts.OnConnect = func(_ mqtt.Client) {
 		log.Printf("mqtt bridge connected: filter=%s", filter)
-		token := bridge.client.Subscribe(filter, 0, func(_ mqtt.Client, msg mqtt.Message) {
+		token := bridge.client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
 			env, err := contracts.ParseEnvelope(msg.Payload())
 			if err != nil {
 				log.Printf("mqtt bridge parse error: topic=%s err=%v", msg.Topic(), err)
@@ -67,8 +77,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 				Payload:    env.Payload,
 				ReceivedAt: time.Now().UTC(),
 			}
-			select {
-			case bridge.publishSlots <- struct{}{}:
+			if acquirePublishSlot(bridge.publishSlots, publishSlotTimeout) {
 				go func() {
 					defer func() { <-bridge.publishSlots }()
 					if err := publisher.publishTelemetry(rec); err != nil {
@@ -82,7 +91,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 						bridge.metrics.IncMQTTBridge("ok")
 					}
 				}()
-			default:
+			} else {
 				log.Printf("mqtt bridge publish backlog full: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
@@ -100,6 +109,25 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 	}
 	bridge.client = mqtt.NewClient(opts)
 	return bridge
+}
+
+func acquirePublishSlot(slots chan struct{}, timeout time.Duration) bool {
+	if timeout <= 0 {
+		select {
+		case slots <- struct{}{}:
+			return true
+		default:
+			return false
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case slots <- struct{}{}:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (b *MQTTBridge) Run(ctx context.Context) error {

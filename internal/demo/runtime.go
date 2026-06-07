@@ -231,6 +231,7 @@ func newMQTTBus(cfg MQTTBusFactoryConfig, tenantID string) (*mqttBus, error) {
 	bus := &mqttBus{subs: map[string]func(string, []byte){}}
 	opts := mqtt.NewClientOptions().AddBroker(cfg.BrokerURL)
 	opts.SetClientID(fmt.Sprintf("%s-%s-%d", cfg.ClientPref, strings.ReplaceAll(tenantID, "/", "-"), time.Now().UnixNano()))
+	opts.SetOrderMatters(false)
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
 	}
@@ -242,7 +243,7 @@ func newMQTTBus(cfg MQTTBusFactoryConfig, tenantID string) (*mqttBus, error) {
 		bus.mu.Lock()
 		defer bus.mu.Unlock()
 		for topic := range bus.subs {
-			token := client.Subscribe(topic, 0, func(_ mqtt.Client, msg mqtt.Message) {
+			token := client.Subscribe(topic, 1, func(_ mqtt.Client, msg mqtt.Message) {
 				bus.handle(msg.Topic(), msg.Payload())
 			})
 			token.Wait()
@@ -258,7 +259,7 @@ func newMQTTBus(cfg MQTTBusFactoryConfig, tenantID string) (*mqttBus, error) {
 }
 
 func (b *mqttBus) Publish(topic string, payload []byte) error {
-	token := b.client.Publish(topic, 0, false, payload)
+	token := b.client.Publish(topic, 1, false, payload)
 	token.Wait()
 	return token.Error()
 }
@@ -268,7 +269,7 @@ func (b *mqttBus) Subscribe(topic string, handler func(topic string, payload []b
 	b.subs[topic] = handler
 	b.mu.Unlock()
 
-	token := b.client.Subscribe(topic, 0, func(_ mqtt.Client, msg mqtt.Message) {
+	token := b.client.Subscribe(topic, 1, func(_ mqtt.Client, msg mqtt.Message) {
 		b.handle(msg.Topic(), msg.Payload())
 	})
 	token.Wait()
@@ -277,11 +278,15 @@ func (b *mqttBus) Subscribe(topic string, handler func(topic string, payload []b
 
 func (b *mqttBus) handle(topic string, payload []byte) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	handlers := make([]func(string, []byte), 0, len(b.subs))
 	for pattern, handler := range b.subs {
 		if topicMatches(pattern, topic) {
-			handler(topic, payload)
+			handlers = append(handlers, handler)
 		}
+	}
+	b.mu.Unlock()
+	for _, handler := range handlers {
+		handler(topic, payload)
 	}
 }
 

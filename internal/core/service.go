@@ -47,6 +47,9 @@ func (s *Service) CreateTenant(_ context.Context, req *corev1.CreateTenantReques
 	if req.GetId() == "" || req.GetName() == "" {
 		return nil, fmt.Errorf("id and name are required")
 	}
+	if !contracts.IsValidTopicPart(req.GetId()) {
+		return nil, fmt.Errorf("tenantId contains invalid MQTT topic characters")
+	}
 	tenant, err := s.repo.CreateTenant(platform.Tenant{ID: req.GetId(), Name: req.GetName()})
 	if err != nil {
 		return nil, err
@@ -66,6 +69,9 @@ func (s *Service) ListTenants(context.Context, *corev1.ListTenantsRequest) (*cor
 func (s *Service) CreateDevice(_ context.Context, req *corev1.CreateDeviceRequest) (*corev1.Device, error) {
 	if req.GetTenantId() == "" || req.GetDeviceId() == "" || req.GetProductId() == "" || req.GetSecret() == "" {
 		return nil, fmt.Errorf("tenantId, deviceId, productId and secret are required")
+	}
+	if !contracts.IsValidTopicPart(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
+		return nil, fmt.Errorf("tenantId or deviceId contains invalid MQTT topic characters")
 	}
 	device, err := s.repo.CreateDevice(platform.Device{
 		TenantID:  req.GetTenantId(),
@@ -137,6 +143,9 @@ func (s *Service) RecordTelemetry(_ context.Context, req *corev1.RecordTelemetry
 func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequest) (*corev1.CreateCommandResponse, error) {
 	if req.GetTenantId() == "" || req.GetDeviceId() == "" {
 		return nil, fmt.Errorf("tenantId and deviceId are required")
+	}
+	if !contracts.IsValidTopicPart(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
+		return nil, fmt.Errorf("tenantId or deviceId contains invalid MQTT topic characters")
 	}
 	command, err := s.repo.CreateCommand(req.GetTenantId(), req.GetDeviceId(), req.GetPayload())
 	if err != nil {

@@ -25,7 +25,8 @@ data:
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
   EMQX_TOPIC_FILTER: tenant/+/device/+/telemetry
-  EMQX_CLIENT_ID: iot-ingress
+  EMQX_INGRESS_CLIENT_ID: iot-ingress
+  EMQX_WORKER_CLIENT_ID: iot-worker
   TDENGINE_TABLE: telemetry
   LISTEN_ADDR: :8080
   ADMIN_METRICS_HOST: 0.0.0.0

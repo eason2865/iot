@@ -3,7 +3,9 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -34,22 +36,25 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublish
 	if commandTopic == "" {
 		commandTopic = "iot.command"
 	}
+	ensureKafkaTopicsBestEffort(cfg.Brokers, telemetryTopic, commandTopic)
 	return &KafkaPublisher{
 		telemetryWriter: &kafka.Writer{
-			Addr:         kafka.TCP(cfg.Brokers...),
-			Topic:        telemetryTopic,
-			Balancer:     &kafka.Hash{},
-			RequiredAcks: kafka.RequireOne,
-			BatchSize:    1,
-			BatchTimeout: 10 * time.Millisecond,
+			Addr:                   kafka.TCP(cfg.Brokers...),
+			Topic:                  telemetryTopic,
+			Balancer:               &kafka.Hash{},
+			RequiredAcks:           kafka.RequireOne,
+			BatchSize:              1,
+			BatchTimeout:           10 * time.Millisecond,
+			AllowAutoTopicCreation: true,
 		},
 		commandWriter: &kafka.Writer{
-			Addr:         kafka.TCP(cfg.Brokers...),
-			Topic:        commandTopic,
-			Balancer:     &kafka.Hash{},
-			RequiredAcks: kafka.RequireOne,
-			BatchSize:    1,
-			BatchTimeout: 10 * time.Millisecond,
+			Addr:                   kafka.TCP(cfg.Brokers...),
+			Topic:                  commandTopic,
+			Balancer:               &kafka.Hash{},
+			RequiredAcks:           kafka.RequireOne,
+			BatchSize:              1,
+			BatchTimeout:           10 * time.Millisecond,
+			AllowAutoTopicCreation: true,
 		},
 		metrics: metrics,
 	}
@@ -87,9 +92,7 @@ func (p *KafkaPublisher) publishTelemetry(record TelemetryRecord) error {
 		}
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = p.telemetryWriter.WriteMessages(ctx, kafka.Message{
+	err = writeKafkaMessageWithRetry(p.telemetryWriter, kafka.Message{
 		Key:   []byte(record.DeviceID),
 		Value: value,
 	})
@@ -120,9 +123,7 @@ func (p *KafkaPublisher) publishCommand(cmd Command) error {
 		}
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = p.commandWriter.WriteMessages(ctx, kafka.Message{
+	err = writeKafkaMessageWithRetry(p.commandWriter, kafka.Message{
 		Key:   []byte(cmd.DeviceID),
 		Value: value,
 	})
@@ -139,3 +140,46 @@ func (p *KafkaPublisher) publishCommand(cmd Command) error {
 }
 
 func (p *KafkaPublisher) PublishCommand(cmd Command) error { return p.publishCommand(cmd) }
+
+func writeKafkaMessageWithRetry(writer *kafka.Writer, msg kafka.Message) error {
+	var err error
+	for _, delay := range []time.Duration{
+		0,
+		200 * time.Millisecond,
+		500 * time.Millisecond,
+		time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+	} {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = writer.WriteMessages(ctx, msg)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if !isRetriableKafkaError(err) {
+			return err
+		}
+	}
+	return err
+}
+
+func isRetriableKafkaError(err error) bool {
+	var kafkaErr kafka.Error
+	if errors.As(err, &kafkaErr) && kafkaErr.Temporary() {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Temporary() {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection refused")
+}

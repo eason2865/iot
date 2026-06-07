@@ -15,6 +15,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/segmentio/kafka-go"
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
@@ -81,14 +82,16 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 		BrokerURL:   emqxURL,
 		ClientID:    "iot-load-bridge",
-		TopicFilter: "tenant/+/device/+/telemetry",
+		TopicFilter: contracts.TelemetryTopicFilter,
 	}, publisher, metrics)
 	worker := platform.NewWorker(platform.WorkerConfig{
-		KafkaBrokers:   kafkaBrokers,
-		TelemetryTopic: "iot.telemetry",
-		CommandTopic:   "iot.command",
-		MQTTBrokerURL:  emqxURL,
-		MQTTClientID:   "iot-load-worker",
+		KafkaBrokers:     kafkaBrokers,
+		KafkaGroupID:     fmt.Sprintf("iot-load-%d", time.Now().UnixNano()),
+		KafkaStartOffset: kafka.LastOffset,
+		TelemetryTopic:   "iot.telemetry",
+		CommandTopic:     "iot.command",
+		MQTTBrokerURL:    emqxURL,
+		MQTTClientID:     "iot-load-worker",
 	}, store, tdWriter, metrics)
 
 	runErr := make(chan error, 2)
@@ -137,14 +140,17 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	for _, tenantID := range tenantIDs {
 		tenantID := tenantID
 		client := mustMQTTClient(t, emqxURL, "iot-load-agent-"+tenantID)
-		commandTopic := fmt.Sprintf("tenant/%s/device/+/command", tenantID)
+		commandTopic, err := contracts.BuildTenantCommandTopicFilter(tenantID)
+		if err != nil {
+			t.Fatalf("BuildTenantCommandTopicFilter() error = %v", err)
+		}
 		ackCh := make(chan commandEnvelope, 16)
-		sub := client.Subscribe(commandTopic, 0, func(c mqtt.Client, msg mqtt.Message) {
+		sub := client.Subscribe(commandTopic, 1, func(c mqtt.Client, msg mqtt.Message) {
 			var env commandEnvelope
 			if err := json.Unmarshal(msg.Payload(), &env); err != nil {
 				return
 			}
-			ackTopic, err := contracts.BuildDeviceTopic(env.TenantID, env.DeviceID, "ack")
+			ackTopic, err := contracts.BuildAckTopic(env.TenantID, env.DeviceID)
 			if err != nil {
 				return
 			}
@@ -199,7 +205,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 						"temp": 20 + seq,
 					},
 				}
-				telemetryTopic := contractsMustTopic(t, tenantID, deviceID, "telemetry")
+				telemetryTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixTelemetry)
 				publishMQTTJSON(t, telemetryClient, telemetryTopic, payload)
 				telemetrySent++
 			}
@@ -328,7 +334,7 @@ func publishMQTTJSONNoT(client mqtt.Client, topic string, body map[string]any) e
 	if err != nil {
 		return err
 	}
-	token := client.Publish(topic, 0, false, payload)
+	token := client.Publish(topic, 1, false, payload)
 	token.Wait()
 	return token.Error()
 }

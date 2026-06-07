@@ -1,5 +1,78 @@
 # AI Handover
 
+## 2026-06-07 消息链路生命周期诊断与修复
+- 本轮按 `diagnose` 流程排查 `messages.dropped.no_subscribers=436836`，覆盖连接、发布、订阅、消费、处理、日志、监控和端到端测试。
+- 关键根因已定位：
+  - `ingress` 与 `worker` 共用 `EMQX_CLIENT_ID=iot-ingress`，后连接的 worker 会踢掉 ingress，导致 EMQX 只剩 ACK 订阅而没有 telemetry 订阅，上行消息找不到 MQTT 订阅者。
+  - 本地 Kafka 同时被宿主机测试和 k8s Pod 访问，但 advertised listener 只有单一地址，曾出现宿主机连接后被 metadata 重定向到不可达地址的问题。
+  - demo 设备侧 MQTT 回调里同步发布 QoS1 ACK，叠加回调锁持有，长时间运行后可能出现健康检查正常但业务指标停止增长。
+  - E2E 关闭链路时 TDengine writer 可能在 channel close 后继续写入，引发 `send on closed channel` panic。
+- 已将 MQTT 运行时契约统一为：
+  - telemetry：`tenant/{tenantId}/device/{deviceId}/telemetry`
+  - command：`tenant/{tenantId}/device/{deviceId}/command`
+  - ack：`tenant/{tenantId}/device/{deviceId}/ack`
+- 已在 `internal/contracts/topic.go` 增加统一 topic 构造、过滤器和 topic segment 校验，并在 envelope、core service、platform API 入口拒绝包含 `/`、`+`、`#` 的 tenant/device/topic 标识。
+- 已拆分 MQTT client id：
+  - `EMQX_INGRESS_CLIENT_ID` 默认 `iot-ingress`
+  - `EMQX_WORKER_CLIENT_ID` 默认 `iot-worker`
+  - 已同步 `.env.example`、Helm ConfigMap、k8s local ConfigMap、README 和 bootstrap 读取逻辑。
+- 已验证 EMQX 订阅恢复为稳定双订阅：
+  - `iot-ingress -> tenant/+/device/+/telemetry`
+  - `iot-worker -> tenant/+/device/+/ack`
+- 已补 Kafka 冷启动和本地网络可靠性：
+  - 新增 `internal/platform/kafka_topics.go`，publisher/worker 启动时 best-effort 确保 Kafka topic 存在。
+  - Kafka writer 开启 `AllowAutoTopicCreation`，写入增加瞬时错误重试。
+  - Helm 本地部署改为 k8s Pod 使用 Docker Desktop 网关 `192.168.65.254:29092`，宿主机测试使用 `localhost:9092`。
+  - `scripts/helm-deploy-local.sh` 增加 `DOCKER_GATEWAY_KAFKA_PORT=29092`，并将 Helm wait/netcheck 一并切到该端口。
+- 已补 MQTT bridge 背压处理：
+  - `MQTTBridgeConfig` 新增 `PublishConcurrency` 和 `PublishSlotTimeout`。
+  - 上行消息不再因瞬时 backlog 满而立即丢弃，默认等待 publish slot，减少内部链路人为丢消息。
+- 已补 worker 消费可靠性：
+  - Kafka reader 改为稳定 consumer group，默认 `iot-worker-telemetry` / `iot-worker-command`。
+  - E2E/load 测试使用唯一 group id 与 `kafka.LastOffset`，避免历史 demo 或旧测试消息串扰。
+  - Kafka transient fetch error 会计数、短暂等待并继续消费；`context.Canceled` 正常退出。
+  - 异常 command topic / marshal error 会记录、计数并提交消息，避免 poison message 卡住消费。
+- 已补 QoS：
+  - telemetry 订阅、command 下发、ACK 订阅、demo bus、E2E 发布订阅均统一使用 QoS1。
+- 已修复 demo MQTT 回调停滞：
+  - Paho 设置 `SetOrderMatters(false)`。
+  - demo MQTT bus 分发 handler 时先复制 handler 列表再释放锁，避免回调内发布和订阅分发互相阻塞。
+- 已修复 TDengine writer 关闭竞态：
+  - writer 增加 `closedCh`、锁和 closed 状态。
+  - close 后 `WriteTelemetry` 返回 `errTDengineWriterClosed`，不再向已关闭 channel 发送。
+  - 新增 `TestTDengineWriterWriteAfterCloseDoesNotPanic`。
+- 已完成多轮验证：
+  - `go test ./... -count=3` 通过。
+  - `helm lint charts/iot` 通过。
+  - `IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=3 -v` 通过。
+  - `IOT_E2E=1 IOT_E2E_LOAD=1 go test ./internal/platform -run TestE2ELoadMultiTenantMultiDevice -count=3 -v` 通过，单轮覆盖 5 租户、50 设备、300 telemetry、50 command/ACK。
+  - 已重新构建 `iot-app:2.0` 并通过 `scripts/helm-deploy-local.sh` 部署，`admin`、`core-rpc`、`ingress`、`worker` 均 Running/Ready。
+  - 已验证 `/healthz`、服务 `/metrics`、Prometheus `/-/healthy` 正常。
+  - Prometheus 1 分钟窗口内 demo、MQTT bridge、worker telemetry/command/ack 均有 ok 速率，error 速率为 0。
+- 注意事项：
+  - 为避免 E2E/load 测试与持续造流互相干扰，验证期间曾停止 demo；需要恢复监控造流时，先启动本地 port-forward，再执行 `docker compose -f monitoring/docker-compose.yml up -d demo`。
+  - Docker Kafka 推荐使用双 listener：宿主机 `localhost:9092`，Docker/k8s 网关 `192.168.65.254:29092`。
+
+## 2026-06-07 MQTT topic 契约统一
+- 已统一当前运行时的 MQTT 设备契约为三类 canonical topic：
+  - 上行遥测：`tenant/{tenantId}/device/{deviceId}/telemetry`
+  - 下行命令：`tenant/{tenantId}/device/{deviceId}/command`
+  - ACK 回执：`tenant/{tenantId}/device/{deviceId}/ack`
+- 已在 `internal/contracts/topic.go` 抽出 topic suffix 常量和构造函数：
+  - `TopicSuffixTelemetry`
+  - `TopicSuffixCommand`
+  - `TopicSuffixAck`
+  - `BuildTelemetryTopic`
+  - `BuildCommandTopic`
+  - `BuildAckTopic`
+  - `TelemetryTopicFilter`
+  - `AckTopicFilter`
+  - `BuildTenantCommandTopicFilter`
+- 已把 `demo`、`worker`、`ingress`、`e2e` 和 `simulator` 测试全部切到统一构造函数和过滤器常量，减少 topic 裸字符串分散。
+- 已同步 `README.md` 和 `docs/物联网平台技术方案.html` 的 Topic 说明与时序图，只保留当前运行时契约。
+- 已补回归测试，确认 canonical topic 构造函数输出符合统一契约。
+- 已验证 `go test ./...` 通过。
+
 ## 2026-06-06 Grafana 业务监控与 demo 造流闭环
 - 已按 IoT 业务闭环重新整理 Grafana dashboard：
   - `IoT Overview`：服务在线数、demo 拓扑规模、遥测入库速率、命令创建速率、ACK 成功率、上行链路、命令闭环、HTTP/gRPC 延迟和错误汇总

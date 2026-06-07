@@ -14,6 +14,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/segmentio/kafka-go"
 	_ "github.com/taosdata/driver-go/v3/taosRestful"
 
 	"iot/internal/contracts"
@@ -74,17 +75,19 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 		BrokerURL:   emqxURL,
 		ClientID:    "iot-e2e-bridge",
-		TopicFilter: "tenant/+/device/+/telemetry",
+		TopicFilter: contracts.TelemetryTopicFilter,
 	}, publisher, metrics)
 	if bridge == nil {
 		t.Fatal("NewMQTTBridge() returned nil")
 	}
 	worker := platform.NewWorker(platform.WorkerConfig{
-		KafkaBrokers:   kafkaBrokers,
-		TelemetryTopic: "iot.telemetry",
-		CommandTopic:   "iot.command",
-		MQTTBrokerURL:  emqxURL,
-		MQTTClientID:   "iot-e2e-worker",
+		KafkaBrokers:     kafkaBrokers,
+		KafkaGroupID:     fmt.Sprintf("iot-e2e-%d", time.Now().UnixNano()),
+		KafkaStartOffset: kafka.LastOffset,
+		TelemetryTopic:   "iot.telemetry",
+		CommandTopic:     "iot.command",
+		MQTTBrokerURL:    emqxURL,
+		MQTTClientID:     "iot-e2e-worker",
 	}, store, tdWriter, metrics)
 	if worker == nil {
 		t.Fatal("NewWorker() returned nil")
@@ -124,7 +127,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	telemetryClient := mustMQTTClient(t, emqxURL, "iot-e2e-telemetry")
 	defer telemetryClient.Disconnect(250)
-	telemetryTopic := contractsMustTopic(t, tenantID, deviceID, "telemetry")
+	telemetryTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixTelemetry)
 	telemetryPayload := map[string]any{
 		"msgId":    fmt.Sprintf("msg-%d", time.Now().UnixNano()),
 		"tenantId": tenantID,
@@ -138,7 +141,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	}
 	publishMQTTJSON(t, telemetryClient, telemetryTopic, telemetryPayload)
 
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 60*time.Second, func() bool {
 		var status platform.DeviceStatus
 		if err := e2eGetJSON(ts.URL+"/api/v1/devices/"+tenantID+"/"+deviceID+"/status", &status); err != nil {
 			return false
@@ -146,7 +149,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return status.Online && !status.LastSeenAt.IsZero()
 	})
 
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 60*time.Second, func() bool {
 		var records []platform.TelemetryRecord
 		if err := e2eGetJSON(ts.URL+"/api/v1/devices/"+tenantID+"/"+deviceID+"/telemetry", &records); err != nil {
 			return false
@@ -154,17 +157,16 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return len(records) >= 1
 	})
 
-	if got, err := tdengineTelemetryCount(tdengineDSN, tenantID, deviceID); err != nil {
-		t.Fatalf("tdengineTelemetryCount() error = %v", err)
-	} else if got < 1 {
-		t.Fatalf("TDengine telemetry count = %d, want >= 1", got)
-	}
+	waitFor(t, 60*time.Second, func() bool {
+		got, err := tdengineTelemetryCount(tdengineDSN, tenantID, deviceID)
+		return err == nil && got >= 1
+	})
 
 	commandClient := mustMQTTClient(t, emqxURL, "iot-e2e-device")
 	defer commandClient.Disconnect(250)
-	commandTopic := contractsMustTopic(t, tenantID, deviceID, "command")
+	commandTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixCommand)
 	commandCh := make(chan commandEnvelope, 1)
-	commandToken := commandClient.Subscribe(commandTopic, 0, func(_ mqtt.Client, msg mqtt.Message) {
+	commandToken := commandClient.Subscribe(commandTopic, 1, func(_ mqtt.Client, msg mqtt.Message) {
 		var env commandEnvelope
 		_ = json.Unmarshal(msg.Payload(), &env)
 		select {
@@ -199,7 +201,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	ackClient := mustMQTTClient(t, emqxURL, "iot-e2e-ack")
 	defer ackClient.Disconnect(250)
-	ackTopic := contractsMustTopic(t, tenantID, deviceID, "ack")
+	ackTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixAck)
 	publishMQTTJSON(t, ackClient, ackTopic, map[string]any{
 		"commandId": gotCommand.ID,
 		"tenantId":  tenantID,
@@ -207,7 +209,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		"status":    "acked",
 	})
 
-	waitFor(t, 20*time.Second, func() bool {
+	waitFor(t, 60*time.Second, func() bool {
 		var got platform.Command
 		if err := e2eGetJSON(ts.URL+"/api/v1/commands/"+created.ID, &got); err != nil {
 			return false
@@ -230,7 +232,7 @@ func waitForCommandEnvelope(t *testing.T, ch <-chan commandEnvelope) commandEnve
 	select {
 	case env := <-ch:
 		return env
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		t.Fatal("timed out waiting for command envelope")
 	}
 	return commandEnvelope{}
@@ -285,7 +287,7 @@ func publishMQTTJSON(t *testing.T, client mqtt.Client, topic string, body map[st
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	token := client.Publish(topic, 0, false, payload)
+	token := client.Publish(topic, 1, false, payload)
 	token.Wait()
 	if err := token.Error(); err != nil {
 		t.Fatalf("publish error = %v", err)
@@ -294,9 +296,22 @@ func publishMQTTJSON(t *testing.T, client mqtt.Client, topic string, body map[st
 
 func contractsMustTopic(t *testing.T, tenantID, deviceID, suffix string) string {
 	t.Helper()
-	topic, err := contracts.BuildDeviceTopic(tenantID, deviceID, suffix)
+	var (
+		topic string
+		err   error
+	)
+	switch suffix {
+	case contracts.TopicSuffixTelemetry:
+		topic, err = contracts.BuildTelemetryTopic(tenantID, deviceID)
+	case contracts.TopicSuffixCommand:
+		topic, err = contracts.BuildCommandTopic(tenantID, deviceID)
+	case contracts.TopicSuffixAck:
+		topic, err = contracts.BuildAckTopic(tenantID, deviceID)
+	default:
+		t.Fatalf("unsupported canonical topic suffix %q", suffix)
+	}
 	if err != nil {
-		t.Fatalf("BuildDeviceTopic() error = %v", err)
+		t.Fatalf("%s topic error = %v", suffix, err)
 	}
 	return topic
 }

@@ -190,7 +190,7 @@ func (s *Service) EmitTelemetry(ctx context.Context) error {
 	}
 	device := tenant.Devices[s.rng.Intn(len(tenant.Devices))]
 
-	topic, err := contracts.BuildDeviceTopic(tenant.ID, device.DeviceID, "telemetry")
+	topic, err := contracts.BuildTelemetryTopic(tenant.ID, device.DeviceID)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.IncDemo("telemetry", "error")
@@ -370,13 +370,16 @@ func (a *tenantAgent) subscribe() error {
 	if a == nil || a.bus == nil {
 		return nil
 	}
-	topic := fmt.Sprintf("tenant/%s/device/+/command", a.tenantID)
+	topic, err := contracts.BuildTenantCommandTopicFilter(a.tenantID)
+	if err != nil {
+		return err
+	}
 	return a.bus.Subscribe(topic, func(topic string, payload []byte) {
 		var downlink platform.CommandDownlink
 		if err := json.Unmarshal(payload, &downlink); err != nil {
 			return
 		}
-		ackTopic, err := contracts.BuildDeviceTopic(downlink.TenantID, downlink.DeviceID, "ack")
+		ackTopic, err := contracts.BuildAckTopic(downlink.TenantID, downlink.DeviceID)
 		if err != nil {
 			if a.metrics != nil {
 				a.metrics.IncDemo("ack", "error")

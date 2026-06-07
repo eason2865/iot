@@ -406,7 +406,7 @@ sequenceDiagram
   participant W as Go worker
   participant T as TDengine
   participant P as PostgreSQL
-  D->>E: PUBLISH /up
+  D->>E: PUBLISH /telemetry
   E->>I: 回调/订阅消息
   I->>I: 鉴权 / 校验 / 标准化
   I->>K: produce telemetry event
@@ -425,7 +425,7 @@ sequenceDiagram
                         <h3>下行命令步骤</h3>
                         <ul>
                           <li>管理后台创建命令，admin 调用 core-rpc 写业务状态并生成 <span class="inline">commandId</span>。</li>
-                          <li>core-rpc 统一处理命令、租户和设备等核心业务，再由 ingress 按租户与设备上下文发布下行消息。</li>
+                          <li>core-rpc 统一处理命令、租户和设备等核心业务，worker 消费命令事件后按租户与设备上下文发布下行消息。</li>
                           <li>设备收到命令后返回 ACK。</li>
                           <li>命令状态更新为 <span class="inline">pending / dispatched / sent / acked / timeout / failed</span>。</li>
                         </ul>
@@ -438,20 +438,21 @@ sequenceDiagram
   participant A as Go admin
   participant R as core-rpc
   participant P as PostgreSQL
-  participant I as Go ingress
+  participant K as Kafka
+  participant W as Go worker
   participant E as EMQX
   participant D as Device
   U->>A: POST /commands
   A->>R: create command
   R->>P: insert command(pending)
+  R->>K: produce command event
   A-->>U: commandId
-  A->>I: dispatch request
-  I->>E: publish /down
+  K->>W: consume command event
+  W->>E: publish /command
   E->>D: deliver command
   D->>E: publish /ack
-  E->>I: ack callback
-  I->>R: update command status
-  R->>P: persist command status
+  E->>W: ack subscription
+  W->>P: persist command status
                         </div>
                       </div>
                     </div>
@@ -533,28 +534,18 @@ sequenceDiagram
                 <tbody>
                   <tr>
                     <td>上行遥测</td>
-                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/up</span></td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/telemetry</span></td>
                     <td>设备发往平台的标准数据</td>
                   </tr>
                   <tr>
                     <td>下行命令</td>
-                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/down</span></td>
+                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/command</span></td>
                     <td>平台发往设备的控制命令</td>
                   </tr>
                   <tr>
                     <td>ACK 回执</td>
                     <td><span class="inline">tenant/{tenantId}/device/{deviceId}/ack</span></td>
-                    <td>设备对命令或事件的确认</td>
-                  </tr>
-                  <tr>
-                    <td>事件通知</td>
-                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/event</span></td>
-                    <td>设备异常、状态变化、补充事件</td>
-                  </tr>
-                  <tr>
-                    <td>在线状态</td>
-                    <td><span class="inline">tenant/{tenantId}/device/{deviceId}/status</span></td>
-                    <td>在线、离线、心跳、会话状态</td>
+                    <td>设备对命令的确认</td>
                   </tr>
                 </tbody>
               </table>
@@ -644,7 +635,7 @@ stateDiagram-v2
                         <h3>Kafka 设计</h3>
                         <ul>
                           <li>Topic 按业务域拆，不按设备拆。</li>
-                          <li>推荐：<span class="inline">iot.telemetry</span>、<span class="inline">iot.event</span>、<span class="inline">iot.command</span>、<span class="inline">iot.dlq</span>。</li>
+                          <li>推荐：<span class="inline">iot.telemetry</span>、<span class="inline">iot.command</span>、<span class="inline">iot.dlq</span>。</li>
                           <li>分区键优先 <span class="inline">deviceId</span>，保证同设备有序。</li>
                           <li>失败重试后进入 DLQ，原始消息和失败原因要保留。</li>
                         </ul>

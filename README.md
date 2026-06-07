@@ -103,7 +103,8 @@ export CORE_RPC_LISTEN_ON=:9001
 export KAFKA_TELEMETRY_TOPIC=iot.telemetry
 export KAFKA_COMMAND_TOPIC=iot.command
 export EMQX_TOPIC_FILTER=tenant/+/device/+/telemetry
-export EMQX_CLIENT_ID=iot-ingress
+export EMQX_INGRESS_CLIENT_ID=iot-ingress
+export EMQX_WORKER_CLIENT_ID=iot-worker
 export TDENGINE_TABLE=telemetry
 ```
 
@@ -207,11 +208,9 @@ tenant/{tenantId}/device/{deviceId}/...
 
 常用 Topic：
 
-- 上行遥测：`tenant/{tenantId}/device/{deviceId}/up`
-- 下行命令：`tenant/{tenantId}/device/{deviceId}/down`
+- 上行遥测：`tenant/{tenantId}/device/{deviceId}/telemetry`
+- 下行命令：`tenant/{tenantId}/device/{deviceId}/command`
 - ACK 回执：`tenant/{tenantId}/device/{deviceId}/ack`
-- 事件通知：`tenant/{tenantId}/device/{deviceId}/event`
-- 在线状态：`tenant/{tenantId}/device/{deviceId}/status`
 
 ## 消息模型
 
@@ -288,14 +287,31 @@ iot/
 - Docker：PostgreSQL / Kafka / EMQX / TDengine / etcd / Prometheus / Grafana / demo
 - Kubernetes + Helm：`admin` / `core-rpc` / `ingress` / `worker`
 
-先确认本机 Docker 依赖已经启动，并且 Kafka 的 advertised listener 对 k8s 可达：
+先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 
 ```bash
+docker rm -f kafka 2>/dev/null || true
+docker run -d --name kafka \
+  -p 9092:9092 \
+  -p 29092:29092 \
+  -e KAFKA_CFG_NODE_ID=1 \
+  -e KAFKA_CFG_PROCESS_ROLES=broker,controller \
+  -e KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+  -e KAFKA_CFG_LISTENERS=HOST://:9092,DOCKER://:29092,CONTROLLER://:9093 \
+  -e KAFKA_CFG_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://192.168.65.254:29092 \
+  -e KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+  -e KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,HOST:PLAINTEXT,DOCKER:PLAINTEXT \
+  -e KAFKA_CFG_INTER_BROKER_LISTENER_NAME=HOST \
+  -e KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true \
+  -e KAFKA_CFG_DELETE_TOPIC_ENABLE=true \
+  -e ALLOW_PLAINTEXT_LISTENER=yes \
+  bitnamilegacy/kafka:latest
+
 docker inspect kafka --format '{{range .Config.Env}}{{println .}}{{end}}' | grep KAFKA_CFG_ADVERTISED_LISTENERS
-# 期望：KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://192.168.65.254:9092
+# 期望：KAFKA_CFG_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://192.168.65.254:29092
 ```
 
-如果 Kafka 仍是 `localhost:9092` 或不可被 k8s Pod 解析的 hostname，Pod 会被 Kafka 元数据引导到错误地址，`core-rpc` / `ingress` / `worker` 的 Kafka 写入或消费会失败。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
+宿主机运行 Go E2E 时使用 `localhost:9092`，k8s Pod 访问 Docker Kafka 时使用 `192.168.65.254:29092`。如果 Kafka 只配置单个 advertised listener，客户端会在拿到 broker metadata 后被引导到另一侧不可达的地址，表现为 `core-rpc` / `ingress` / `worker` Kafka 写入或消费超时。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
 
 安装业务服务：
 

@@ -45,3 +45,19 @@ func TestParseEnvelope(t *testing.T) {
 		t.Fatalf("ParseEnvelope().TraceID = %q, want %q", got.TraceID, "trace-001")
 	}
 }
+
+func TestParseEnvelopeRejectsInvalidTopicIdentifiers(t *testing.T) {
+	raw := []byte(`{
+  "msgId": "msg-1",
+  "tenantId": "tenant/a",
+  "deviceId": "device-42",
+  "ts": 1717670000000,
+  "type": "telemetry",
+  "version": "v1",
+  "payload": {}
+}`)
+
+	if _, err := contracts.ParseEnvelope(raw); err == nil {
+		t.Fatal("ParseEnvelope() error = nil, want error")
+	}
+}

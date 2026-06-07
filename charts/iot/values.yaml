@@ -10,7 +10,7 @@ externalDependencies:
   enabled: true
   hostGatewayIP: 192.168.65.254
   postgresDsn: postgres://iot:iot123@192.168.65.254:5432/iot?sslmode=disable
-  kafkaBrokers: 192.168.65.254:9092
+  kafkaBrokers: 192.168.65.254:29092
   emqxUrl: tcp://192.168.65.254:1883
   tdengineDsn: root:taosdata@http(192.168.65.254:6041)/iot
   etcdHosts: 192.168.65.254:2379
@@ -19,7 +19,7 @@ externalDependencies:
     postgresHost: 192.168.65.254
     postgresPort: 5432
     kafkaHost: 192.168.65.254
-    kafkaPort: 9092
+    kafkaPort: 29092
     emqxHost: 192.168.65.254
     emqxPort: 1883
     tdengineHost: 192.168.65.254

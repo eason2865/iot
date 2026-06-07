@@ -85,6 +85,67 @@ func TestCommandAckFlow(t *testing.T) {
 	}
 }
 
+func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
+	app := platform.New(platform.Config{ServiceName: "admin"})
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
+
+	postJSONStatus(t, ts.URL+"/api/v1/tenants", http.StatusBadRequest, map[string]any{
+		"id":   "tenant/bad",
+		"name": "Tenant Bad",
+	})
+
+	createTenant(t, ts.URL, "tenant-a", "Tenant A")
+	postJSONStatus(t, ts.URL+"/api/v1/devices", http.StatusBadRequest, map[string]any{
+		"tenantId":  "tenant-a",
+		"deviceId":  "device/#",
+		"productId": "product-x",
+		"secret":    "secret-1",
+	})
+
+	createDevice(t, ts.URL, "tenant-a", "device-42", "product-x")
+	postJSONStatus(t, ts.URL+"/api/v1/telemetry", http.StatusBadRequest, map[string]any{
+		"msgId":    "msg-invalid-topic",
+		"tenantId": "tenant-a",
+		"deviceId": "device/42",
+		"ts":       1717670000000,
+		"type":     "telemetry",
+		"version":  "v1",
+		"payload":  map[string]any{},
+	})
+	postJSONStatus(t, ts.URL+"/api/v1/commands", http.StatusBadRequest, map[string]any{
+		"tenantId": "tenant-a",
+		"deviceId": "device/42",
+		"payload":  map[string]any{"switch": "on"},
+	})
+}
+
+func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
+	metrics := platform.NewMetrics()
+	app := platform.New(platform.Config{ServiceName: "admin", Metrics: metrics})
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
+
+	postJSONStatus(t, ts.URL+"/api/v1/tenants", http.StatusBadRequest, map[string]any{
+		"id":   "tenant/#",
+		"name": "Tenant Bad",
+	})
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("io.ReadAll() error = %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `iot_tenants_total{result="error"} 1`) {
+		t.Fatalf("metrics body missing tenant error count:\n%s", text)
+	}
+}
+
 func TestMetricsEndpointExposesTraffic(t *testing.T) {
 	metrics := platform.NewMetrics()
 	app := platform.New(platform.Config{ServiceName: "admin", Metrics: metrics})
@@ -171,6 +232,22 @@ func postJSON(t *testing.T, url string, body map[string]any, out ...any) {
 		if err := json.NewDecoder(resp.Body).Decode(out[0]); err != nil {
 			t.Fatalf("Decode() error = %v", err)
 		}
+	}
+}
+
+func postJSONStatus(t *testing.T, url string, wantStatus int, body map[string]any) {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("http.Post() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, wantStatus)
 	}
 }
 

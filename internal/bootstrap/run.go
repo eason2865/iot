@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"iot/internal/contracts"
 	"iot/internal/platform"
 )
 
@@ -118,10 +119,10 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	case "ingress":
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 			BrokerURL:   envOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			ClientID:    envOrDefault("EMQX_CLIENT_ID", "iot-ingress"),
+			ClientID:    envOrDefault("EMQX_INGRESS_CLIENT_ID", "iot-ingress"),
 			Username:    os.Getenv("EMQX_USERNAME"),
 			Password:    os.Getenv("EMQX_PASSWORD"),
-			TopicFilter: envOrDefault("EMQX_TOPIC_FILTER", "tenant/+/device/+/telemetry"),
+			TopicFilter: envOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
 		}, publisher, res.metrics)
 		res.bridge = bridge
 	case "worker":
@@ -137,7 +138,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			TelemetryTopic: envOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 			CommandTopic:   envOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 			MQTTBrokerURL:  envOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			MQTTClientID:   envOrDefault("EMQX_CLIENT_ID", "iot-worker"),
+			MQTTClientID:   envOrDefault("EMQX_WORKER_CLIENT_ID", "iot-worker"),
 			MQTTUsername:   os.Getenv("EMQX_USERNAME"),
 			MQTTPassword:   os.Getenv("EMQX_PASSWORD"),
 		}, store, tdWriter, res.metrics)

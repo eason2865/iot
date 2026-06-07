@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"iot/internal/contracts"
 	"iot/internal/platform"
 )
 
@@ -50,7 +51,10 @@ func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 
 	tenantID := admin.tenants[0].id
 	deviceID := admin.devices[0].deviceID
-	downlinkTopic := fmt.Sprintf("tenant/%s/device/%s/command", tenantID, deviceID)
+	downlinkTopic, err := contracts.BuildCommandTopic(tenantID, deviceID)
+	if err != nil {
+		t.Fatalf("BuildCommandTopic() error = %v", err)
+	}
 	agent := buses.busForTenant(tenantID)
 	if agent == nil {
 		t.Fatal("tenant bus not created")
@@ -67,7 +71,10 @@ func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 	}
 	agent.dispatch(downlinkTopic, payload)
 
-	ackTopic := fmt.Sprintf("tenant/%s/device/%s/ack", tenantID, deviceID)
+	ackTopic, err := contracts.BuildAckTopic(tenantID, deviceID)
+	if err != nil {
+		t.Fatalf("BuildAckTopic() error = %v", err)
+	}
 	if !buses.hasPublish(ackTopic) {
 		t.Fatalf("expected ACK publish on %s", ackTopic)
 	}

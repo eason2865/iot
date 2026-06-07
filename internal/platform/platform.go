@@ -258,7 +258,17 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.ID == "" || req.Name == "" {
+			if a.metrics != nil {
+				a.metrics.IncTenant("error")
+			}
 			writeError(w, http.StatusBadRequest, "id and name are required")
+			return
+		}
+		if !contracts.IsValidTopicPart(req.ID) {
+			if a.metrics != nil {
+				a.metrics.IncTenant("error")
+			}
+			writeError(w, http.StatusBadRequest, "tenantId contains invalid MQTT topic characters")
 			return
 		}
 		tenant, err := a.store.createTenant(req)
@@ -294,7 +304,17 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.TenantID == "" || req.DeviceID == "" || req.ProductID == "" || req.Secret == "" {
+			if a.metrics != nil {
+				a.metrics.IncDevice("error")
+			}
 			writeError(w, http.StatusBadRequest, "tenantId, deviceId, productId and secret are required")
+			return
+		}
+		if !contracts.IsValidTopicPart(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
+			if a.metrics != nil {
+				a.metrics.IncDevice("error")
+			}
+			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
 			return
 		}
 		device, err := a.store.createDevice(Device{
@@ -328,6 +348,9 @@ func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	env, err := contracts.ParseEnvelope(mustReadBody(r))
 	if err != nil {
+		if a.metrics != nil {
+			a.metrics.IncTelemetry("error")
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -365,7 +388,17 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.TenantID == "" || req.DeviceID == "" {
+			if a.metrics != nil {
+				a.metrics.IncCommand("created", "error")
+			}
 			writeError(w, http.StatusBadRequest, "tenantId and deviceId are required")
+			return
+		}
+		if !contracts.IsValidTopicPart(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
+			if a.metrics != nil {
+				a.metrics.IncCommand("created", "error")
+			}
+			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
 			return
 		}
 		cmd, err := a.store.createCommand(req.TenantID, req.DeviceID, req.Payload)

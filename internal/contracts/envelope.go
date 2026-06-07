@@ -37,5 +37,8 @@ func ValidateEnvelope(env Envelope) error {
 	if env.MsgID == "" || env.TenantID == "" || env.DeviceID == "" || env.Type == "" || env.Version == "" || env.Ts <= 0 {
 		return ErrInvalidEnvelope
 	}
+	if !IsValidTopicPart(env.TenantID) || !IsValidTopicPart(env.DeviceID) {
+		return ErrInvalidEnvelope
+	}
 	return nil
 }

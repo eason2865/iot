@@ -2,6 +2,7 @@ package platform
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -15,6 +16,9 @@ type TDengineWriter struct {
 	db            *sql.DB
 	table         string
 	pendingCh     chan TelemetryRecord
+	closedCh      chan struct{}
+	mu            sync.Mutex
+	closed        bool
 	closeOnce     sync.Once
 	wg            sync.WaitGroup
 	flushInterval time.Duration
@@ -26,6 +30,8 @@ type TDengineConfig struct {
 	DSN   string
 	Table string
 }
+
+var errTDengineWriterClosed = errors.New("tdengine writer closed")
 
 func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, error) {
 	if cfg.DSN == "" {
@@ -49,6 +55,7 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 		db:            db,
 		table:         table,
 		pendingCh:     make(chan TelemetryRecord, 1024),
+		closedCh:      make(chan struct{}),
 		flushInterval: 100 * time.Millisecond,
 		batchSize:     50,
 		metrics:       metrics,
@@ -67,7 +74,14 @@ func (w *TDengineWriter) Close() error {
 		return nil
 	}
 	w.closeOnce.Do(func() {
+		w.mu.Lock()
+		if w.closedCh == nil {
+			w.closedCh = make(chan struct{})
+		}
+		w.closed = true
+		close(w.closedCh)
 		close(w.pendingCh)
+		w.mu.Unlock()
 	})
 	w.wg.Wait()
 	return w.db.Close()
@@ -98,13 +112,30 @@ func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
 	if w == nil || w.db == nil {
 		return nil
 	}
-	select {
-	case w.pendingCh <- rec:
-		return nil
-	default:
-		// Backpressure is preferable to dropping telemetry.
-		w.pendingCh <- rec
-		return nil
+	if w.closedCh == nil {
+		w.closedCh = make(chan struct{})
+	}
+	for {
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			return errTDengineWriterClosed
+		}
+		select {
+		case w.pendingCh <- rec:
+			w.mu.Unlock()
+			return nil
+		default:
+			w.mu.Unlock()
+		}
+
+		// Backpressure is preferable to dropping telemetry, but shutdown must
+		// still be able to interrupt a blocked writer without closing under send.
+		select {
+		case <-w.closedCh:
+			return errTDengineWriterClosed
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

@@ -3,7 +3,9 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
+	"time"
 
 	"github.com/eclipse/paho.mqtt.golang"
 	"github.com/segmentio/kafka-go"
@@ -12,14 +14,16 @@ import (
 )
 
 type WorkerConfig struct {
-	KafkaBrokers   []string
-	TelemetryTopic string
-	CommandTopic   string
-	AckTopicFilter string
-	MQTTBrokerURL  string
-	MQTTClientID   string
-	MQTTUsername   string
-	MQTTPassword   string
+	KafkaBrokers     []string
+	KafkaGroupID     string
+	KafkaStartOffset int64
+	TelemetryTopic   string
+	CommandTopic     string
+	AckTopicFilter   string
+	MQTTBrokerURL    string
+	MQTTClientID     string
+	MQTTUsername     string
+	MQTTPassword     string
 }
 
 type Worker struct {
@@ -46,19 +50,28 @@ func NewWorker(cfg WorkerConfig, store Store, tdengine *TDengineWriter, metrics 
 		if commandTopic == "" {
 			commandTopic = "iot.command"
 		}
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, telemetryTopic, commandTopic)
+		groupID := cfg.KafkaGroupID
+		if groupID == "" {
+			groupID = "iot-worker"
+		}
+		startOffset := cfg.KafkaStartOffset
+		if startOffset == 0 {
+			startOffset = kafka.FirstOffset
+		}
 		w.telemetryReader = kafka.NewReader(kafka.ReaderConfig{
 			Brokers:     cfg.KafkaBrokers,
 			Topic:       telemetryTopic,
-			Partition:   0,
-			StartOffset: kafka.FirstOffset,
+			GroupID:     groupID + "-telemetry",
+			StartOffset: startOffset,
 			MinBytes:    1,
 			MaxBytes:    10e6,
 		})
 		w.commandReader = kafka.NewReader(kafka.ReaderConfig{
 			Brokers:     cfg.KafkaBrokers,
 			Topic:       commandTopic,
-			Partition:   0,
-			StartOffset: kafka.FirstOffset,
+			GroupID:     groupID + "-command",
+			StartOffset: startOffset,
 			MinBytes:    1,
 			MaxBytes:    10e6,
 		})
@@ -79,10 +92,10 @@ func NewWorker(cfg WorkerConfig, store Store, tdengine *TDengineWriter, metrics 
 		opts.SetAutoReconnect(true)
 		ackTopic := cfg.AckTopicFilter
 		if ackTopic == "" {
-			ackTopic = "tenant/+/device/+/ack"
+			ackTopic = contracts.AckTopicFilter
 		}
 		opts.OnConnect = func(client mqtt.Client) {
-			token := client.Subscribe(ackTopic, 0, func(_ mqtt.Client, msg mqtt.Message) {
+			token := client.Subscribe(ackTopic, 1, func(_ mqtt.Client, msg mqtt.Message) {
 				var ack CommandAckMessage
 				if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
 					log.Printf("command ack unmarshal error: %v", err)
@@ -163,9 +176,16 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 	for {
 		msg, err := w.telemetryReader.FetchMessage(ctx)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			log.Printf("telemetry fetch error: %v", err)
 			if w.metrics != nil {
 				w.metrics.IncWorker("telemetry", "error")
+			}
+			if isRetriableKafkaError(err) {
+				sleepBeforeKafkaRetry(ctx)
+				continue
 			}
 			return err
 		}
@@ -219,9 +239,16 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 	for {
 		msg, err := w.commandReader.FetchMessage(ctx)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			log.Printf("command fetch error: %v", err)
 			if w.metrics != nil {
 				w.metrics.IncWorker("command", "error")
+			}
+			if isRetriableKafkaError(err) {
+				sleepBeforeKafkaRetry(ctx)
+				continue
 			}
 			return err
 		}
@@ -236,36 +263,55 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		}
 		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
 		if w.mqtt != nil {
-			topic, err := contracts.BuildDeviceTopic(cmd.TenantID, cmd.DeviceID, "command")
-			if err == nil {
-				payload, err := json.Marshal(CommandDownlink{
-					ID:        cmd.ID,
-					TenantID:  cmd.TenantID,
-					DeviceID:  cmd.DeviceID,
-					Status:    cmd.Status,
-					Payload:   cmd.Payload,
-					CreatedAt: cmd.CreatedAt,
-					UpdatedAt: cmd.UpdatedAt,
-				})
-				if err != nil {
-					log.Printf("command marshal error: %v", err)
-					continue
+			topic, err := contracts.BuildCommandTopic(cmd.TenantID, cmd.DeviceID)
+			if err != nil {
+				log.Printf("command topic error: tenant=%s device=%s id=%s err=%v", cmd.TenantID, cmd.DeviceID, cmd.ID, err)
+				if w.metrics != nil {
+					w.metrics.IncWorker("command", "error")
 				}
-				token := w.mqtt.Publish(topic, 0, false, payload)
-				token.Wait()
-				if err := token.Error(); err != nil {
-					log.Printf("mqtt publish error: %v", err)
-					if w.metrics != nil {
-						w.metrics.IncWorker("command", "error")
-					}
-					_ = w.commandReader.CommitMessages(ctx, msg)
-					continue
+				_ = w.commandReader.CommitMessages(ctx, msg)
+				continue
+			}
+			payload, err := json.Marshal(CommandDownlink{
+				ID:        cmd.ID,
+				TenantID:  cmd.TenantID,
+				DeviceID:  cmd.DeviceID,
+				Status:    cmd.Status,
+				Payload:   cmd.Payload,
+				CreatedAt: cmd.CreatedAt,
+				UpdatedAt: cmd.UpdatedAt,
+			})
+			if err != nil {
+				log.Printf("command marshal error: %v", err)
+				if w.metrics != nil {
+					w.metrics.IncWorker("command", "error")
 				}
+				_ = w.commandReader.CommitMessages(ctx, msg)
+				continue
+			}
+			token := w.mqtt.Publish(topic, 1, false, payload)
+			token.Wait()
+			if err := token.Error(); err != nil {
+				log.Printf("mqtt publish error: %v", err)
+				if w.metrics != nil {
+					w.metrics.IncWorker("command", "error")
+				}
+				_ = w.commandReader.CommitMessages(ctx, msg)
+				continue
 			}
 		}
 		if w.metrics != nil {
 			w.metrics.IncWorker("command", "ok")
 		}
 		_ = w.commandReader.CommitMessages(ctx, msg)
+	}
+}
+
+func sleepBeforeKafkaRetry(ctx context.Context) {
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
 	}
 }

@@ -1,5 +1,25 @@
 # AI Handover
 
+## 2026-06-08 Helm 与 k8s 本地部署目录收敛
+- 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
+- 已读取 `ai_readme`，当前目录下无可读文档文件。
+- 已完成对比：
+  - `helm template iot ./charts/iot -n iot -f charts/iot/values-local-stack.yaml`
+  - `kubectl kustomize k8s/local`
+  - 资源集合仅差 `Namespace/iot`，由 Helm 安装命令的 `--create-namespace` 覆盖。
+  - 去掉 Helm 自动 labels、namespace 字段和单独 Namespace 资源后，归一化 manifest 字段级一致。
+- 已新增 `charts/iot/values-local-stack.yaml`，用于复刻旧 `k8s/local` 的集群内全量依赖部署：
+  - `externalDependencies.enabled=false`
+  - `admin/coreRpc/ingress/worker/demo` 均启用
+  - `postgres/kafka/emqx/tdengine/prometheus` 均启用
+  - `images.app=iot-app:metrics2`
+  - 清空 `prometheus.extraScrapeTargets`
+- 已删除 `k8s` 目录。
+- 已更新 README 的 Helm 部署说明，加入 full-stack values 用法，并移除旧 `kubectl apply -k k8s/local` 提示。
+- 已验证：
+  - `helm lint charts/iot` 通过。
+  - `helm template iot charts/iot -n iot -f charts/iot/values-local-stack.yaml` 通过。
+
 ## 2026-06-07 TDD 全链路回归与测试隔离修复
 - 用户要求用 TDD 验证全部链路、全部功能、全部服务、全部模块；本轮读取 `tdd` 技能后执行红绿回归。
 - 首轮验证结果：

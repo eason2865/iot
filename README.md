@@ -388,6 +388,17 @@ Grafana 默认账号：
 helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout 180s
 ```
 
+如果需要复刻旧本地集群内全量依赖部署，使用本地 stack values：
+
+```bash
+helm upgrade --install iot charts/iot \
+  -n iot \
+  --create-namespace \
+  --wait \
+  --timeout 180s \
+  -f charts/iot/values-local-stack.yaml
+```
+
 本地一键脚本：
 
 ```bash
@@ -409,7 +420,7 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 
 当前 Helm 部署只允许包含应用本身和共享配置。PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana、demo 都作为外部依赖或本地 Docker 服务，不进入业务 Helm release。
 
-如果你已经用旧的 `kubectl apply -k k8s/local` 或旧 Helm values 起过同名/依赖资源，先清理旧资源再装：
+如果你已经用旧 Helm values 起过同名/依赖资源，先清理旧资源再装：
 
 ```bash
 helm uninstall iot -n iot --ignore-not-found

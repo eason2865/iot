@@ -1,0 +1,36 @@
+images:
+  app: iot-app:metrics2
+
+externalDependencies:
+  enabled: false
+
+admin:
+  enabled: true
+
+coreRpc:
+  enabled: true
+
+ingress:
+  enabled: true
+
+worker:
+  enabled: true
+
+demo:
+  enabled: true
+
+postgres:
+  enabled: true
+
+kafka:
+  enabled: true
+
+emqx:
+  enabled: true
+
+tdengine:
+  enabled: true
+
+prometheus:
+  enabled: true
+  extraScrapeTargets: []

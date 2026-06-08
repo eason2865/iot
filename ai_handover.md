@@ -9,6 +9,19 @@
   - `go test ./internal/contracts ./internal/platform ./internal/adminapi` 通过。
 - 对应提交 tag：`2.1`。
 
+## 2026-06-08 架构收敛：接口去重
+- 已删除 `platform.Store` / `platform.Publisher` 与 `core.Repository` / `core.Publisher` 的重复接口定义。
+- 现在统一使用：
+  - `platform.Repository`
+  - `platform.MessagePublisher`
+- `PostgresStore`、`memoryStore`、`KafkaPublisher` 只保留一套公开方法实现，删除原大小写双方法包装。
+- `platform.App`、`MQTTBridge`、`Worker`、`bootstrap`、`core.Service` 均已切到统一接口。
+- 目的：减少浅接口和重复 seam，让测试面和运行时装配面一致。
+- 已验证：
+  - `go test ./internal/core ./internal/platform` 通过。
+  - `go test ./internal/platform ./internal/bootstrap ./internal/core` 通过。
+- 对应提交 tag：`2.2`。
+
 ## 2026-06-08 Helm 与 k8s 本地部署目录收敛
 - 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
 - 已读取 `ai_readme`，当前目录下无可读文档文件。

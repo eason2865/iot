@@ -17,8 +17,8 @@ import (
 )
 
 type runtimeResources struct {
-	store     platform.Store
-	publisher platform.Publisher
+	store     platform.Repository
+	publisher platform.MessagePublisher
 	worker    *platform.Worker
 	bridge    *platform.MQTTBridge
 	metrics   *platform.Metrics
@@ -147,7 +147,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	return res, nil
 }
 
-func buildStore(ttl time.Duration) (platform.Store, func() error, error) {
+func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 	dsn := envOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	store, err := platform.NewPostgresStore(dsn, ttl)
 	if err != nil {
@@ -156,7 +156,7 @@ func buildStore(ttl time.Duration) (platform.Store, func() error, error) {
 	return store, store.Close, nil
 }
 
-func buildPublisher(metrics *platform.Metrics) (platform.Publisher, func() error, error) {
+func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func() error, error) {
 	brokers := splitCSV(envOrDefault("KAFKA_BROKERS", "localhost:9092"))
 	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        brokers,

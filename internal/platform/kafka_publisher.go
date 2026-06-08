@@ -81,7 +81,7 @@ func (p *KafkaPublisher) Close() error {
 	return nil
 }
 
-func (p *KafkaPublisher) publishTelemetry(record TelemetryRecord) error {
+func (p *KafkaPublisher) PublishTelemetry(record TelemetryRecord) error {
 	if p == nil || p.telemetryWriter == nil {
 		return nil
 	}
@@ -108,11 +108,7 @@ func (p *KafkaPublisher) publishTelemetry(record TelemetryRecord) error {
 	return nil
 }
 
-func (p *KafkaPublisher) PublishTelemetry(record TelemetryRecord) error {
-	return p.publishTelemetry(record)
-}
-
-func (p *KafkaPublisher) publishCommand(cmd Command) error {
+func (p *KafkaPublisher) PublishCommand(cmd Command) error {
 	if p == nil || p.commandWriter == nil {
 		return nil
 	}
@@ -138,8 +134,6 @@ func (p *KafkaPublisher) publishCommand(cmd Command) error {
 	}
 	return nil
 }
-
-func (p *KafkaPublisher) PublishCommand(cmd Command) error { return p.publishCommand(cmd) }
 
 func writeKafkaMessageWithRetry(writer *kafka.Writer, msg kafka.Message) error {
 	var err error

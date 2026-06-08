@@ -29,7 +29,7 @@ type WorkerConfig struct {
 }
 
 type Worker struct {
-	store           Store
+	store           Repository
 	tdengine        *TDengineWriter
 	mqtt            mqtt.Client
 	telemetryReader *kafka.Reader
@@ -38,7 +38,7 @@ type Worker struct {
 	tenantAllowlist map[string]struct{}
 }
 
-func NewWorker(cfg WorkerConfig, store Store, tdengine *TDengineWriter, metrics *Metrics) *Worker {
+func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, metrics *Metrics) *Worker {
 	w := &Worker{
 		store:           store,
 		tdengine:        tdengine,
@@ -140,7 +140,7 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 		ack.CommandID = string(msg.Payload())
 	}
 	if w.store != nil {
-		if _, err := w.store.ackCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
+		if _, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
 			log.Printf("command ack store error: %v", err)
 			if w.metrics != nil {
 				w.metrics.IncWorker("ack", "error")
@@ -236,7 +236,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			Payload:  rec.Payload,
 		}
 		if w.store != nil {
-			if _, err := w.store.recordTelemetry(env); err != nil {
+			if _, err := w.store.RecordTelemetry(env); err != nil {
 				log.Printf("telemetry store error: %v", err)
 				if w.metrics != nil {
 					w.metrics.IncWorker("telemetry", "error")

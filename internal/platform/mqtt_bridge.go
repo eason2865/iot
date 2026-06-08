@@ -27,7 +27,7 @@ type MQTTBridge struct {
 	publishSlots chan struct{}
 }
 
-func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) *MQTTBridge {
+func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Metrics) *MQTTBridge {
 	if cfg.BrokerURL == "" || publisher == nil {
 		return nil
 	}
@@ -80,7 +80,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher Publisher, metrics *Metrics) 
 			if acquirePublishSlot(bridge.publishSlots, publishSlotTimeout) {
 				go func() {
 					defer func() { <-bridge.publishSlots }()
-					if err := publisher.publishTelemetry(rec); err != nil {
+					if err := publisher.PublishTelemetry(rec); err != nil {
 						log.Printf("mqtt bridge publish telemetry error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, err)
 						if bridge.metrics != nil {
 							bridge.metrics.IncMQTTBridge("error")

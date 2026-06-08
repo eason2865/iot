@@ -13,33 +13,13 @@ import (
 	corev1 "iot/proto/core/v1"
 )
 
-type Repository interface {
-	CreateTenant(platform.Tenant) (platform.Tenant, error)
-	ListTenants() []platform.Tenant
-	CreateDevice(platform.Device) (platform.Device, error)
-	ListDevices() []platform.Device
-	GetDevice(tenantID, deviceID string) (platform.Device, bool)
-	RecordTelemetry(env contracts.Envelope) (platform.TelemetryRecord, error)
-	ListTelemetry(tenantID, deviceID string) []platform.TelemetryRecord
-	GetDeviceStatus(tenantID, deviceID string) (platform.DeviceStatus, bool)
-	CreateCommand(tenantID, deviceID string, payload json.RawMessage) (platform.Command, error)
-	AckCommand(id, tenantID, deviceID string) (platform.Command, error)
-	ListCommands() []platform.Command
-	GetCommand(id string) (platform.Command, bool)
-}
-
-type Publisher interface {
-	PublishTelemetry(platform.TelemetryRecord) error
-	PublishCommand(platform.Command) error
-}
-
 type Service struct {
 	corev1.UnimplementedCoreServiceServer
-	repo      Repository
-	publisher Publisher
+	repo      platform.Repository
+	publisher platform.MessagePublisher
 }
 
-func NewService(repo Repository, publisher Publisher) *Service {
+func NewService(repo platform.Repository, publisher platform.MessagePublisher) *Service {
 	return &Service{repo: repo, publisher: publisher}
 }
 

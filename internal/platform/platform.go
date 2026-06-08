@@ -15,15 +15,15 @@ import (
 type Config struct {
 	ServiceName        string
 	DeviceHeartbeatTTL time.Duration
-	Store              Store
-	Publisher          Publisher
+	Store              Repository
+	Publisher          MessagePublisher
 	Metrics            *Metrics
 }
 
 type App struct {
 	serviceName string
-	store       Store
-	publisher   Publisher
+	store       Repository
+	publisher   MessagePublisher
 	metrics     *Metrics
 	ttl         time.Duration
 	router      http.Handler
@@ -190,7 +190,7 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId contains invalid MQTT topic characters")
 			return
 		}
-		tenant, err := a.store.createTenant(req)
+		tenant, err := a.store.CreateTenant(req)
 		if err != nil {
 			if a.metrics != nil {
 				a.metrics.IncTenant("error")
@@ -203,7 +203,7 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusCreated, tenant)
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, a.store.listTenants())
+		writeJSON(w, http.StatusOK, a.store.ListTenants())
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -236,7 +236,7 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
 			return
 		}
-		device, err := a.store.createDevice(Device{
+		device, err := a.store.CreateDevice(Device{
 			TenantID:  req.TenantID,
 			DeviceID:  req.DeviceID,
 			ProductID: req.ProductID,
@@ -254,7 +254,7 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusCreated, device)
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, a.store.listDevices())
+		writeJSON(w, http.StatusOK, a.store.ListDevices())
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -273,7 +273,7 @@ func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	record, err := a.store.recordTelemetry(env)
+	record, err := a.store.RecordTelemetry(env)
 	if err != nil {
 		if a.metrics != nil {
 			a.metrics.IncTelemetry("error")
@@ -281,7 +281,7 @@ func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.publisher.publishTelemetry(record); err != nil {
+	if err := a.publisher.PublishTelemetry(record); err != nil {
 		if a.metrics != nil {
 			a.metrics.IncTelemetry("error")
 		}
@@ -320,7 +320,7 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
 			return
 		}
-		cmd, err := a.store.createCommand(req.TenantID, req.DeviceID, req.Payload)
+		cmd, err := a.store.CreateCommand(req.TenantID, req.DeviceID, req.Payload)
 		if err != nil {
 			if a.metrics != nil {
 				a.metrics.IncCommand("created", "error")
@@ -328,7 +328,7 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := a.publisher.publishCommand(cmd); err != nil {
+		if err := a.publisher.PublishCommand(cmd); err != nil {
 			if a.metrics != nil {
 				a.metrics.IncCommand("created", "error")
 			}
@@ -340,7 +340,7 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusCreated, cmd)
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, a.store.listCommands())
+		writeJSON(w, http.StatusOK, a.store.ListCommands())
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -355,7 +355,7 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		cmd, ok := a.store.getCommand(id)
+		cmd, ok := a.store.GetCommand(id)
 		if !ok {
 			writeError(w, http.StatusNotFound, "command not found")
 			return
@@ -372,7 +372,7 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		cmd, err := a.store.ackCommand(id, req.TenantID, req.DeviceID)
+		cmd, err := a.store.AckCommand(id, req.TenantID, req.DeviceID)
 		if err != nil {
 			if a.metrics != nil {
 				a.metrics.IncCommand("acked", "error")
@@ -398,7 +398,7 @@ func (a *App) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, deviceID := parts[0], parts[1]
 	if len(parts) == 2 && r.Method == http.MethodGet {
-		device, ok := a.store.getDevice(tenantID, deviceID)
+		device, ok := a.store.GetDevice(tenantID, deviceID)
 		if !ok {
 			writeError(w, http.StatusNotFound, "device not found")
 			return
@@ -417,7 +417,7 @@ func (a *App) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		status, ok := a.store.getDeviceStatus(tenantID, deviceID)
+		status, ok := a.store.GetDeviceStatus(tenantID, deviceID)
 		if !ok {
 			writeError(w, http.StatusNotFound, "device not found")
 			return
@@ -428,7 +428,7 @@ func (a *App) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		records := a.store.listTelemetry(tenantID, deviceID)
+		records := a.store.ListTelemetry(tenantID, deviceID)
 		writeJSON(w, http.StatusOK, records)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
@@ -495,7 +495,7 @@ func deviceKey(tenantID, deviceID string) string {
 	return tenantID + ":" + deviceID
 }
 
-func (s *memoryStore) createTenant(t Tenant) (Tenant, error) {
+func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
@@ -505,9 +505,7 @@ func (s *memoryStore) createTenant(t Tenant) (Tenant, error) {
 	return t, nil
 }
 
-func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) { return s.createTenant(t) }
-
-func (s *memoryStore) listTenants() []Tenant {
+func (s *memoryStore) ListTenants() []Tenant {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Tenant, 0, len(s.tenants))
@@ -517,9 +515,7 @@ func (s *memoryStore) listTenants() []Tenant {
 	return out
 }
 
-func (s *memoryStore) ListTenants() []Tenant { return s.listTenants() }
-
-func (s *memoryStore) createDevice(d Device) (Device, error) {
+func (s *memoryStore) CreateDevice(d Device) (Device, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[d.TenantID]; !exists {
@@ -535,9 +531,7 @@ func (s *memoryStore) createDevice(d Device) (Device, error) {
 	return d, nil
 }
 
-func (s *memoryStore) CreateDevice(d Device) (Device, error) { return s.createDevice(d) }
-
-func (s *memoryStore) listDevices() []Device {
+func (s *memoryStore) ListDevices() []Device {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Device, 0, len(s.devices))
@@ -547,20 +541,14 @@ func (s *memoryStore) listDevices() []Device {
 	return out
 }
 
-func (s *memoryStore) ListDevices() []Device { return s.listDevices() }
-
-func (s *memoryStore) getDevice(tenantID, deviceID string) (Device, bool) {
+func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	device, ok := s.devices[deviceKey(tenantID, deviceID)]
 	return device, ok
 }
 
-func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
-	return s.getDevice(tenantID, deviceID)
-}
-
-func (s *memoryStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
+func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deviceKey(env.TenantID, env.DeviceID)
@@ -587,11 +575,7 @@ func (s *memoryStore) recordTelemetry(env contracts.Envelope) (TelemetryRecord, 
 	return rec, nil
 }
 
-func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
-	return s.recordTelemetry(env)
-}
-
-func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
+func (s *memoryStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deviceKey(tenantID, deviceID)
@@ -620,11 +604,7 @@ func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawM
 	return cmd, nil
 }
 
-func (s *memoryStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
-	return s.createCommand(tenantID, deviceID, payload)
-}
-
-func (s *memoryStore) ackCommand(id, tenantID, deviceID string) (Command, error) {
+func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cmd, exists := s.commands[id]
@@ -644,11 +624,7 @@ func (s *memoryStore) ackCommand(id, tenantID, deviceID string) (Command, error)
 	return cmd, nil
 }
 
-func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	return s.ackCommand(id, tenantID, deviceID)
-}
-
-func (s *memoryStore) listCommands() []Command {
+func (s *memoryStore) ListCommands() []Command {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Command, 0, len(s.commands))
@@ -658,18 +634,14 @@ func (s *memoryStore) listCommands() []Command {
 	return out
 }
 
-func (s *memoryStore) ListCommands() []Command { return s.listCommands() }
-
-func (s *memoryStore) getCommand(id string) (Command, bool) {
+func (s *memoryStore) GetCommand(id string) (Command, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	cmd, ok := s.commands[id]
 	return cmd, ok
 }
 
-func (s *memoryStore) GetCommand(id string) (Command, bool) { return s.getCommand(id) }
-
-func (s *memoryStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
+func (s *memoryStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	key := deviceKey(tenantID, deviceID)
@@ -683,11 +655,7 @@ func (s *memoryStore) getDeviceStatus(tenantID, deviceID string) (DeviceStatus, 
 	return status, true
 }
 
-func (s *memoryStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
-	return s.getDeviceStatus(tenantID, deviceID)
-}
-
-func (s *memoryStore) listTelemetry(tenantID, deviceID string) []TelemetryRecord {
+func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	key := deviceKey(tenantID, deviceID)
@@ -695,8 +663,4 @@ func (s *memoryStore) listTelemetry(tenantID, deviceID string) []TelemetryRecord
 	out := make([]TelemetryRecord, len(src))
 	copy(out, src)
 	return out
-}
-
-func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
-	return s.listTelemetry(tenantID, deviceID)
 }

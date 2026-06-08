@@ -22,6 +22,19 @@
   - `go test ./internal/platform ./internal/bootstrap ./internal/core` 通过。
 - 对应提交 tag：`2.2`。
 
+## 2026-06-08 架构收敛：platform 文件拆分
+- 已保持 `internal/platform` package 不变，仅按职责拆分文件，降低迁移风险。
+- 新增：
+  - `internal/platform/domain.go`：领域数据结构与命令状态别名。
+  - `internal/platform/handlers.go`：旧 `platform.App` REST handlers。
+  - `internal/platform/http_helpers.go`：HTTP JSON 编解码与响应辅助。
+  - `internal/platform/memory_store.go`：内存仓储实现。
+- `internal/platform/platform.go` 现在只保留 `App` 配置、构造、路由和 HTTP 观测包装，文件从约 380 行降到约 82 行。
+- 目的：不改变运行行为的前提下，让 platform 目录职责更清楚，后续继续拆 adapter/package 时更安全。
+- 已验证：
+  - `go test ./internal/platform ./internal/core ./internal/demo` 通过。
+- 对应提交 tag：`2.3`。
+
 ## 2026-06-08 Helm 与 k8s 本地部署目录收敛
 - 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
 - 已读取 `ai_readme`，当前目录下无可读文档文件。

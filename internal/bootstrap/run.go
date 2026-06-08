@@ -7,13 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
+	"iot/internal/runtimeconfig"
 )
 
 type runtimeResources struct {
@@ -118,11 +117,11 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	switch serviceName {
 	case "ingress":
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
-			BrokerURL:   envOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			ClientID:    envOrDefault("EMQX_INGRESS_CLIENT_ID", "iot-ingress"),
+			BrokerURL:   runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
+			ClientID:    runtimeconfig.EnvOrDefault("EMQX_INGRESS_CLIENT_ID", "iot-ingress"),
 			Username:    os.Getenv("EMQX_USERNAME"),
 			Password:    os.Getenv("EMQX_PASSWORD"),
-			TopicFilter: envOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
+			TopicFilter: runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
 		}, publisher, res.metrics)
 		res.bridge = bridge
 	case "worker":
@@ -134,11 +133,11 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			res.closers = append(res.closers, closer)
 		}
 		res.worker = platform.NewWorker(platform.WorkerConfig{
-			KafkaBrokers:   splitCSV(envOrDefault("KAFKA_BROKERS", "localhost:9092")),
-			TelemetryTopic: envOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
-			CommandTopic:   envOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
-			MQTTBrokerURL:  envOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			MQTTClientID:   envOrDefault("EMQX_WORKER_CLIENT_ID", "iot-worker"),
+			KafkaBrokers:   runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
+			TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
+			CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+			MQTTBrokerURL:  runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
+			MQTTClientID:   runtimeconfig.EnvOrDefault("EMQX_WORKER_CLIENT_ID", "iot-worker"),
 			MQTTUsername:   os.Getenv("EMQX_USERNAME"),
 			MQTTPassword:   os.Getenv("EMQX_PASSWORD"),
 		}, store, tdWriter, res.metrics)
@@ -148,7 +147,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 }
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
-	dsn := envOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
+	dsn := runtimeconfig.EnvOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	store, err := platform.NewPostgresStore(dsn, ttl)
 	if err != nil {
 		return nil, nil, err
@@ -157,11 +156,11 @@ func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 }
 
 func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func() error, error) {
-	brokers := splitCSV(envOrDefault("KAFKA_BROKERS", "localhost:9092"))
+	brokers := runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092"))
 	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        brokers,
-		TelemetryTopic: envOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
-		CommandTopic:   envOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
+		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 	}, metrics)
 	if publisher == nil {
 		return nil, nil, nil
@@ -170,10 +169,10 @@ func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func(
 }
 
 func buildTDengineWriter(metrics *platform.Metrics) (*platform.TDengineWriter, func() error, error) {
-	dsn := envOrDefault("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
+	dsn := runtimeconfig.EnvOrDefault("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
 	writer, err := platform.NewTDengineWriter(platform.TDengineConfig{
 		DSN:   dsn,
-		Table: envOrDefault("TDENGINE_TABLE", "telemetry"),
+		Table: runtimeconfig.EnvOrDefault("TDENGINE_TABLE", "telemetry"),
 	}, metrics)
 	if err != nil {
 		return nil, nil, err
@@ -181,33 +180,6 @@ func buildTDengineWriter(metrics *platform.Metrics) (*platform.TDengineWriter, f
 	return writer, writer.Close, nil
 }
 
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 func listenAddr() string {
-	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
-		return addr
-	}
-	if port := os.Getenv("PORT"); port != "" {
-		if _, err := strconv.Atoi(port); err == nil {
-			return ":" + port
-		}
-	}
-	return ":8080"
+	return runtimeconfig.ListenAddr("LISTEN_ADDR", "PORT", ":8080")
 }

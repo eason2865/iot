@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 
 	"iot/internal/platform"
+	"iot/internal/runtimeconfig"
 	corev1 "iot/proto/core/v1"
 )
 
@@ -48,8 +49,8 @@ func Run() error {
 		},
 		ListenOn: rpcListenOn(),
 		Etcd: discov.EtcdConf{
-			Hosts: splitCSV(envOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
-			Key:   envOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
+			Hosts: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
+			Key:   runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
 		},
 		Middlewares: zrpc.ServerMiddlewaresConf{
 			Trace:      true,
@@ -63,14 +64,14 @@ func Run() error {
 	})
 	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor(), metrics.UnaryServerInterceptor())
 
-	go serveCoreRPCMetrics(metrics.Handler(), coreRPCPrometheusHost(), coreRPCPrometheusPort(), envOrDefault("CORE_RPC_PROMETHEUS_PATH", "/metrics"))
+	go serveCoreRPCMetrics(metrics.Handler(), coreRPCPrometheusHost(), coreRPCPrometheusPort(), runtimeconfig.EnvOrDefault("CORE_RPC_PROMETHEUS_PATH", "/metrics"))
 
 	server.Start()
 	return nil
 }
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
-	dsn := envOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
+	dsn := runtimeconfig.EnvOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	store, err := platform.NewPostgresStore(dsn, ttl)
 	if err != nil {
 		return nil, nil, err
@@ -79,35 +80,16 @@ func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 }
 
 func buildPublisher() (platform.MessagePublisher, func() error, error) {
-	brokers := splitCSV(envOrDefault("KAFKA_BROKERS", "localhost:9092"))
+	brokers := runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092"))
 	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        brokers,
-		TelemetryTopic: envOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
-		CommandTopic:   envOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
+		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 	}, nil)
 	if publisher == nil {
 		return nil, nil, nil
 	}
 	return publisher, publisher.Close, nil
-}
-
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func rpcListenOn() string {
@@ -123,19 +105,11 @@ func rpcListenOn() string {
 }
 
 func coreRPCPrometheusHost() string {
-	if host := os.Getenv("CORE_RPC_PROMETHEUS_HOST"); host != "" {
-		return host
-	}
-	return "0.0.0.0"
+	return runtimeconfig.EnvOrDefault("CORE_RPC_PROMETHEUS_HOST", "0.0.0.0")
 }
 
 func coreRPCPrometheusPort() int {
-	if port := os.Getenv("CORE_RPC_PROMETHEUS_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			return p
-		}
-	}
-	return 9101
+	return runtimeconfig.Int("CORE_RPC_PROMETHEUS_PORT", 9101)
 }
 
 func serveCoreRPCMetrics(handler http.Handler, host string, port int, path string) {

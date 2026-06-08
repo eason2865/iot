@@ -45,6 +45,21 @@
 - 目的：让后续会话和新开发者不再反复猜核心架构决策。
 - 对应提交 tag：`2.4`。
 
+## 2026-06-08 架构收敛：运行时配置辅助
+- 已新增 `internal/runtimeconfig/config.go`，统一无业务语义的环境变量解析：
+  - `EnvOrDefault`
+  - `SplitCSV`
+  - `Int`
+  - `Duration`
+  - `ListenAddr`
+  - `ListenHost`
+  - `ListenPort`
+- `internal/bootstrap`、`internal/core`、`internal/adminapi`、`internal/demo` 已切到共享 runtimeconfig helper。
+- 业务默认值仍保留在各运行模块调用处，避免 runtimeconfig 变成新的全局配置大杂烩。
+- 已验证：
+  - `go test ./internal/runtimeconfig ./internal/bootstrap ./internal/core ./internal/adminapi ./internal/demo` 通过。
+- 对应提交 tag：`2.5`。
+
 ## 2026-06-08 Helm 与 k8s 本地部署目录收敛
 - 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
 - 已读取 `ai_readme`，当前目录下无可读文档文件。

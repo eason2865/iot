@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +17,7 @@ import (
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
+	"iot/internal/runtimeconfig"
 	corev1 "iot/proto/core/v1"
 )
 
@@ -58,7 +56,7 @@ func Run() error {
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
 	defer httpServer.Stop()
 
-	go serveAdminMetrics(metrics.Handler(), adminMetricsHost(), adminMetricsPort(), envOrDefault("ADMIN_METRICS_PATH", "/metrics"))
+	go serveAdminMetrics(metrics.Handler(), adminMetricsHost(), adminMetricsPort(), runtimeconfig.EnvOrDefault("ADMIN_METRICS_PATH", "/metrics"))
 
 	api := &Server{
 		rpc:     corev1.NewCoreServiceClient(client.Conn()),
@@ -71,8 +69,8 @@ func Run() error {
 
 func newRPCClient() (zrpc.Client, error) {
 	conf := zrpc.NewEtcdClientConf(
-		splitCSV(envOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
-		envOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
+		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
+		runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
 		"admin-api",
 		"",
 	)
@@ -344,19 +342,11 @@ func (s *Server) ackCommandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func adminMetricsHost() string {
-	if host := os.Getenv("ADMIN_METRICS_HOST"); host != "" {
-		return host
-	}
-	return "0.0.0.0"
+	return runtimeconfig.EnvOrDefault("ADMIN_METRICS_HOST", "0.0.0.0")
 }
 
 func adminMetricsPort() int {
-	if port := os.Getenv("ADMIN_METRICS_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			return p
-		}
-	}
-	return 9100
+	return runtimeconfig.Int("ADMIN_METRICS_PORT", 9100)
 }
 
 func serveAdminMetrics(handler http.Handler, host string, port int, path string) {
@@ -481,51 +471,10 @@ func decodeJSON(r *http.Request, dst any) error {
 	return dec.Decode(dst)
 }
 
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func splitCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
 func listenHost() string {
-	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
-		host, _, err := net.SplitHostPort(addr)
-		if err == nil && host != "" {
-			return host
-		}
-		if strings.HasPrefix(addr, ":") {
-			return "0.0.0.0"
-		}
-	}
-	return "0.0.0.0"
+	return runtimeconfig.ListenHost("LISTEN_ADDR", "0.0.0.0")
 }
 
 func listenPort() int {
-	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
-		_, port, err := net.SplitHostPort(addr)
-		if err == nil {
-			if p, err := strconv.Atoi(port); err == nil {
-				return p
-			}
-		}
-	}
-	if port := os.Getenv("PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			return p
-		}
-	}
-	return 8080
+	return runtimeconfig.ListenPort("LISTEN_ADDR", "PORT", 8080)
 }

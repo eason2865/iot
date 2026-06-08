@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"iot/internal/platform"
+	"iot/internal/runtimeconfig"
 )
 
 func Run() error {
@@ -28,29 +28,29 @@ func Run() error {
 
 	metrics := platform.NewMetrics()
 	cfg := Config{
-		TenantCount:       envInt("DEMO_TENANT_COUNT", 5),
-		DevicesPerTenant:  envInt("DEMO_DEVICES_PER_TENANT", 10),
-		TenantPrefix:      envOr("DEMO_TENANT_PREFIX", "demo"),
-		ProductID:         envOr("DEMO_PRODUCT_ID", "product-demo"),
-		TickInterval:      envDuration("DEMO_TICK_INTERVAL", 250*time.Millisecond),
-		TelemetryBurstMin: envInt("DEMO_TELEMETRY_BURST_MIN", 1),
-		TelemetryBurstMax: envInt("DEMO_TELEMETRY_BURST_MAX", 5),
-		CommandBurstMin:   envInt("DEMO_COMMAND_BURST_MIN", 1),
-		CommandBurstMax:   envInt("DEMO_COMMAND_BURST_MAX", 3),
+		TenantCount:       runtimeconfig.Int("DEMO_TENANT_COUNT", 5),
+		DevicesPerTenant:  runtimeconfig.Int("DEMO_DEVICES_PER_TENANT", 10),
+		TenantPrefix:      runtimeconfig.EnvOrDefault("DEMO_TENANT_PREFIX", "demo"),
+		ProductID:         runtimeconfig.EnvOrDefault("DEMO_PRODUCT_ID", "product-demo"),
+		TickInterval:      runtimeconfig.Duration("DEMO_TICK_INTERVAL", 250*time.Millisecond),
+		TelemetryBurstMin: runtimeconfig.Int("DEMO_TELEMETRY_BURST_MIN", 1),
+		TelemetryBurstMax: runtimeconfig.Int("DEMO_TELEMETRY_BURST_MAX", 5),
+		CommandBurstMin:   runtimeconfig.Int("DEMO_COMMAND_BURST_MIN", 1),
+		CommandBurstMax:   runtimeconfig.Int("DEMO_COMMAND_BURST_MAX", 3),
 		Metrics:           metrics,
 	}
 
-	admin, err := newHTTPAdminClient(envOr("DEMO_ADMIN_URL", "http://127.0.0.1:8080"))
+	admin, err := newHTTPAdminClient(runtimeconfig.EnvOrDefault("DEMO_ADMIN_URL", "http://127.0.0.1:8080"))
 	if err != nil {
 		return err
 	}
 	defer admin.Close()
 
 	factory, err := newMQTTBusFactory(MQTTBusFactoryConfig{
-		BrokerURL:  envOr("DEMO_MQTT_URL", "tcp://127.0.0.1:1883"),
+		BrokerURL:  runtimeconfig.EnvOrDefault("DEMO_MQTT_URL", "tcp://127.0.0.1:1883"),
 		Username:   os.Getenv("DEMO_MQTT_USERNAME"),
 		Password:   os.Getenv("DEMO_MQTT_PASSWORD"),
-		ClientPref: envOr("DEMO_CLIENT_ID_PREFIX", "iot-demo"),
+		ClientPref: runtimeconfig.EnvOrDefault("DEMO_CLIENT_ID_PREFIX", "iot-demo"),
 	})
 	if err != nil {
 		return err
@@ -324,43 +324,7 @@ func runHealthServer(ctx context.Context, addr string, metrics *platform.Metrics
 }
 
 func listenAddr() string {
-	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
-		return addr
-	}
-	if port := os.Getenv("PORT"); port != "" {
-		if _, err := strconv.Atoi(port); err == nil {
-			return ":" + port
-		}
-	}
-	return ":8080"
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func envInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return fallback
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-		if ms, err := strconv.Atoi(v); err == nil {
-			return time.Duration(ms) * time.Millisecond
-		}
-	}
-	return fallback
+	return runtimeconfig.ListenAddr("LISTEN_ADDR", "PORT", ":8080")
 }
 
 func randSource() *rand.Rand {

@@ -118,11 +118,11 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) openapiHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, platform.OpenAPISpec())
+	writeJSON(w, http.StatusOK, contracts.OpenAPISpec())
 }
 
 func (s *Server) mqttEnvelopeSchemaHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, platform.MQTTEnvelopeSchema())
+	writeJSON(w, http.StatusOK, contracts.MQTTEnvelopeSchema())
 }
 
 func (s *Server) createTenantHandler(w http.ResponseWriter, r *http.Request) {

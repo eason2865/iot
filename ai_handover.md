@@ -1,5 +1,14 @@
 # AI Handover
 
+## 2026-06-08 架构收敛：契约文档迁移
+- 用户要求直接优化项目架构、目录结构和文件组织，并要求每次提交新增递增 tag。
+- 已将 OpenAPI 与 MQTT Envelope Schema 的生成函数从 `internal/platform` 迁移到 `internal/contracts/docs.go`。
+- `internal/adminapi` 与旧 `platform.App` 文档端点现在都直接引用 `contracts.OpenAPISpec()` 和 `contracts.MQTTEnvelopeSchema()`。
+- 目的：让外部契约归属 `contracts`，减少 `platform` 同时承担 HTTP 契约和应用运行时职责的混杂。
+- 已验证：
+  - `go test ./internal/contracts ./internal/platform ./internal/adminapi` 通过。
+- 对应提交 tag：`2.1`。
+
 ## 2026-06-08 Helm 与 k8s 本地部署目录收敛
 - 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
 - 已读取 `ai_readme`，当前目录下无可读文档文件。

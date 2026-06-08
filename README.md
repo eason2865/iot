@@ -265,12 +265,18 @@ iot/
 │   ├── ingress/    # MQTT 接入与事件解耦
 │   └── worker/     # Kafka 消费、落库和下行处理
 ├── internal/
+│   ├── adminapi/   # REST 网关，负责 HTTP 到 core-rpc 的转换
 │   ├── bootstrap/  # 启动装配
-│   ├── contracts/  # topic、envelope、状态机等契约
-│   ├── platform/   # 数据访问、MQTT/Kafka/TDengine 集成
+│   ├── contracts/  # topic、envelope、状态机、OpenAPI 和 Schema 契约
+│   ├── core/       # 核心业务 gRPC 服务实现
+│   ├── demo/       # 造流模拟器运行时
+│   ├── platform/   # 仓储、消息、指标、worker、MQTT/TDengine 适配
 │   └── server/     # HTTP 基础能力
+├── charts/iot/     # Helm 部署清单
 ├── migrations/     # 数据库迁移
-└── docs/           # OpenAPI、Schema、技术方案
+├── proto/          # core-rpc protobuf 契约
+├── monitoring/     # 本地 Prometheus / Grafana 配置
+└── docs/           # OpenAPI、Schema、技术方案和 ADR
 ```
 
 ## 文档

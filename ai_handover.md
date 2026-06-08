@@ -35,6 +35,16 @@
   - `go test ./internal/platform ./internal/core ./internal/demo` 通过。
 - 对应提交 tag：`2.3`。
 
+## 2026-06-08 架构收敛：上下文与 ADR
+- 已新增 `CONTEXT.md`，记录平台稳定领域术语、运行模式术语和 module ownership。
+- 已新增 ADR：
+  - `docs/adr/0001-core-rpc-admin-api-split.md`
+  - `docs/adr/0002-storage-and-event-split.md`
+  - `docs/adr/0003-helm-only-kubernetes-manifests.md`
+- 已更新 README 的项目结构说明，补齐 `adminapi`、`core`、`demo`、`charts/iot`、`proto`、`monitoring` 和 ADR 的目录职责。
+- 目的：让后续会话和新开发者不再反复猜核心架构决策。
+- 对应提交 tag：`2.4`。
+
 ## 2026-06-08 Helm 与 k8s 本地部署目录收敛
 - 用户要求对比 Helm 与 `k8s` 目录后删除重复的 `k8s` 目录。
 - 已读取 `ai_readme`，当前目录下无可读文档文件。

@@ -7,24 +7,9 @@ CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
 APP_IMAGE="${APP_IMAGE:-iot-app:2.0}"
+DEPLOY_APP_IMAGE="$APP_IMAGE"
 DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
-COMMON_HELM_ARGS="
-  --set externalDependencies.enabled=true
-  --set externalDependencies.kafkaBrokers=${DOCKER_GATEWAY_HOST}:${DOCKER_GATEWAY_KAFKA_PORT}
-  --set externalDependencies.wait.kafkaHost=${DOCKER_GATEWAY_HOST}
-  --set externalDependencies.wait.kafkaPort=${DOCKER_GATEWAY_KAFKA_PORT}
-  --set admin.enabled=true
-  --set coreRpc.enabled=true
-  --set ingress.enabled=true
-  --set worker.enabled=true
-  --set postgres.enabled=false
-  --set kafka.enabled=false
-  --set emqx.enabled=false
-  --set tdengine.enabled=false
-  --set demo.enabled=false
-  --set prometheus.enabled=false
-"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -47,7 +32,22 @@ wait_for_docker_deps() {
 
 load_local_image() {
   if command -v kind >/dev/null 2>&1; then
-    kind load docker-image "$APP_IMAGE"
+    kind load docker-image "$DEPLOY_APP_IMAGE"
+  fi
+}
+
+prepare_local_app_image() {
+  if command -v docker >/dev/null 2>&1; then
+    image_id="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
+    if [ -n "$image_id" ]; then
+      image_hash="$(printf '%s' "$image_id" | sed 's/^sha256://' | cut -c 1-12)"
+      image_name="${APP_IMAGE%:*}"
+      if [ "$image_name" = "$APP_IMAGE" ]; then
+        image_name="$APP_IMAGE"
+      fi
+      DEPLOY_APP_IMAGE="${image_name}:local-${image_hash}"
+      docker tag "$APP_IMAGE" "$DEPLOY_APP_IMAGE"
+    fi
   fi
 }
 
@@ -62,7 +62,26 @@ if [ "$CHECK_EXTERNAL_DEPS" = "1" ]; then
   wait_for_docker_deps
 fi
 
+prepare_local_app_image
 load_local_image
+
+COMMON_HELM_ARGS="
+  --set images.app=${DEPLOY_APP_IMAGE}
+  --set externalDependencies.enabled=true
+  --set externalDependencies.kafkaBrokers=${DOCKER_GATEWAY_HOST}:${DOCKER_GATEWAY_KAFKA_PORT}
+  --set externalDependencies.wait.kafkaHost=${DOCKER_GATEWAY_HOST}
+  --set externalDependencies.wait.kafkaPort=${DOCKER_GATEWAY_KAFKA_PORT}
+  --set admin.enabled=true
+  --set coreRpc.enabled=true
+  --set ingress.enabled=true
+  --set worker.enabled=true
+  --set postgres.enabled=false
+  --set kafka.enabled=false
+  --set emqx.enabled=false
+  --set tdengine.enabled=false
+  --set demo.enabled=false
+  --set prometheus.enabled=false
+"
 
 helm upgrade --install "$RELEASE" "$CHART" \
   -n "$NAMESPACE" \

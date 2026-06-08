@@ -337,6 +337,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `admin`、`ingress`、`worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
 现在脚本同样会部署并等待 `core-rpc`，它是 `admin` 的 gRPC 核心依赖。
+脚本会把当前本地 `APP_IMAGE` 按镜像内容重新打成 `local-<hash>` tag 后传给 Helm，避免 `iot-app:2.0` 这类固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像。
 
 默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 Docker Desktop 网关 IP 连接 Docker 服务。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
 

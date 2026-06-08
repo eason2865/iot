@@ -1,5 +1,29 @@
 # AI Handover
 
+## 2026-06-08 全链路回归与本地部署镜像修复
+- 用户要求“全链路再测一遍”。
+- 已完成基础回归：
+  - `go test ./...` 通过。
+  - `make build` 通过。
+  - `helm lint charts/iot` 通过。
+  - 默认 Helm template 与 `charts/iot/values-local-stack.yaml` template 均通过。
+- 已完成代码层 E2E：
+  - `IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=1 -v` 通过。
+  - `IOT_E2E=1 IOT_E2E_LOAD=1 go test ./internal/platform -run TestE2ELoadMultiTenantMultiDevice -count=1 -v` 通过，覆盖 5 租户、50 设备、300 telemetry、50 command/ACK。
+- 回归中发现并修复两个本地部署问题：
+  - scratch 镜像内默认不存在 `/tmp`，file trace exporter 默认写 `/tmp/<service>-traces.log` 时会报 `file exporter endpoint error`；现 `TraceConfig` 会在 file exporter 配置阶段创建 endpoint 父目录，并补 `TestTraceConfigCreatesFileEndpointDir`。
+  - `scripts/helm-deploy-local.sh` 之前没有把 `APP_IMAGE` 传给 Helm，且固定 tag 重建后 k8s `IfNotPresent` 可能复用旧镜像；现脚本会根据当前本地镜像内容生成 `local-<hash>` tag，传入 `images.app`，kind 场景也加载该内容 tag。
+- 已重新构建并部署：
+  - `docker build -t iot-app:2.0 .` 通过。
+  - `scripts/helm-deploy-local.sh` 通过，Helm revision 20，`admin`、`core-rpc`、`ingress`、`worker` 均 Running/Ready。
+  - Deployment 镜像已切到 `iot-app:local-df4bca89ae27`。
+- 已完成部署级 smoke：
+  - 集群内 `admin`、`ingress`、`worker` `/healthz` 正常。
+  - 集群内 `core-rpc:9101/metrics` 正常。
+  - 通过前台 `kubectl port-forward` 短跑 demo，k8s admin 产生 tenant/device/command 201；k8s worker 日志确认 `smoke-1780890578` 的 telemetry、command consumed、command ack consumed。
+  - 新 Pod 近 3 分钟日志未再出现 trace exporter、panic、fatal 错误。
+- 对应提交 tag：`2.6`。
+
 ## 2026-06-08 架构收敛：契约文档迁移
 - 用户要求直接优化项目架构、目录结构和文件组织，并要求每次提交新增递增 tag。
 - 已将 OpenAPI 与 MQTT Envelope Schema 的生成函数从 `internal/platform` 迁移到 `internal/contracts/docs.go`。

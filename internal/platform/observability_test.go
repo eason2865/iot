@@ -4,11 +4,29 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
+
+func TestTraceConfigCreatesFileEndpointDir(t *testing.T) {
+	endpoint := filepath.Join(t.TempDir(), "nested", "trace", "admin.log")
+	t.Setenv("OTEL_DISABLED", "false")
+	t.Setenv("OTEL_BATCHER", "file")
+	t.Setenv("OTEL_ENDPOINT", endpoint)
+
+	cfg := TraceConfig("admin/api")
+
+	if cfg.Endpoint != endpoint {
+		t.Fatalf("unexpected trace endpoint: got %q want %q", cfg.Endpoint, endpoint)
+	}
+	if _, err := os.Stat(filepath.Dir(endpoint)); err != nil {
+		t.Fatalf("expected trace endpoint directory to exist: %v", err)
+	}
+}
 
 func TestRequestIDHTTPMiddleware(t *testing.T) {
 	var gotRequestID string

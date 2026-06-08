@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,6 +79,9 @@ func TraceConfig(serviceName string) trace.Config {
 	if endpoint == "" && batcher == "file" {
 		endpoint = fmt.Sprintf("/tmp/%s-traces.log", strings.ReplaceAll(serviceName, "/", "-"))
 	}
+	if batcher == "file" && endpoint != "" {
+		ensureTraceEndpointDir(endpoint)
+	}
 
 	cfg := trace.Config{
 		Name:     serviceName,
@@ -97,6 +101,16 @@ func TraceConfig(serviceName string) trace.Config {
 		cfg.OtlpHttpSecure = true
 	}
 	return cfg
+}
+
+func ensureTraceEndpointDir(endpoint string) {
+	dir := filepath.Dir(endpoint)
+	if dir == "." || dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("trace endpoint directory create error: endpoint=%q error=%v", endpoint, err)
+	}
 }
 
 func StartTracing(serviceName string) {

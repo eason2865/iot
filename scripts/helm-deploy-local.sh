@@ -32,7 +32,7 @@ wait_for_docker_deps() {
 
 load_local_image() {
   if command -v kind >/dev/null 2>&1; then
-    kind load docker-image "$DEPLOY_APP_IMAGE"
+    kind load docker-image "$APP_IMAGE"
   fi
 }
 
@@ -40,13 +40,22 @@ prepare_local_app_image() {
   if command -v docker >/dev/null 2>&1; then
     image_id="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)"
     if [ -n "$image_id" ]; then
-      image_hash="$(printf '%s' "$image_id" | sed 's/^sha256://' | cut -c 1-12)"
-      image_name="${APP_IMAGE%:*}"
-      if [ "$image_name" = "$APP_IMAGE" ]; then
-        image_name="$APP_IMAGE"
-      fi
-      DEPLOY_APP_IMAGE="${image_name}:local-${image_hash}"
-      docker tag "$APP_IMAGE" "$DEPLOY_APP_IMAGE"
+      image_name="${APP_IMAGE%@*}"
+      case "${image_name##*/}" in
+        *:*) image_name="${image_name%:*}" ;;
+      esac
+      # Use the manifest digest, not the image config ID used by classic Docker.
+      image_digests="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$APP_IMAGE")"
+      for image_digest in $image_digests; do
+        case "$image_digest" in
+          "$image_name"@sha256:*)
+            DEPLOY_APP_IMAGE="$image_digest"
+            return
+            ;;
+        esac
+      done
+      echo "No repository digest for $APP_IMAGE; pull or publish this image before deploying." >&2
+      exit 1
     fi
   fi
 }

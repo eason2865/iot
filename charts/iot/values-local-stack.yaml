@@ -1,5 +1,5 @@
 images:
-  app: iot-app:metrics2
+  app: iot-app:2.0
 
 externalDependencies:
   enabled: false

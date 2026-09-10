@@ -1,5 +1,11 @@
 # AI Handover
 
+## 2026-09-10 应用镜像单 tag
+- 本地应用镜像只保留 `iot-app:2.0`；本地 Helm 脚本改用该镜像的 RepoDigest 部署，不再创建 `local-<hash>` tag，并保留按内容更新 Pod 的能力。
+- kind 导入仍使用原始 `APP_IMAGE` tag；若本地镜像缺少匹配的 RepoDigest，则明确失败，避免把经典 Docker 的 config ID 当成 manifest digest。
+- 备用 `values-local-stack.yaml` 的旧 `metrics2` 引用同步为 `2.0`。
+- 已验证 shell 语法、Helm lint 和实际本地部署（revision 23）；四个 Deployment 均 Ready，Prometheus 5 个 target 均 up。已删除 `local-f08659f9994b`，Docker 应用镜像列表只剩 `2.0`。
+
 ## 2026-09-10 监控与注册中心镜像版本
 - 用户要求将 IoT 使用的 etcd、Prometheus、Grafana 镜像切换为最新版本。
 - 已更新本地 Docker Compose：

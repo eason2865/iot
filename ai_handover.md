@@ -9,6 +9,11 @@
 - 已同步 Helm：Prometheus 默认镜像改为 `prom/prometheus:latest`，etcd 模板改为 `quay.io/coreos/etcd:v3.6.14`。
 - 风险：后续 `pull` 或重建会获取上游当时的最新版本，可能跨越主版本；升级前应备份 etcd / Prometheus 数据并验证 Grafana dashboard。
 
+## 2026-09-10 本地全链路恢复：Worker MQTT 启动韧性
+- 本地 Docker 依赖已恢复：PostgreSQL（`postgres-local`，数据卷 `iot-postgres-data`）、Kafka、EMQX、TDengine、etcd 3.6.14、Prometheus、Grafana。
+- 在 Kubernetes 本地部署时，入口服务可连接 EMQX，而 worker 的一次性初始 MQTT 连接偶发失败后立即退出，导致 `CrashLoopBackOff`。独立 client ID 的探针同样失败，已排除 client ID 冲突。
+- `Worker` 现在与 `MQTTBridge` 一致，开启 Paho `SetConnectRetry(true)` 并以 2 秒间隔重试；因此 EMQX 重启或短暂不可用时，worker 会等待连接恢复而非退出。
+
 ## 2026-06-08 全链路回归与本地部署镜像修复
 - 用户要求“全链路再测一遍”。
 - 已完成基础回归：

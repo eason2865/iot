@@ -94,6 +94,9 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 			opts.SetPassword(cfg.MQTTPassword)
 		}
 		opts.SetAutoReconnect(true)
+		// Keep the worker alive while EMQX is starting or briefly unavailable.
+		opts.SetConnectRetry(true)
+		opts.SetConnectRetryInterval(2 * time.Second)
 		ackTopics := normalizeAckTopicFilters(cfg)
 		opts.OnConnect = func(client mqtt.Client) {
 			for _, ackTopic := range ackTopics {

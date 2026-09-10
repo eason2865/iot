@@ -4,7 +4,7 @@ images:
   kafka: bitnamilegacy/kafka:latest
   emqx: emqx/emqx-enterprise:latest
   tdengine: tdengine/tdengine:latest
-  prometheus: prom/prometheus:v2.55.1
+  prometheus: prom/prometheus:latest
 
 externalDependencies:
   enabled: true

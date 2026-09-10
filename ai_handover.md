@@ -1,5 +1,14 @@
 # AI Handover
 
+## 2026-09-10 监控与注册中心镜像浮动标签
+- 用户明确要求将 IoT 使用的 etcd、Prometheus、Grafana 镜像切换为 `latest`。
+- 已更新本地 Docker Compose：
+  - `quay.io/coreos/etcd:latest`
+  - `prom/prometheus:latest`
+  - `grafana/grafana:latest`
+- 已同步 Helm：Prometheus 默认镜像改为 `prom/prometheus:latest`，etcd 模板改为 `quay.io/coreos/etcd:latest`。
+- 风险：后续 `pull` 或重建会获取上游当时的最新版本，可能跨越主版本；升级前应备份 etcd / Prometheus 数据并验证 Grafana dashboard。
+
 ## 2026-06-08 全链路回归与本地部署镜像修复
 - 用户要求“全链路再测一遍”。
 - 已完成基础回归：

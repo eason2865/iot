@@ -3,10 +3,10 @@
 ## 2026-09-10 监控与注册中心镜像版本
 - 用户要求将 IoT 使用的 etcd、Prometheus、Grafana 镜像切换为最新版本。
 - 已更新本地 Docker Compose：
-  - `quay.io/coreos/etcd:v3.5.24`：上游仓库不发布 `latest` 标签，故使用已验证可拉取的 3.5 系列新补丁，保持现有数据目录兼容。
+  - `quay.io/coreos/etcd:v3.6.14`：上游仓库不发布 `latest` 标签，故使用 Quay 已发布的最新 3.6 系列版本。
   - `prom/prometheus:latest`
   - `grafana/grafana:latest`
-- 已同步 Helm：Prometheus 默认镜像改为 `prom/prometheus:latest`，etcd 模板改为 `quay.io/coreos/etcd:v3.5.24`。
+- 已同步 Helm：Prometheus 默认镜像改为 `prom/prometheus:latest`，etcd 模板改为 `quay.io/coreos/etcd:v3.6.14`。
 - 风险：后续 `pull` 或重建会获取上游当时的最新版本，可能跨越主版本；升级前应备份 etcd / Prometheus 数据并验证 Grafana dashboard。
 
 ## 2026-06-08 全链路回归与本地部署镜像修复

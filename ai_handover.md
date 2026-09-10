@@ -11,8 +11,9 @@
 
 ## 2026-09-10 本地全链路恢复：Worker MQTT 启动韧性
 - 本地 Docker 依赖已恢复：PostgreSQL（`postgres-local`，数据卷 `iot-postgres-data`）、Kafka、EMQX、TDengine、etcd 3.6.14、Prometheus、Grafana。
-- 在 Kubernetes 本地部署时，入口服务可连接 EMQX，而 worker 的一次性初始 MQTT 连接偶发失败后立即退出，导致 `CrashLoopBackOff`。独立 client ID 的探针同样失败，已排除 client ID 冲突。
 - `Worker` 现在与 `MQTTBridge` 一致，开启 Paho `SetConnectRetry(true)` 并以 2 秒间隔重试；因此 EMQX 重启或短暂不可用时，worker 会等待连接恢复而非退出。
+- 本次 `CrashLoopBackOff` 的实际根因是 TDengine 容器中 `taosd` 已退出，仅 adapter/keeper 仍在运行；worker 初始化 TDengine schema 时收到 `Unable to establish connection`。重启 `tdengine` 后，`taosd`、`SHOW DATABASES` 与 worker 均恢复，挂载目录 `/Users/lyc/tdengine/data` 中的数据保留。
+- Docker Desktop 不能从容器回连宿主机 `kubectl port-forward` 监听端口。监控 Compose 现通过 `k8s-forward-*` 容器加入 `kind` 网络，在 Docker 内部转发 admin、ingress、worker、core-rpc；demo 与 Prometheus 使用这些 Docker DNS 名称，不依赖宿主机回环网络。
 
 ## 2026-06-08 全链路回归与本地部署镜像修复
 - 用户要求“全链路再测一遍”。

@@ -1,4 +1,49 @@
 services:
+  k8s-forward-admin:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-admin
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/admin", "18080:8080", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
+  k8s-forward-admin-metrics:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-admin-metrics
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/admin", "18090:9100", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
+  k8s-forward-ingress:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-ingress
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/ingress", "18081:8080", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
+  k8s-forward-worker:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-worker
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/worker", "18082:8080", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
+  k8s-forward-core-rpc:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-core-rpc
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/core-rpc", "18091:9101", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
   etcd:
     image: quay.io/coreos/etcd:v3.6.14
     container_name: iot-etcd
@@ -72,7 +117,7 @@ services:
     ports:
       - "18084:8080"
     environment:
-      DEMO_ADMIN_URL: http://host.docker.internal:18080
+      DEMO_ADMIN_URL: http://k8s-forward-admin:18080
       DEMO_MQTT_URL: tcp://host.docker.internal:1883
       DEMO_TENANT_COUNT: "5"
       DEMO_DEVICES_PER_TENANT: "10"
@@ -91,3 +136,8 @@ services:
 
 volumes:
   etcd-data:
+
+networks:
+  kind:
+    external: true
+    name: kind

@@ -1,5 +1,12 @@
 # AI Handover
 
+## 2026-09-16 Admin HTTP 告警与看板关联
+- 用户选择监控 HTTP 5xx 持续 1 分钟；新增可导入规则模板 `monitoring/grafana/alerts/admin-http-5xx.json`，本地已通过 provisioning API 导入且禁用只读 provenance，允许后续在 UI 编辑。
+- 规则 UID `iot-admin-http-5xx`，分组 `Admin HTTP`，本地评估间隔 60 秒；表达式按 route/status 计算 5 分钟 5xx QPS，阈值 > 0，pending 1 分钟，无 5xx 序列时回退 0（不负责服务离线检测）。发送到已有“钉钉”联系人，仓库无 Webhook/token。
+- 规则关联 `iot-admin-api` 的 panel 6；看板顶部增加当前告警/实例列表，开放 Annotations & Alerts 开关，HTTP 5xx 序列红色加粗。原有 GC 测试规则 `cfyeixhhzn4zkb` 保持暂停，不改条件。
+- 已验证 JSON、面板布局与规则关联；Grafana API 显示规则 health=ok、状态 Normal；浏览器确认告警列表、Normal 实例和 HTTP 5xx QPS=0 正常显示。
+- 未制造真实 HTTP 5xx 或伪造历史告警。触发/恢复时间标记在后续实际状态变化时产生；标记为评估时间，不能定位单次请求。新环境导入需先配置相应联系人，详见 README。
+
 ## 2026-09-16 Grafana 链接与持久化恢复
 - 原目录链接 `efobmswzeefi8d` 返回 404；Grafana 未配置自动重启，数据库此前位于容器可写层，provisioning 也未固定 folderUid。
 - Compose 增加 `restart: unless-stopped` 和命名卷 `iot-grafana-data:/var/lib/grafana`；固定 provisioning 的 `folderUid: efobmswzeefi8d`。

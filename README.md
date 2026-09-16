@@ -386,8 +386,25 @@ Grafana 默认账号：
 已预置的面板：
 
 - [IoT Overview](http://localhost:3000/d/iot-overview/iot-overview)
-- [IoT Admin API](http://localhost:3000/d/iot-api/iot-admin-api)
+- [IoT Admin API](http://localhost:3000/d/iot-admin-api/iot-admin-api)
 - [IoT Pipeline](http://localhost:3000/d/iot-pipeline/iot-pipeline)
+
+### Admin API 告警可视化
+
+`IoT Admin API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
+
+规则模板为 `monitoring/grafana/alerts/admin-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
+
+该模板通过 Grafana API 导入，不做只读文件 provisioning，导入后仍可在页面调整阈值、暂停和通知渠道。新环境先创建名为“钉钉”的联系人（或修改模板中的 receiver）；Webhook 凭证只保存在 Grafana，不进入仓库。首次导入示例：
+
+```bash
+curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
+  -H 'Content-Type: application/json' -H 'X-Disable-Provenance: true' \
+  --data-binary @monitoring/grafana/alerts/admin-http-5xx.json \
+  http://localhost:3000/api/v1/provisioning/alert-rules
+```
+
+已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-admin-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
 
 ## Helm 部署
 

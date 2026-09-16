@@ -1,0 +1,57 @@
+{
+  "uid": "iot-admin-http-5xx",
+  "orgID": 1,
+  "folderUID": "efobmswzeefi8d",
+  "ruleGroup": "Admin HTTP",
+  "title": "Admin HTTP 5xx 持续出现",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "relativeTimeRange": { "from": 600, "to": 0 },
+      "datasourceUid": "prometheus",
+      "model": {
+        "refId": "A",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "editorMode": "code",
+        "expr": "sum by (route, status) (rate(iot_http_requests_total{job=\"admin\",status=\"5xx\"}[5m])) or vector(0)",
+        "instant": true,
+        "range": false,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+      }
+    },
+    {
+      "refId": "C",
+      "relativeTimeRange": { "from": 0, "to": 0 },
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "C",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["C"] },
+            "reducer": { "type": "last", "params": [] },
+            "evaluator": { "type": "gt", "params": [0] },
+            "operator": { "type": "and" }
+          }
+        ]
+      }
+    }
+  ],
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "for": "1m",
+  "annotations": {
+    "__dashboardUid__": "iot-admin-api",
+    "__panelId__": "6",
+    "summary": "grafana：Admin HTTP 5xx 检测{{ if $labels.route }} | {{ $labels.route }} / {{ $labels.status }}{{ end }}",
+    "description": "{{ if $labels.route }}路由 {{ $labels.route }} 最近 5 分钟 HTTP 5xx 平均速率为 {{ $values.A.Value }} req/s。{{ else }}当前未查询到 HTTP 5xx 序列，检测值回退为 0；此规则不检测服务离线。{{ end }}触发条件：5xx QPS 大于 0 持续 1 分钟。请打开关联 HTTP 图表查看状态变化和曲线。"
+  },
+  "labels": { "service": "admin", "severity": "warning" },
+  "isPaused": false,
+  "notification_settings": { "receiver": "钉钉" }
+}

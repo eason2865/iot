@@ -8,7 +8,7 @@
           "uid": "-- Grafana --"
         },
         "enable": true,
-        "hide": true,
+        "hide": false,
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
@@ -35,6 +35,35 @@
       "panels": []
     },
     {
+      "id": 10,
+      "type": "alertlist",
+      "title": "Admin API 告警状态",
+      "description": "显示关联此看板的告警及实例标签。展开实例可定位 route/status，点击规则查看详情；HTTP 图表上的告警标记显示状态变化时间。",
+      "gridPos": { "x": 0, "y": 1, "w": 24, "h": 6 },
+      "options": {
+        "viewMode": "list",
+        "groupMode": "default",
+        "groupBy": [],
+        "maxItems": 20,
+        "sortOrder": 3,
+        "dashboardAlerts": true,
+        "showInstances": true,
+        "showInactiveAlerts": true,
+        "alertName": "",
+        "alertInstanceLabelFilter": "",
+        "datasource": "grafana",
+        "folder": { "uid": "efobmswzeefi8d", "title": "IoT" },
+        "stateFilter": {
+          "firing": true,
+          "pending": true,
+          "recovering": true,
+          "noData": true,
+          "normal": true,
+          "error": true
+        }
+      }
+    },
+    {
       "id": 2,
       "type": "stat",
       "title": "HTTP QPS",
@@ -44,7 +73,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 1,
+        "y": 7,
         "w": 6,
         "h": 4
       },
@@ -89,7 +118,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 1,
+        "y": 7,
         "w": 6,
         "h": 4
       },
@@ -134,7 +163,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 7,
         "w": 6,
         "h": 4
       },
@@ -179,7 +208,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 1,
+        "y": 7,
         "w": 6,
         "h": 4
       },
@@ -218,13 +247,14 @@
       "id": 6,
       "type": "timeseries",
       "title": "HTTP Requests by Route / Status",
+      "description": "告警按 route/status 检测 HTTP 5xx：最近 5 分钟平均 QPS > 0 持续 1 分钟。红色曲线为 5xx，告警状态变化显示为时间标记；标记对应评估时间，并非单次请求发生时间。",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 11,
         "w": 24,
         "h": 7
       },
@@ -232,7 +262,15 @@
         "defaults": {
           "unit": "reqps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*5xx.*" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -254,6 +292,7 @@
             "uid": "prometheus"
           },
           "expr": "sum(rate(iot_http_requests_total{job=\"admin\"}[5m])) by (route, status)",
+          "legendFormat": "{{route}} / {{status}}",
           "refId": "A"
         }
       ]
@@ -268,7 +307,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 18,
         "w": 12,
         "h": 7
       },
@@ -312,7 +351,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 18,
         "w": 12,
         "h": 7
       },
@@ -384,7 +423,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 19,
+        "y": 25,
         "w": 24,
         "h": 7
       },
@@ -464,6 +503,6 @@
   "timezone": "browser",
   "title": "IoT Admin API",
   "uid": "iot-admin-api",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

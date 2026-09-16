@@ -6,7 +6,9 @@ import datetime
 import json
 import os
 from pathlib import Path
+import re
 import unittest
+import urllib.parse
 import urllib.request
 
 
@@ -51,6 +53,7 @@ class DingTalkTemplateTest(unittest.TestCase):
             result = json.load(response)
         self.assertFalse(result.get("errors"), result.get("errors"))
         rendered = {item["name"]: item["text"] for item in result["results"]}
+        self.rendered = rendered
         for text in rendered.values():
             self.assertIn("grafana", text)
             self.assertNotIn("<no value>", text)
@@ -72,6 +75,8 @@ class DingTalkTemplateTest(unittest.TestCase):
         self.assertIn("[已恢复]", body)
         self.assertIn("恢复时间", body)
         self.assertNotIn("临时静默", body)
+        payload = json.loads(self.rendered["iot.dingtalk.payload"])
+        self.assertEqual(payload["markdown"], {"title": title, "text": body})
 
     def test_optional_fields(self):
         _, body = self.render([self.alert(minimal=True)])
@@ -84,6 +89,33 @@ class DingTalkTemplateTest(unittest.TestCase):
         self.assertIn("触发 6 / 恢复 6", title)
         self.assertEqual(body.count("#### "), 10)
         self.assertIn("仅展示前 10 条", body)
+
+    def test_markdown_payload_and_distinct_links(self):
+        alert = self.alert()
+        alert["annotations"]["summary"] = 'Quoted "value"\nSecond line'
+        title, body = self.render([alert])
+        payload = json.loads(self.rendered["iot.dingtalk.payload"])
+        self.assertEqual(payload["msgtype"], "markdown")
+        self.assertEqual(payload["markdown"], {"title": title, "text": body})
+        self.assertNotIn("actionCard", payload)
+        self.assertNotIn("singleURL", payload)
+        links = dict(re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body))
+        selected = [links[name] for name in ["定位图表", "打开看板", "查看规则", "临时静默"]]
+        self.assertEqual(len(set(selected)), 4)
+        panel, dashboard, rule, silence = [urllib.parse.urlparse(url) for url in selected]
+        self.assertEqual(urllib.parse.parse_qs(panel.query)["viewPanel"], ["6"])
+        self.assertNotIn("viewPanel", urllib.parse.parse_qs(dashboard.query))
+        self.assertEqual(rule.path, "/alerting/grafana/iot-admin-healthz-qps/view")
+        self.assertEqual(silence.path, "/alerting/silence/new")
+
+    def test_contact_uses_markdown_payload(self):
+        path = Path(__file__).resolve().parents[1] / "monitoring/grafana/notifications/dingtalk-contact.json"
+        contact = json.loads(path.read_text())
+        self.assertEqual(contact["type"], "webhook")
+        self.assertFalse(contact["disableResolveMessage"])
+        self.assertEqual(contact["settings"]["httpMethod"], "POST")
+        self.assertEqual(contact["settings"]["payload"]["template"], '{{ template "iot.dingtalk.payload" . }}')
+        self.assertNotIn("url", contact["settings"])
 
 
 if __name__ == "__main__":

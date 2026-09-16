@@ -412,16 +412,17 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 ### 钉钉通知模板
 
-`monitoring/grafana/notifications/dingtalk.tmpl` 定义 `iot.dingtalk.title` 和 `iot.dingtalk.message`，本地保存于 Grafana 的 `iot.dingtalk` 模板组。联系人引用见 `dingtalk-contact.json`；这是不含 URL 的合并配置，不可直接覆盖完整联系人。
+`monitoring/grafana/notifications/dingtalk.tmpl` 定义 `iot.dingtalk.title`、`iot.dingtalk.message` 和 `iot.dingtalk.payload`，本地保存于 Grafana 的 `iot.dingtalk` 模板组。联系人引用见 `dingtalk-contact.json`；这是不含 URL 的配置片段，不可直接覆盖完整联系人。
 
 - 标题包含固定 `grafana` 关键词、触发/恢复状态、规则名称和数量。
-- 使用 ActionCard，正文按实例展示级别、服务、路由、HTTP 状态、摘要、详情，以及 UTC+8 开始/恢复时间；无值的可选字段不展示。
+- 联系人名称仍为“钉钉”，集成类型使用 Webhook，通过 Custom Payload 直接向原机器人 URL POST 钉钉 Markdown JSON；不使用原生 DingDing 的整体跳转 ActionCard（其 singleURL 固定跳到告警列表）。无需转发服务。
+- 正文按实例展示级别、服务、路由、HTTP 状态、摘要、详情，以及 UTC+8 开始/恢复时间；无值的可选字段不展示。JSON 由 `data.ToJSON` 编码，不手动拼接文案，以正确处理引号和换行。
 - 按规则提供的 URL 展示图表、看板、规则、处理手册和临时静默链接，单条消息最多展示 10 个实例。链接继承 Grafana 对外地址，目前为 localhost，其他设备访问需另行配置可达地址。
 - `disableResolveMessage: false` 开启恢复通知；此次模板规范化不改变规则阈值、评估周期、分组或重复通知频率。
-- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再将联系人片段合并到现有“钉钉”联系人，保留 UID 和加密 URL。不要把机器人 URL/token 写入仓库。
+- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再应用联系人片段并保留 UID、名称和原始 URL。由原生 DingDing 迁移到 Webhook 时，只在内存中读取原 URL，并替换类型对应的 settings、清除旧 secureFields，不能将 `[REDACTED]` 当作 URL 保存。Webhook 的 URL 是受保护配置字段而非原生 DingDing 的加密秘密字段，需限制联系人读取权限；不要打印、导出到仓库或提交机器人 token。
 - 修改模板优先在通知模板组中进行。已打开的联系人编辑页必须刷新后再保存，避免旧表单覆盖模板引用。
 
-设置 `GRAFANA_ADMIN_PASSWORD` 后运行 `python3 scripts/test-grafana-notification-template.py -v`，通过本地 Grafana 模板预览 API 验证触发、恢复、缺失字段和多实例截断；不会向钉钉发消息。可用 `GRAFANA_URL`、`GRAFANA_USER` 指定其他测试实例。
+设置 `GRAFANA_ADMIN_PASSWORD` 后运行 `python3 scripts/test-grafana-notification-template.py -v`，通过本地 Grafana 模板预览 API 验证触发、恢复、缺失字段、多实例截断、Markdown JSON 和四个独立链接；不会向钉钉发消息。可用 `GRAFANA_URL`、`GRAFANA_USER` 指定其他测试实例。钉钉历史卡片不会随模板更新，应在新消息上验证；联系人测试通知可能缺少规则 GeneratorURL，因此不展示“查看规则”，真实规则通知才包含该链接。
 
 ## Helm 部署
 

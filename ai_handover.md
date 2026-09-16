@@ -1,5 +1,13 @@
 # AI Handover
 
+## 2026-09-16 钉钉独立链接修复
+- 用户反馈卡片正文多个链接点击目标相同。捕获原生 DingDing 请求确认正文链接不同，但 actionCard 还包含固定到 `/alerting/list` 的 singleURL；未直接验证钉钉客户端拦截行为。
+- 改为 Webhook v1 + Custom Payload，发送钉钉 markdown JSON，移除整体跳转 singleURL，保留联系人名称“钉钉”、UID `ffyeiqivgwi68f` 及机器人 URL。模板新增 `iot.dingtalk.payload`，使用 coll.Dict/tmpl.Exec/data.ToJSON 安全编码。
+- 已用临时本地捕获服务验证候选实际请求，再保存联系人。解密读取原 URL 仅在内存中操作，迁移后逐字比对 URL 不变，所有规则及通知策略不变，无临时代理地址留在配置中。
+- 注意 Webhook URL 在 Grafana 中属于受保护普通配置，不再是 DingDing 的 secure URL 字段；不要输出完整联系人 settings 或提交 URL。恢复通知仍开启。
+- 新增回归测试验证 JSON 引号/换行、非 ActionCard、四个链接目标不同及联系人 payload 引用；已有恢复/缺失字段/多实例测试保留。用 Grafana 渲染发送“Markdown 独立链接修复测试”，钉钉返回 errcode=0。
+- 未实际操作钉钉客户端验证点击；请在新消息中确认（历史卡片不会更新）。测试通知没有 GeneratorURL 时省略规则链接，预览 fixture 和真实规则通知包含该链接。localhost 仍仅在本机有效，未扩大 Grafana 网络访问范围。
+
 ## 2026-09-16 钉钉联系人与通知模板规范化
 - 用户明确限定范围为联系人标题、正文、卡片格式、恢复通知和模板，要求 Webhook URL 保持不变；不调整告警条件、阈值、防抖或通知频率。
 - 新增 `monitoring/grafana/notifications/dingtalk.tmpl`，通过 API 保存为可编辑模板组 `iot.dingtalk`，定义 `iot.dingtalk.title` / `iot.dingtalk.message`；联系人 `ffyeiqivgwi68f` 改为引用模板，保留 actionCard，`disableResolveMessage=false`。

@@ -2,6 +2,10 @@
 grafana | {{ if eq .Status "firing" }}告警中{{ else }}已恢复{{ end }} | {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}IoT 监控{{ end }} | 触发 {{ len .Alerts.Firing }} / 恢复 {{ len .Alerts.Resolved }}
 {{- end }}
 
+{{ define "iot.dingtalk.payload" -}}
+{{ coll.Dict "msgtype" "markdown" "markdown" (coll.Dict "title" (tmpl.Exec "iot.dingtalk.title" .) "text" (tmpl.Exec "iot.dingtalk.message" .)) | data.ToJSON }}
+{{- end }}
+
 {{ define "iot.dingtalk.message" -}}
 ### grafana | {{ if eq .Status "firing" }}告警通知{{ else }}恢复通知{{ end }}
 

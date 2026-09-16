@@ -1,9 +1,10 @@
 {
-  "type": "dingding",
+  "type": "webhook",
   "disableResolveMessage": false,
   "settings": {
-    "msgType": "actionCard",
-    "title": "{{ template \"iot.dingtalk.title\" . }}",
-    "message": "{{ template \"iot.dingtalk.message\" . }}"
+    "httpMethod": "POST",
+    "payload": {
+      "template": "{{ template \"iot.dingtalk.payload\" . }}"
+    }
   }
 }

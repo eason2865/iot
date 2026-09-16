@@ -393,6 +393,8 @@ Grafana 默认账号：
 
 `IoT Admin API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
 
+看板顶部另有两条固定 UID 的规则入口，避免通过目录显示名拼接规则地址。若旧浏览器页面中的 `View alert rule` 跳到 `pri%24grafana%24IoT...` 并报 403，请完整刷新浏览器页面（不是仅点击看板的 Refresh），或使用顶部固定入口；不要为此扩大目录权限。Alert list 的内置数据源名称为 `-- Grafana --`，与 API 中的规则源标识 `grafana` 不同。
+
 规则模板为 `monitoring/grafana/alerts/admin-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
 
 该模板通过 Grafana API 导入，不做只读文件 provisioning，导入后仍可在页面调整阈值、暂停和通知渠道。新环境先创建名为“钉钉”的联系人（或修改模板中的 receiver）；Webhook 凭证只保存在 Grafana，不进入仓库。首次导入示例：

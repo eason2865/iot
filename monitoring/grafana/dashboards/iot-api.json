@@ -19,7 +19,22 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "type": "link",
+      "title": "HTTP 5xx 告警规则",
+      "url": "/alerting/grafana/iot-admin-http-5xx/view",
+      "targetBlank": false,
+      "icon": "external link"
+    },
+    {
+      "type": "link",
+      "title": "healthz > 0.3 告警规则",
+      "url": "/alerting/grafana/iot-admin-healthz-qps/view",
+      "targetBlank": false,
+      "icon": "external link"
+    }
+  ],
   "panels": [
     {
       "id": 1,
@@ -51,7 +66,7 @@
         "showInactiveAlerts": true,
         "alertName": "",
         "alertInstanceLabelFilter": "",
-        "datasource": "grafana",
+        "datasource": "-- Grafana --",
         "folder": { "uid": "efobmswzeefi8d", "title": "IoT" },
         "stateFilter": {
           "firing": true,
@@ -519,6 +534,6 @@
   "timezone": "browser",
   "title": "IoT Admin API",
   "uid": "iot-admin-api",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }

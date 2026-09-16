@@ -1,5 +1,12 @@
 # AI Handover
 
+## 2026-09-16 告警规则跳转入口修正
+- 用户旧页面的 `View alert rule` 生成 `pri$grafana$IoT$Admin HTTP$...` 标识，后续按目录显示名 `IoT` 请求 ruler API，复现 HTTP 403。同一管理员用目录 UID `efobmswzeefi8d` 查询该组成功，不应通过扩大权限绕过。
+- 本次新打开的内置浏览器在修改前已生成两条正确规则 UID 链接；未复现同样的前端错误生成过程，因此旧页面状态/规则元数据未加载只是可能原因，不能断言为权限或单一配置错误。
+- 将 Alert list 数据源名称规范化为 `-- Grafana --`，并在看板顶部增加两条固定 UID 的规则入口，避免依赖旧组件的合成标识；版本升到 5，已重新加载。未修改规则、通知或权限。
+- 已验证实际看板 API 包含正确数据源和固定链接，两条规则详情 API 成功、页面入口 HTTP 200。浏览器后续复查因工具超时未完成，不把 SPA HTTP 200 当作详情页面渲染测试。
+- 如用户停留在旧标签页，需完整刷新浏览器页面（不是看板内的 Refresh），或直接使用固定规则入口。旧 pri 地址不会自动重定向。
+
 ## 2026-09-16 healthz QPS 阈值告警
 - 按用户截图新增 `/healthz`、`2xx` 专属规则 `iot-admin-healthz-qps`，模板 `monitoring/grafana/alerts/admin-healthz-qps.json`；与 HTTP 图表保持相同的 5 分钟 rate，严格 > 0.3 req/s。
 - 使用已有 `Admin HTTP` 分组（60 秒评估），`for: 0s`、通知 `group_wait: 0s`，接收人为已有“钉钉”。不修改 5xx 或暂停中的 GC 规则。

@@ -1,0 +1,40 @@
+{{ define "iot.dingtalk.title" -}}
+grafana | {{ if eq .Status "firing" }}告警中{{ else }}已恢复{{ end }} | {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}IoT 监控{{ end }} | 触发 {{ len .Alerts.Firing }} / 恢复 {{ len .Alerts.Resolved }}
+{{- end }}
+
+{{ define "iot.dingtalk.message" -}}
+### grafana | {{ if eq .Status "firing" }}告警通知{{ else }}恢复通知{{ end }}
+
+**触发：{{ len .Alerts.Firing }} 条 | 恢复：{{ len .Alerts.Resolved }} 条**
+{{ range $index, $alert := .Alerts }}{{ if lt $index 10 }}
+
+---
+
+#### {{ if eq .Status "firing" }}[告警中]{{ else }}[已恢复]{{ end }} {{ .Labels.alertname }}
+{{ if .Labels.severity }}
+- **级别**：{{ .Labels.severity | toUpper }}{{ end }}{{ if .Labels.service }}
+- **服务**：{{ .Labels.service }}{{ end }}{{ if .Labels.environment }}
+- **环境**：{{ .Labels.environment }}{{ end }}{{ if .Labels.instance }}
+- **实例**：{{ .Labels.instance }}{{ end }}{{ if .Labels.route }}
+- **路由**：{{ .Labels.route }}{{ end }}{{ if .Labels.status }}
+- **HTTP 状态**：{{ .Labels.status }}{{ end }}
+- **开始时间**：{{ .StartsAt | tz "Asia/Shanghai" | date "2006-01-02 15:04:05 -0700" }}{{ if eq .Status "resolved" }}
+- **恢复时间**：{{ .EndsAt | tz "Asia/Shanghai" | date "2006-01-02 15:04:05 -0700" }}{{ end }}{{ if .Annotations.summary }}
+
+**摘要**：{{ .Annotations.summary }}{{ end }}{{ if .Annotations.description }}
+
+**详情**：{{ .Annotations.description }}{{ end }}{{ if .Annotations.runbook_url }}
+
+[处理手册]({{ .Annotations.runbook_url }}){{ end }}{{ if .PanelURL }}
+
+[定位图表]({{ .PanelURL }}){{ end }}{{ if .DashboardURL }}
+
+[打开看板]({{ .DashboardURL }}){{ end }}{{ if .GeneratorURL }}
+
+[查看规则]({{ .GeneratorURL }}){{ end }}{{ if and (eq .Status "firing") .SilenceURL }}
+
+[临时静默]({{ .SilenceURL }}){{ end }}
+{{ end }}{{ end }}{{ if gt (len .Alerts) 10 }}
+
+仅展示前 10 条，请到 Grafana 查看全部告警。{{ end }}
+{{- end }}

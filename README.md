@@ -410,6 +410,19 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 另有 `monitoring/grafana/alerts/admin-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Admin HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-admin-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
 
+### 钉钉通知模板
+
+`monitoring/grafana/notifications/dingtalk.tmpl` 定义 `iot.dingtalk.title` 和 `iot.dingtalk.message`，本地保存于 Grafana 的 `iot.dingtalk` 模板组。联系人引用见 `dingtalk-contact.json`；这是不含 URL 的合并配置，不可直接覆盖完整联系人。
+
+- 标题包含固定 `grafana` 关键词、触发/恢复状态、规则名称和数量。
+- 使用 ActionCard，正文按实例展示级别、服务、路由、HTTP 状态、摘要、详情，以及 UTC+8 开始/恢复时间；无值的可选字段不展示。
+- 按规则提供的 URL 展示图表、看板、规则、处理手册和临时静默链接，单条消息最多展示 10 个实例。链接继承 Grafana 对外地址，目前为 localhost，其他设备访问需另行配置可达地址。
+- `disableResolveMessage: false` 开启恢复通知；此次模板规范化不改变规则阈值、评估周期、分组或重复通知频率。
+- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再将联系人片段合并到现有“钉钉”联系人，保留 UID 和加密 URL。不要把机器人 URL/token 写入仓库。
+- 修改模板优先在通知模板组中进行。已打开的联系人编辑页必须刷新后再保存，避免旧表单覆盖模板引用。
+
+设置 `GRAFANA_ADMIN_PASSWORD` 后运行 `python3 scripts/test-grafana-notification-template.py -v`，通过本地 Grafana 模板预览 API 验证触发、恢复、缺失字段和多实例截断；不会向钉钉发消息。可用 `GRAFANA_URL`、`GRAFANA_USER` 指定其他测试实例。
+
 ## Helm 部署
 
 仓库里已经提供 Helm Chart：[`charts/iot`](charts/iot)

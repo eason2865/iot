@@ -1,5 +1,14 @@
 # AI Handover
 
+## 2026-09-16 钉钉联系人与通知模板规范化
+- 用户明确限定范围为联系人标题、正文、卡片格式、恢复通知和模板，要求 Webhook URL 保持不变；不调整告警条件、阈值、防抖或通知频率。
+- 新增 `monitoring/grafana/notifications/dingtalk.tmpl`，通过 API 保存为可编辑模板组 `iot.dingtalk`，定义 `iot.dingtalk.title` / `iot.dingtalk.message`；联系人 `ffyeiqivgwi68f` 改为引用模板，保留 actionCard，`disableResolveMessage=false`。
+- 标题和正文固定带 `grafana` 关键词。区分 firing/resolved，显示数量、级别、服务、路由、摘要/详情、UTC+8 时间和可用的看板/图表/规则/静默链接；可选字段隐藏，最多显示 10 个实例。不虚构环境、负责人等标签。
+- 仓库联系人片段不含 URL，更新时合并并保留加密 URL。已在内存中对比更新前后解密 URL 完全一致，同时断言所有规则及通知策略均未改变；未记录或提交 token。
+- `scripts/test-grafana-notification-template.py` 通过 Grafana 预览 API 验证触发、恢复、缺失可选字段、混合状态及 10 条截断，4 项通过，不发送群消息。
+- 另用新联系人模板渲染一条明确标注的“钉钉模板格式测试”，临时捕获并转发到原 URL，确认钉钉业务响应 errcode=0；捕获服务已关闭，联系人未保存临时转发地址。未伪造真实业务恢复。
+- 图表链接仍继承 localhost，仅本机可达；未修改全局 root_url。用户旧联系人编辑页需刷新，避免覆盖新模板引用。
+
 ## 2026-09-16 告警规则跳转入口修正
 - 用户旧页面的 `View alert rule` 生成 `pri$grafana$IoT$Admin HTTP$...` 标识，后续按目录显示名 `IoT` 请求 ruler API，复现 HTTP 403。同一管理员用目录 UID `efobmswzeefi8d` 查询该组成功，不应通过扩大权限绕过。
 - 本次新打开的内置浏览器在修改前已生成两条正确规则 UID 链接；未复现同样的前端错误生成过程，因此旧页面状态/规则元数据未加载只是可能原因，不能断言为权限或单一配置错误。

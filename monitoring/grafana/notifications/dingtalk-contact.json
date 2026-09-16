@@ -1,0 +1,9 @@
+{
+  "type": "dingding",
+  "disableResolveMessage": false,
+  "settings": {
+    "msgType": "actionCard",
+    "title": "{{ template \"iot.dingtalk.title\" . }}",
+    "message": "{{ template \"iot.dingtalk.message\" . }}"
+  }
+}

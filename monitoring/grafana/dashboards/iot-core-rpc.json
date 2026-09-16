@@ -394,6 +394,6 @@
   "timezone": "browser",
   "title": "IoT Core RPC",
   "uid": "iot-core-rpc",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

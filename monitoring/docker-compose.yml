@@ -92,6 +92,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: iot-grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -104,6 +105,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - etcd
@@ -136,6 +138,8 @@ services:
 
 volumes:
   etcd-data:
+  grafana-data:
+    name: iot-grafana-data
 
 networks:
   kind:

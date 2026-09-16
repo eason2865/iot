@@ -377,6 +377,8 @@ docker compose -f monitoring/docker-compose.yml up -d
 Grafana 默认账号：
 
 - URL: http://localhost:3000
+- IoT 目录固定地址：http://localhost:3000/dashboards/f/efobmswzeefi8d/
+- Grafana 数据保存在 Docker 命名卷 `iot-grafana-data`，容器使用 `unless-stopped` 自动重启策略；重建容器保留登录配置和数据库，勿删除该数据卷。
 - User: `admin`
 - Password: `admin`
 - 可用 dashboard：`IoT Overview`、`IoT Admin API`、`IoT Pipeline`、`IoT Core RPC`

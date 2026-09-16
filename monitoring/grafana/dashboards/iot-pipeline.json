@@ -558,6 +558,6 @@
   "timezone": "browser",
   "title": "IoT Pipeline",
   "uid": "iot-pipeline",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

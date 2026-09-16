@@ -1,5 +1,12 @@
 # AI Handover
 
+## 2026-09-16 Grafana 链接与持久化恢复
+- 原目录链接 `efobmswzeefi8d` 返回 404；Grafana 未配置自动重启，数据库此前位于容器可写层，provisioning 也未固定 folderUid。
+- Compose 增加 `restart: unless-stopped` 和命名卷 `iot-grafana-data:/var/lib/grafana`；固定 provisioning 的 `folderUid: efobmswzeefi8d`。
+- 四个仪表盘 JSON 的版本从 1 调整为 2，触发 provisioning 更新并迁移到固定目录，仪表盘 UID 和面板内容不变。
+- 已停止旧容器做冷备份：`/Users/lyc/.local/share/iot/backups/grafana-before-persistence-20260916/`；将数据库及插件等文件复制到命名卷，再重建容器。
+- 已验证强制重建后健康检查正常、原目录 API 正常、目录下 4 个仪表盘保留，Prometheus 数据源健康检查为 OK。
+
 ## 2026-09-10 应用镜像单 tag
 - 本地应用镜像只保留 `iot-app:2.0`；本地 Helm 脚本改用该镜像的 RepoDigest 部署，不再创建 `local-<hash>` tag，并保留按内容更新 Pod 的能力。
 - kind 导入仍使用原始 `APP_IMAGE` tag；若本地镜像缺少匹配的 RepoDigest，则明确失败，避免把经典 Docker 的 config ID 当成 manifest digest。

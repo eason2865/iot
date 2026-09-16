@@ -4,6 +4,7 @@ providers:
   - name: iot
     orgId: 1
     folder: IoT
+    folderUid: efobmswzeefi8d
     type: file
     disableDeletion: false
     editable: false

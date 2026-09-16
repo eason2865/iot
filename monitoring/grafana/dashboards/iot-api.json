@@ -464,6 +464,6 @@
   "timezone": "browser",
   "title": "IoT Admin API",
   "uid": "iot-admin-api",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

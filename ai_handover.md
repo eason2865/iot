@@ -1,5 +1,12 @@
 # AI Handover
 
+## 2026-09-16 healthz QPS 阈值告警
+- 按用户截图新增 `/healthz`、`2xx` 专属规则 `iot-admin-healthz-qps`，模板 `monitoring/grafana/alerts/admin-healthz-qps.json`；与 HTTP 图表保持相同的 5 分钟 rate，严格 > 0.3 req/s。
+- 使用已有 `Admin HTTP` 分组（60 秒评估），`for: 0s`、通知 `group_wait: 0s`，接收人为已有“钉钉”。不修改 5xx 或暂停中的 GC 规则。
+- 关联 `iot-admin-api` panel 6；该序列增加 0.3 橙色虚线阈值，看板版本升到 4 并重新加载。
+- 已用 Grafana 表达式 API 验证 0.299、0.3 不触发，0.301 触发。真实指标在 15:07:30 评估为 0.3016918472，health=ok、状态 Alerting；panel 6 产生 Normal -> Alerting 标记，通知日志确认向钉钉发起发送（未代替用户确认群内收件）。
+- 健康检查速率贴近 0.3，采样抖动可能导致反复触发/恢复；当前遵循用户要求，未额外添加持续时间或恢复滞回。
+
 ## 2026-09-16 Admin HTTP 告警与看板关联
 - 用户选择监控 HTTP 5xx 持续 1 分钟；新增可导入规则模板 `monitoring/grafana/alerts/admin-http-5xx.json`，本地已通过 provisioning API 导入且禁用只读 provenance，允许后续在 UI 编辑。
 - 规则 UID `iot-admin-http-5xx`，分组 `Admin HTTP`，本地评估间隔 60 秒；表达式按 route/status 计算 5 分钟 5xx QPS，阈值 > 0，pending 1 分钟，无 5xx 序列时回退 0（不负责服务离线检测）。发送到已有“钉钉”联系人，仓库无 Webhook/token。

@@ -406,6 +406,8 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-admin-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
 
+另有 `monitoring/grafana/alerts/admin-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Admin HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-admin-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
+
 ## Helm 部署
 
 仓库里已经提供 Helm Chart：[`charts/iot`](charts/iot)

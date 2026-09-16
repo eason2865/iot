@@ -247,7 +247,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "HTTP Requests by Route / Status",
-      "description": "告警按 route/status 检测 HTTP 5xx：最近 5 分钟平均 QPS > 0 持续 1 分钟。红色曲线为 5xx，告警状态变化显示为时间标记；标记对应评估时间，并非单次请求发生时间。",
+      "description": "关联告警：HTTP 5xx 的 5 分钟平均 QPS > 0 持续 1 分钟；/healthz、2xx 的 5 分钟平均 QPS > 0.3 则在下次评估时直接触发。红色曲线为 5xx；/healthz 的橙色虚线为 0.3 阈值。时间标记为告警评估状态变化，并非单次请求发生时间。",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -268,6 +268,22 @@
             "properties": [
               { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
               { "id": "custom.lineWidth", "value": 3 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "/healthz / 2xx" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "orange", "value": 0.3 }
+                  ]
+                }
+              },
+              { "id": "custom.thresholdsStyle", "value": { "mode": "dashed" } }
             ]
           }
         ]
@@ -503,6 +519,6 @@
   "timezone": "browser",
   "title": "IoT Admin API",
   "uid": "iot-admin-api",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }

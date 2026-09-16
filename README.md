@@ -13,11 +13,11 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 
 这是一套已经把物联网关键闭环打通的开源基础设施，重点能力包括：
 
-- 先拆出一个核心业务微服务 `core-rpc`
-- `admin` 作为 go-zero REST 网关，统一对外提供 API
-- `core-rpc` 通过 gRPC + protobuf 暴露核心业务，并用 etcd 做服务发现
-- `ingress` 负责 MQTT 接入、标准化和事件解耦
-- `worker` 负责时序落库、业务状态更新和命令投递
+- 核心业务微服务 `iot-core`
+- `management-api` 作为 go-zero REST 网关，统一对外提供 API
+- `iot-core` 通过 gRPC + protobuf 暴露核心业务，并用 etcd 做服务发现
+- `telemetry-ingestor` 负责 MQTT 接入、标准化和事件解耦
+- `device-worker` 负责时序落库、业务状态更新和命令投递
 - `demo` 负责多租户多设备造流和 ACK 回执，适合联调和压测
 
 ## 一图看懂
@@ -28,9 +28,10 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 
 ## 核心特性
 
-- 设备接入链路：MQTT -> EMQX -> Go `ingress`
-- 核心服务拆分：`admin` 负责 REST 网关，`core-rpc` 负责核心业务
-- 服务发现：`core-rpc` 通过 etcd 注册与发现，支持本地 Docker 部署
+- 设备接入链路：MQTT -> EMQX -> Go `telemetry-ingestor`
+- 核心服务拆分：`management-api` 负责 REST 网关，`iot-core` 负责核心业务
+- 服务发现：`iot-core` 通过 etcd 注册与发现，支持本地 Docker 部署
+- 本地改名部署：新的 `iot-device-worker` Kafka 消费组从最新 offset 开始，避免重放迁移前已完成的命令和遥测；后续重启继续使用已提交的 offset。
 - 异步解耦：遥测、命令和事件统一进入 Kafka
 - 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
 - 命令闭环：创建、下发、ACK、状态机更新
@@ -40,8 +41,8 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 
 ## 当前实现
 
-- 5 个可启动入口：`cmd/admin`、`cmd/core-rpc`、`cmd/demo`、`cmd/ingress`、`cmd/worker`
-- `admin` 使用 go-zero REST，`core-rpc` 使用 gRPC + protobuf + etcd
+- 5 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`
+- `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf + etcd
 - 本地 Docker 编排包含 etcd，适配 Helm / k8s 本地联调
 - 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
 - 1 份 OpenAPI 定义：`docs/openapi.json`
@@ -51,10 +52,10 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 ## 观测
 
 - 每个服务都暴露 `/metrics`
-- `admin` 和 `core-rpc` 已启用 go-zero 的 trace / log middleware
+- `management-api` 和 `iot-core` 已启用 go-zero 的 trace / log middleware
 - 服务启动时会开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`
-- HTTP 请求会自动补 `X-Request-Id`，并透传到 `admin -> core-rpc` 的 gRPC 调用
-- `demo` 发往 `admin` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
+- HTTP 请求会自动补 `X-Request-Id`，并透传到 `management-api -> iot-core` 的 gRPC 调用
+- `demo` 发往 `management-api` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
 - 标准输出日志已切换为结构化 JSON，便于在容器和本地直接检索
 - 可通过以下环境变量调整 tracing：
   - `OTEL_DISABLED=true`
@@ -92,9 +93,9 @@ export POSTGRES_DSN=postgres://iot:iot123@localhost:5432/iot?sslmode=disable
 export KAFKA_BROKERS=localhost:9092
 export EMQX_URL=tcp://127.0.0.1:1883
 export TDENGINE_DSN=root:taosdata@http(127.0.0.1:6041)/iot
-export CORE_RPC_ETCD_HOSTS=localhost:2379
-export CORE_RPC_ETCD_KEY=iot/core-rpc
-export CORE_RPC_LISTEN_ON=:9001
+export IOT_CORE_ETCD_HOSTS=localhost:2379
+export IOT_CORE_ETCD_KEY=iot/iot-core
+export IOT_CORE_LISTEN_ON=:9001
 ```
 
 可选的 topic 和客户端标识配置：
@@ -103,8 +104,8 @@ export CORE_RPC_LISTEN_ON=:9001
 export KAFKA_TELEMETRY_TOPIC=iot.telemetry
 export KAFKA_COMMAND_TOPIC=iot.command
 export EMQX_TOPIC_FILTER=tenant/+/device/+/telemetry
-export EMQX_INGRESS_CLIENT_ID=iot-ingress
-export EMQX_WORKER_CLIENT_ID=iot-worker
+export EMQX_TELEMETRY_INGESTOR_CLIENT_ID=iot-telemetry-ingestor
+export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
 export TDENGINE_TABLE=telemetry
 ```
 
@@ -119,11 +120,11 @@ export LISTEN_ADDR=:8081
 ### 3. 启动服务
 
 ```bash
-go run ./cmd/core-rpc
-go run ./cmd/admin
+go run ./cmd/iot-core
+go run ./cmd/management-api
 go run ./cmd/demo
-go run ./cmd/ingress
-go run ./cmd/worker
+go run ./cmd/telemetry-ingestor
+go run ./cmd/device-worker
 ```
 
 常用开发命令：
@@ -164,10 +165,10 @@ make build
 如果你只想快速理解当前版本，按这个顺序看：
 
 1. 设备通过 MQTT 进入 EMQX
-2. `ingress` 负责标准化和事件解耦
-3. `admin` 通过 gRPC 调用 `core-rpc`
-4. `core-rpc` 使用 etcd 做服务发现
-5. `worker` 消费 Kafka，完成时序和状态落库
+2. `telemetry-ingestor` 负责标准化和事件解耦
+3. `management-api` 通过 gRPC 调用 `iot-core`
+4. `iot-core` 使用 etcd 做服务发现
+5. `device-worker` 消费 Kafka，完成时序和状态落库
 
 这套拆法的原则是先保留一个清晰的核心边界，再根据业务压力继续扩展，而不是一下拆成很多很难排障的小服务。
 
@@ -177,13 +178,13 @@ make build
 
 - 按配置创建多租户和多设备拓扑
 - 随机发布 telemetry 到 MQTT
-- 随机向 `admin` 创建 command 请求
+- 随机向 `management-api` 创建 command 请求
 - 订阅各租户 command topic，并自动回 ACK
 
 常用环境变量：
 
 ```bash
-export DEMO_ADMIN_URL=http://127.0.0.1:8080
+export DEMO_MANAGEMENT_API_URL=http://127.0.0.1:8080
 export DEMO_MQTT_URL=tcp://127.0.0.1:1883
 export DEMO_TENANT_COUNT=5
 export DEMO_DEVICES_PER_TENANT=10
@@ -259,22 +260,22 @@ tenant/{tenantId}/device/{deviceId}/...
 ```text
 iot/
 ├── cmd/
-│   ├── admin/      # 查询与管理 API
-│   ├── core-rpc/   # 核心业务 gRPC 服务
+│   ├── management-api/      # 查询与管理 API
+│   ├── iot-core/            # 核心业务 gRPC 服务
 │   ├── demo/       # 随机造流与 ACK 的模拟器
-│   ├── ingress/    # MQTT 接入与事件解耦
-│   └── worker/     # Kafka 消费、落库和下行处理
+│   ├── telemetry-ingestor/  # MQTT 接入与事件解耦
+│   └── device-worker/       # Kafka 消费、落库和下行处理
 ├── internal/
-│   ├── adminapi/   # REST 网关，负责 HTTP 到 core-rpc 的转换
+│   ├── adminapi/   # REST 网关，负责 HTTP 到 iot-core 的转换
 │   ├── bootstrap/  # 启动装配
 │   ├── contracts/  # topic、envelope、状态机、OpenAPI 和 Schema 契约
 │   ├── core/       # 核心业务 gRPC 服务实现
 │   ├── demo/       # 造流模拟器运行时
-│   ├── platform/   # 仓储、消息、指标、worker、MQTT/TDengine 适配
+│   ├── platform/   # 仓储、消息、指标、device-worker、MQTT/TDengine 适配
 │   └── server/     # HTTP 基础能力
 ├── charts/iot/     # Helm 部署清单
 ├── migrations/     # 数据库迁移
-├── proto/          # core-rpc protobuf 契约
+├── proto/          # iot-core protobuf 契约
 ├── monitoring/     # 本地 Prometheus / Grafana 配置
 └── docs/           # OpenAPI、Schema、技术方案和 ADR
 ```
@@ -291,7 +292,9 @@ iot/
 当前推荐的本地形态是：
 
 - Docker：PostgreSQL / Kafka / EMQX / TDengine / etcd / Prometheus / Grafana / demo
-- Kubernetes + Helm：`admin` / `core-rpc` / `ingress` / `worker`
+- Kubernetes + Helm：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`
+
+Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
 先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 
@@ -317,16 +320,16 @@ docker inspect kafka --format '{{range .Config.Env}}{{println .}}{{end}}' | grep
 # 期望：KAFKA_CFG_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://192.168.65.254:29092
 ```
 
-宿主机运行 Go E2E 时使用 `localhost:9092`，k8s Pod 访问 Docker Kafka 时使用 `192.168.65.254:29092`。如果 Kafka 只配置单个 advertised listener，客户端会在拿到 broker metadata 后被引导到另一侧不可达的地址，表现为 `core-rpc` / `ingress` / `worker` Kafka 写入或消费超时。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
+宿主机运行 Go E2E 时使用 `localhost:9092`，k8s Pod 访问 Docker Kafka 时使用 `192.168.65.254:29092`。如果 Kafka 只配置单个 advertised listener，客户端会在拿到 broker metadata 后被引导到另一侧不可达的地址，表现为 `iot-core` / `telemetry-ingestor` / `device-worker` Kafka 写入或消费超时。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
 
 安装业务服务：
 
 ```bash
 helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout 180s
-kubectl rollout status deploy/core-rpc -n iot
-kubectl rollout status deploy/admin -n iot
-kubectl rollout status deploy/ingress -n iot
-kubectl rollout status deploy/worker -n iot
+kubectl rollout status deploy/iot-core -n iot
+kubectl rollout status deploy/management-api -n iot
+kubectl rollout status deploy/telemetry-ingestor -n iot
+kubectl rollout status deploy/device-worker -n iot
 ```
 
 也可以使用仓库脚本一键完成外部依赖连通性检查、Helm 安装和 rollout 验证：
@@ -335,8 +338,8 @@ kubectl rollout status deploy/worker -n iot
 scripts/helm-deploy-local.sh
 ```
 
-该脚本会强制 apps-only 部署，只安装 `admin`、`ingress`、`worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
-现在脚本同样会部署并等待 `core-rpc`，它是 `admin` 的 gRPC 核心依赖。
+该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
+其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
 脚本从当前本地 `APP_IMAGE` 读取仓库摘要（RepoDigest），以 `iot-app@sha256:...` 传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像。本地只保留 `iot-app:2.0`，不再生成 `local-<hash>` tag；若镜像尚无仓库摘要，脚本会提示先拉取或发布镜像再部署。
 
 默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 Docker Desktop 网关 IP 连接 Docker 服务。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
@@ -366,7 +369,7 @@ docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
 ## 本地监控
 
 Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 通过本机 port-forward 抓取 k8s 业务服务的 `/metrics`，Grafana 数据源已经预置为 Docker Compose 内部地址 `http://prometheus:9090`。
-现在本地监控会同时覆盖 `admin / core-rpc / ingress / worker / demo`，其中 `core-rpc` 走独立的 gRPC 指标端口 `9101`。
+现在本地监控会同时覆盖 `management-api / iot-core / telemetry-ingestor / device-worker / demo`，其中 `iot-core` 走独立的 gRPC 指标端口 `9101`。
 
 ```bash
 helm upgrade --install iot charts/iot -n iot --create-namespace
@@ -381,34 +384,34 @@ Grafana 默认账号：
 - Grafana 数据保存在 Docker 命名卷 `iot-grafana-data`，容器使用 `unless-stopped` 自动重启策略；重建容器保留登录配置和数据库，勿删除该数据卷。
 - User: `admin`
 - Password: `admin`
-- 可用 dashboard：`IoT Overview`、`IoT Admin API`、`IoT Pipeline`、`IoT Core RPC`
+- 可用 dashboard：`IoT Overview`、`IoT Management API`、`IoT Pipeline`、`IoT Core`
 
 已预置的面板：
 
 - [IoT Overview](http://localhost:3000/d/iot-overview/iot-overview)
-- [IoT Admin API](http://localhost:3000/d/iot-admin-api/iot-admin-api)
+- [IoT Management API](http://localhost:3000/d/iot-management-api/iot-management-api)
 - [IoT Pipeline](http://localhost:3000/d/iot-pipeline/iot-pipeline)
 
-### Admin API 告警可视化
+### Management API 告警可视化
 
-`IoT Admin API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
+`IoT Management API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
 
 看板顶部另有两条固定 UID 的规则入口，避免通过目录显示名拼接规则地址。若旧浏览器页面中的 `View alert rule` 跳到 `pri%24grafana%24IoT...` 并报 403，请完整刷新浏览器页面（不是仅点击看板的 Refresh），或使用顶部固定入口；不要为此扩大目录权限。Alert list 的内置数据源名称为 `-- Grafana --`，与 API 中的规则源标识 `grafana` 不同。
 
-规则模板为 `monitoring/grafana/alerts/admin-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
+规则模板为 `monitoring/grafana/alerts/management-api-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
 
 该模板通过 Grafana API 导入，不做只读文件 provisioning，导入后仍可在页面调整阈值、暂停和通知渠道。新环境先创建名为“钉钉”的联系人（或修改模板中的 receiver）；Webhook 凭证只保存在 Grafana，不进入仓库。首次导入示例：
 
 ```bash
 curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
   -H 'Content-Type: application/json' -H 'X-Disable-Provenance: true' \
-  --data-binary @monitoring/grafana/alerts/admin-http-5xx.json \
+  --data-binary @monitoring/grafana/alerts/management-api-http-5xx.json \
   http://localhost:3000/api/v1/provisioning/alert-rules
 ```
 
-已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-admin-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
+已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
 
-另有 `monitoring/grafana/alerts/admin-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Admin HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-admin-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
+另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
 
 ### 钉钉通知模板
 
@@ -451,10 +454,10 @@ scripts/helm-deploy-local.sh
 
 脚本默认只部署应用本身：
 
-- `admin`
-- `core-rpc`
-- `ingress`
-- `worker`
+- `management-api`
+- `iot-core`
+- `telemetry-ingestor`
+- `device-worker`
 
 脚本默认会先从 k8s Pod 内检查外部 PostgreSQL、Kafka、EMQX、TDengine 端口是否可达。若目标环境使用云服务或 CI 不需要这个检查，可以关闭：
 

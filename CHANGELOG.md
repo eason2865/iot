@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Go service entrypoints for `admin`, `ingress`, `worker`, and `demo`.
+- Go service entrypoints for `management-api`, `telemetry-ingestor`, `device-worker`, and `demo`.
 - MQTT ingestion through EMQX and asynchronous event flow through Kafka.
 - PostgreSQL persistence for tenants, devices, telemetry, state, and commands.
 - TDengine writer for time-series telemetry.

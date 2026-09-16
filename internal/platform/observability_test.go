@@ -13,12 +13,12 @@ import (
 )
 
 func TestTraceConfigCreatesFileEndpointDir(t *testing.T) {
-	endpoint := filepath.Join(t.TempDir(), "nested", "trace", "admin.log")
+	endpoint := filepath.Join(t.TempDir(), "nested", "trace", "management-api.log")
 	t.Setenv("OTEL_DISABLED", "false")
 	t.Setenv("OTEL_BATCHER", "file")
 	t.Setenv("OTEL_ENDPOINT", endpoint)
 
-	cfg := TraceConfig("admin/api")
+	cfg := TraceConfig("management-api/api")
 
 	if cfg.Endpoint != endpoint {
 		t.Fatalf("unexpected trace endpoint: got %q want %q", cfg.Endpoint, endpoint)

@@ -1,4 +1,4 @@
-# ADR 0001: Split Core RPC From Admin API
+# ADR 0001: Split IoT Core From Management API
 
 ## Status
 
@@ -10,7 +10,7 @@ The platform needs a stable business module for tenants, devices, telemetry, com
 
 ## Decision
 
-Keep `core-rpc` as the core business gRPC service and keep `admin`/`adminapi` as the REST gateway. `adminapi` discovers `core-rpc` through etcd and translates HTTP requests to protobuf calls.
+Keep `iot-core` as the core business gRPC service and keep `management-api`/`adminapi` as the REST gateway implementation. `adminapi` discovers `iot-core` through etcd and translates HTTP requests to protobuf calls.
 
 ## Consequences
 

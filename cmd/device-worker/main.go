@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	if err := bootstrap.Run("worker"); err != nil {
+	if err := bootstrap.Run("device-worker"); err != nil {
 		log.Fatal(err)
 	}
 }

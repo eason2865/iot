@@ -57,7 +57,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, telemetryTopic, commandTopic)
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
-			groupID = "iot-worker"
+			groupID = "iot-device-worker"
 		}
 		startOffset := cfg.KafkaStartOffset
 		if startOffset == 0 {
@@ -85,7 +85,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		if cfg.MQTTClientID != "" {
 			opts.SetClientID(cfg.MQTTClientID)
 		} else {
-			opts.SetClientID("iot-worker")
+			opts.SetClientID("iot-device-worker")
 		}
 		if cfg.MQTTUsername != "" {
 			opts.SetUsername(cfg.MQTTUsername)
@@ -135,7 +135,7 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
 		log.Printf("command ack unmarshal error: %v", err)
 		if w.metrics != nil {
-			w.metrics.IncWorker("ack", "error")
+			w.metrics.IncDeviceWorker("ack", "error")
 		}
 		return
 	}
@@ -146,12 +146,12 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 		if _, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
 			log.Printf("command ack store error: %v", err)
 			if w.metrics != nil {
-				w.metrics.IncWorker("ack", "error")
+				w.metrics.IncDeviceWorker("ack", "error")
 			}
 		} else {
 			log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
 			if w.metrics != nil {
-				w.metrics.IncWorker("ack", "ok")
+				w.metrics.IncDeviceWorker("ack", "ok")
 			}
 		}
 	}
@@ -161,7 +161,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return nil
 	}
-	log.Printf("worker starting: telemetryReader=%t commandReader=%t mqtt=%t", w.telemetryReader != nil, w.commandReader != nil, w.mqtt != nil)
+	log.Printf("device-worker starting: telemetryReader=%t commandReader=%t mqtt=%t", w.telemetryReader != nil, w.commandReader != nil, w.mqtt != nil)
 	if w.mqtt != nil {
 		token := w.mqtt.Connect()
 		token.Wait()
@@ -207,7 +207,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			}
 			log.Printf("telemetry fetch error: %v", err)
 			if w.metrics != nil {
-				w.metrics.IncWorker("telemetry", "error")
+				w.metrics.IncDeviceWorker("telemetry", "error")
 			}
 			if isRetriableKafkaError(err) {
 				sleepBeforeKafkaRetry(ctx)
@@ -219,7 +219,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 		if err := json.Unmarshal(msg.Value, &rec); err != nil {
 			log.Printf("telemetry unmarshal error: %v", err)
 			if w.metrics != nil {
-				w.metrics.IncWorker("telemetry", "error")
+				w.metrics.IncDeviceWorker("telemetry", "error")
 			}
 			_ = w.telemetryReader.CommitMessages(ctx, msg)
 			continue
@@ -242,7 +242,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if _, err := w.store.RecordTelemetry(env); err != nil {
 				log.Printf("telemetry store error: %v", err)
 				if w.metrics != nil {
-					w.metrics.IncWorker("telemetry", "error")
+					w.metrics.IncDeviceWorker("telemetry", "error")
 				}
 				_ = w.telemetryReader.CommitMessages(ctx, msg)
 				continue
@@ -252,14 +252,14 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if err := w.tdengine.WriteTelemetry(rec); err != nil {
 				log.Printf("tdengine write error: %v", err)
 				if w.metrics != nil {
-					w.metrics.IncWorker("telemetry", "error")
+					w.metrics.IncDeviceWorker("telemetry", "error")
 				}
 				_ = w.telemetryReader.CommitMessages(ctx, msg)
 				continue
 			}
 		}
 		if w.metrics != nil {
-			w.metrics.IncWorker("telemetry", "ok")
+			w.metrics.IncDeviceWorker("telemetry", "ok")
 		}
 		_ = w.telemetryReader.CommitMessages(ctx, msg)
 	}
@@ -274,7 +274,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			}
 			log.Printf("command fetch error: %v", err)
 			if w.metrics != nil {
-				w.metrics.IncWorker("command", "error")
+				w.metrics.IncDeviceWorker("command", "error")
 			}
 			if isRetriableKafkaError(err) {
 				sleepBeforeKafkaRetry(ctx)
@@ -286,7 +286,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		if err := json.Unmarshal(msg.Value, &cmd); err != nil {
 			log.Printf("command unmarshal error: %v", err)
 			if w.metrics != nil {
-				w.metrics.IncWorker("command", "error")
+				w.metrics.IncDeviceWorker("command", "error")
 			}
 			_ = w.commandReader.CommitMessages(ctx, msg)
 			continue
@@ -301,7 +301,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if err != nil {
 				log.Printf("command topic error: tenant=%s device=%s id=%s err=%v", cmd.TenantID, cmd.DeviceID, cmd.ID, err)
 				if w.metrics != nil {
-					w.metrics.IncWorker("command", "error")
+					w.metrics.IncDeviceWorker("command", "error")
 				}
 				_ = w.commandReader.CommitMessages(ctx, msg)
 				continue
@@ -318,7 +318,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if err != nil {
 				log.Printf("command marshal error: %v", err)
 				if w.metrics != nil {
-					w.metrics.IncWorker("command", "error")
+					w.metrics.IncDeviceWorker("command", "error")
 				}
 				_ = w.commandReader.CommitMessages(ctx, msg)
 				continue
@@ -328,14 +328,14 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if err := token.Error(); err != nil {
 				log.Printf("mqtt publish error: %v", err)
 				if w.metrics != nil {
-					w.metrics.IncWorker("command", "error")
+					w.metrics.IncDeviceWorker("command", "error")
 				}
 				_ = w.commandReader.CommitMessages(ctx, msg)
 				continue
 			}
 		}
 		if w.metrics != nil {
-			w.metrics.IncWorker("command", "ok")
+			w.metrics.IncDeviceWorker("command", "ok")
 		}
 		_ = w.commandReader.CommitMessages(ctx, msg)
 	}

@@ -280,21 +280,21 @@
             <section id="architecture" data-tab-panel="architecture">
               <h2>2. 总体架构</h2>
               <p>
-                平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，ingress 做鉴权和标准化，
-                将事件写入 Kafka，再由 worker 异步落 TDengine 和 PostgreSQL；管理后台通过 go-zero REST
-                调用 core-rpc，核心业务通过 gRPC + protobuf + etcd 独立提供租户、设备、遥测和命令能力。
+                平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，telemetry-ingestor 做鉴权和标准化，
+                将事件写入 Kafka，再由 device-worker 异步落 TDengine 和 PostgreSQL；管理后台通过 go-zero REST
+                调用 iot-core，核心业务通过 gRPC + protobuf + etcd 独立提供租户、设备、遥测和命令能力。
               </p>
               <div class="diagram">
                 <div class="mermaid">
 graph TD
   D[设备] -->|MQTT PUBLISH| E[EMQX]
-  E -->|消息回调/订阅| I[Go ingress]
+  E -->|消息回调/订阅| I[Go telemetry-ingestor]
   I -->|标准事件| K[Kafka]
-  K --> W[Go worker]
+  K --> W[Go device-worker]
   W --> T[TDengine]
   W --> P[PostgreSQL]
-  U[管理后台/外部系统] --> A[Go admin]
-  A --> R[core-rpc]
+  U[管理后台/外部系统] --> A[Go management-api]
+  A --> R[iot-core]
   R --> P
   R --> T
   R --> M[etcd]
@@ -329,11 +329,11 @@ graph TD
                 <div class="mermaid">
 flowchart LR
   subgraph K8S[Kubernetes 单地域集群 / Helm]
-    G[API Gateway/Ingress]
-    I[Go ingress]
-    A[Go admin]
-    R[core-rpc]
-    W[Go worker]
+    G[API Gateway]
+    I[Go telemetry-ingestor]
+    A[Go management-api]
+    R[iot-core]
+    W[Go device-worker]
   end
   subgraph EDGE[接入基础设施]
     E[EMQX]
@@ -390,9 +390,9 @@ flowchart LR
                         <ul>
                           <li>设备发布 MQTT 到上行 Topic。</li>
                           <li>EMQX 完成连接和 ACL 判断。</li>
-                          <li>ingress 校验设备身份、版本和字段。</li>
+                          <li>telemetry-ingestor 校验设备身份、版本和字段。</li>
                           <li>标准事件写入 Kafka。</li>
-                          <li>worker 消费后落 TDengine，并同步关键状态到 PostgreSQL。</li>
+                          <li>device-worker 消费后落 TDengine，并同步关键状态到 PostgreSQL。</li>
                         </ul>
                       </div>
                       <div class="panel">
@@ -401,9 +401,9 @@ flowchart LR
 sequenceDiagram
   participant D as Device
   participant E as EMQX
-  participant I as Go ingress
+  participant I as Go telemetry-ingestor
   participant K as Kafka
-  participant W as Go worker
+  participant W as Go device-worker
   participant T as TDengine
   participant P as PostgreSQL
   D->>E: PUBLISH /telemetry
@@ -424,8 +424,8 @@ sequenceDiagram
                       <div class="panel">
                         <h3>下行命令步骤</h3>
                         <ul>
-                          <li>管理后台创建命令，admin 调用 core-rpc 写业务状态并生成 <span class="inline">commandId</span>。</li>
-                          <li>core-rpc 统一处理命令、租户和设备等核心业务，worker 消费命令事件后按租户与设备上下文发布下行消息。</li>
+                          <li>管理后台创建命令，management-api 调用 iot-core 写业务状态并生成 <span class="inline">commandId</span>。</li>
+                          <li>iot-core 统一处理命令、租户和设备等核心业务，device-worker 消费命令事件后按租户与设备上下文发布下行消息。</li>
                           <li>设备收到命令后返回 ACK。</li>
                           <li>命令状态更新为 <span class="inline">pending / dispatched / sent / acked / timeout / failed</span>。</li>
                         </ul>
@@ -435,11 +435,11 @@ sequenceDiagram
                         <div class="mermaid" id="command-diagram" role="button" tabindex="0" aria-label="放大查看命令时序图" onclick="openDiagramById('command-diagram')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDiagramById('command-diagram')}">
 sequenceDiagram
   participant U as 管理后台
-  participant A as Go admin
-  participant R as core-rpc
+  participant A as Go management-api
+  participant R as iot-core
   participant P as PostgreSQL
   participant K as Kafka
-  participant W as Go worker
+  participant W as Go device-worker
   participant E as EMQX
   participant D as Device
   U->>A: POST /commands
@@ -465,7 +465,7 @@ sequenceDiagram
                         <ul>
                           <li>遥测进入后先做轻量阈值判断。</li>
                           <li>触发后将告警写 Kafka 或 PostgreSQL。</li>
-                          <li>admin 提供告警列表、详情和通知消费入口。</li>
+                          <li>management-api 提供告警列表、详情和通知消费入口。</li>
                         </ul>
                       </div>
                       <div class="panel">
@@ -473,9 +473,9 @@ sequenceDiagram
                         <div class="mermaid">
 sequenceDiagram
   participant D as Device
-  participant I as Go ingress
+  participant I as Go telemetry-ingestor
   participant K as Kafka
-  participant W as Go worker
+  participant W as Go device-worker
   participant P as PostgreSQL
   D->>I: telemetry
   I->>I: threshold / N次连续判断
@@ -803,13 +803,13 @@ flowchart LR
   D[设备] --> E[EMQX]
   DM[demo 模拟器] --> E
   DM --> A
-  E --> I[Go ingress]
+  E --> I[Go telemetry-ingestor]
   I --> K[Kafka]
-  K --> W[Go worker]
+  K --> W[Go device-worker]
   W --> T[TDengine]
   W --> P[PostgreSQL]
-  G[API Gateway/Ingress] --> A[Go admin]
-  A --> R[core-rpc]
+  G[API Gateway] --> A[Go management-api]
+  A --> R[iot-core]
   R --> P
   R --> T
   R --> Z[etcd]
@@ -834,11 +834,11 @@ flowchart LR
               </p>
               <pre>iot/
 ├── cmd/
-│   ├── admin/            # go-zero REST 网关
-│   ├── core-rpc/         # 核心业务 gRPC 服务
+│   ├── management-api/   # go-zero REST 网关
+│   ├── iot-core/         # 核心业务 gRPC 服务
 │   ├── demo/             # 造流与 ACK 模拟器
-│   ├── ingress/          # 接入处理服务入口
-│   └── worker/           # 后台消费者、补偿任务、DLQ 重放
+│   ├── telemetry-ingestor/          # 接入处理服务入口
+│   └── device-worker/           # 后台消费者、补偿任务、DLQ 重放
 ├── internal/
 │   ├── adminapi/
 │   ├── core/
@@ -853,11 +853,11 @@ flowchart LR
                 <div class="panel">
                   <h3>当前代码结构</h3>
                   <ul>
-                    <li><span class="inline">cmd/admin/main.go</span></li>
-                    <li><span class="inline">cmd/core-rpc/main.go</span></li>
+                    <li><span class="inline">cmd/management-api/main.go</span></li>
+                    <li><span class="inline">cmd/iot-core/main.go</span></li>
                     <li><span class="inline">cmd/demo/main.go</span></li>
-                    <li><span class="inline">cmd/ingress/main.go</span></li>
-                    <li><span class="inline">cmd/worker/main.go</span></li>
+                    <li><span class="inline">cmd/telemetry-ingestor/main.go</span></li>
+                    <li><span class="inline">cmd/device-worker/main.go</span></li>
                     <li><span class="inline">internal/adminapi/*</span></li>
                     <li><span class="inline">internal/core/*</span></li>
                     <li><span class="inline">internal/contracts/*</span></li>
@@ -942,7 +942,7 @@ flowchart LR
                       <tr>
                         <td>过早拆分服务</td>
                         <td>当前可控</td>
-                        <td>当前只拆 `core-rpc` 一层，保留统一日志、trace、错误码和发布节奏。</td>
+                        <td>当前只拆 `iot-core` 一层，保留统一日志、trace、错误码和发布节奏。</td>
                       </tr>
                       <tr>
                         <td>时序与元数据边界不清</td>
@@ -957,7 +957,7 @@ flowchart LR
                   <ul>
                     <li>设备直连 EMQX。</li>
                     <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
-                    <li>当前只保留一个核心微服务拆分点 `core-rpc`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
+                    <li>当前只保留一个核心微服务拆分点 `iot-core`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>
                     <li>业务库选 PostgreSQL。</li>

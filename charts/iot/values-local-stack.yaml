@@ -4,16 +4,16 @@ images:
 externalDependencies:
   enabled: false
 
-admin:
+managementApi:
   enabled: true
 
-coreRpc:
+iotCore:
   enabled: true
 
-ingress:
+telemetryIngestor:
   enabled: true
 
-worker:
+deviceWorker:
   enabled: true
 
 demo:

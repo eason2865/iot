@@ -14,7 +14,7 @@ import (
 	"iot/internal/platform"
 )
 
-type AdminAPI interface {
+type ManagementAPI interface {
 	CreateTenant(ctx context.Context, id, name string) error
 	CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error
 	CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error)
@@ -46,11 +46,11 @@ type Config struct {
 }
 
 type Service struct {
-	cfg     Config
-	admin   AdminAPI
-	factory BusFactory
-	rng     *rand.Rand
-	metrics *platform.Metrics
+	cfg           Config
+	managementAPI ManagementAPI
+	factory       BusFactory
+	rng           *rand.Rand
+	metrics       *platform.Metrics
 
 	mu      sync.RWMutex
 	tenants []demoTenant
@@ -76,18 +76,18 @@ type tenantAgent struct {
 	metrics  *platform.Metrics
 }
 
-func NewService(cfg Config, admin AdminAPI, factory BusFactory, rng *rand.Rand) *Service {
+func NewService(cfg Config, managementAPI ManagementAPI, factory BusFactory, rng *rand.Rand) *Service {
 	cfg = normalizeConfig(cfg)
 	if rng == nil {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 	return &Service{
-		cfg:     cfg,
-		admin:   admin,
-		factory: factory,
-		rng:     rng,
-		metrics: cfg.Metrics,
-		agents:  map[string]*tenantAgent{},
+		cfg:           cfg,
+		managementAPI: managementAPI,
+		factory:       factory,
+		rng:           rng,
+		metrics:       cfg.Metrics,
+		agents:        map[string]*tenantAgent{},
 	}
 }
 
@@ -106,8 +106,8 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			Name: fmt.Sprintf("Demo Tenant %d", ti+1),
 		}
 		tenantCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
-		if s.admin != nil {
-			if err := s.admin.CreateTenant(tenantCtx, tenant.ID, tenant.Name); err != nil {
+		if s.managementAPI != nil {
+			if err := s.managementAPI.CreateTenant(tenantCtx, tenant.ID, tenant.Name); err != nil {
 				if s.metrics != nil {
 					s.metrics.IncDemo("topology", "error")
 				}
@@ -126,9 +126,9 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 				ProductID: s.cfg.ProductID,
 			}
 			tenant.Devices = append(tenant.Devices, dev)
-			if s.admin != nil {
+			if s.managementAPI != nil {
 				deviceCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
-				if err := s.admin.CreateDevice(deviceCtx, dev.TenantID, dev.DeviceID, dev.ProductID); err != nil {
+				if err := s.managementAPI.CreateDevice(deviceCtx, dev.TenantID, dev.DeviceID, dev.ProductID); err != nil {
 					if s.metrics != nil {
 						s.metrics.IncDemo("topology", "error")
 					}
@@ -241,12 +241,12 @@ func (s *Service) EmitCommand(ctx context.Context) error {
 		return nil
 	}
 	device := tenant.Devices[s.rng.Intn(len(tenant.Devices))]
-	if s.admin == nil {
+	if s.managementAPI == nil {
 		return nil
 	}
 	payload := json.RawMessage(fmt.Sprintf(`{"switch":"toggle","nonce":%d}`, s.rng.Int63()))
 	commandCtx := platform.ContextWithRequestID(ctx, platform.NewRequestID())
-	_, err := s.admin.CreateCommand(commandCtx, tenant.ID, device.DeviceID, payload)
+	_, err := s.managementAPI.CreateCommand(commandCtx, tenant.ID, device.DeviceID, payload)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.IncDemo("command", "error")

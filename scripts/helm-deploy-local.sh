@@ -80,10 +80,10 @@ COMMON_HELM_ARGS="
   --set externalDependencies.kafkaBrokers=${DOCKER_GATEWAY_HOST}:${DOCKER_GATEWAY_KAFKA_PORT}
   --set externalDependencies.wait.kafkaHost=${DOCKER_GATEWAY_HOST}
   --set externalDependencies.wait.kafkaPort=${DOCKER_GATEWAY_KAFKA_PORT}
-  --set admin.enabled=true
-  --set coreRpc.enabled=true
-  --set ingress.enabled=true
-  --set worker.enabled=true
+  --set managementApi.enabled=true
+  --set iotCore.enabled=true
+  --set telemetryIngestor.enabled=true
+  --set deviceWorker.enabled=true
   --set postgres.enabled=false
   --set kafka.enabled=false
   --set emqx.enabled=false
@@ -99,12 +99,12 @@ helm upgrade --install "$RELEASE" "$CHART" \
   --timeout "$TIMEOUT" \
   $COMMON_HELM_ARGS
 
-kubectl rollout restart deployment/admin deployment/core-rpc deployment/ingress deployment/worker -n "$NAMESPACE"
+kubectl rollout restart deployment/management-api deployment/iot-core deployment/telemetry-ingestor deployment/device-worker -n "$NAMESPACE"
 
-wait_for_deployment admin
-wait_for_deployment core-rpc
-wait_for_deployment ingress
-wait_for_deployment worker
+wait_for_deployment management-api
+wait_for_deployment iot-core
+wait_for_deployment telemetry-ingestor
+wait_for_deployment device-worker
 
 kubectl get pods -n "$NAMESPACE"
 
@@ -113,10 +113,10 @@ cat <<EOF
 Helm deployment is ready.
 
 This script deploys application services only:
-  - admin
-  - core-rpc
-  - ingress
-  - worker
+  - management-api
+  - iot-core
+  - telemetry-ingestor
+  - device-worker
 
 Useful local forwards:
   scripts/port-forward-local-monitoring.sh

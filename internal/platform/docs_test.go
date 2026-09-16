@@ -10,7 +10,7 @@ import (
 )
 
 func TestDocsEndpoints(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "admin"})
+	app := platform.New(platform.Config{ServiceName: "management-api"})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 

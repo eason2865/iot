@@ -1,5 +1,14 @@
 # AI Handover
 
+## 2026-09-16 运行服务命名统一与全链路验证
+- 用户要求不保留兼容别名，运行服务已统一重命名为：`management-api`（原 `admin`）、`iot-core`（原 `core-rpc`）、`telemetry-ingestor`（原 `ingress`）、`device-worker`（原 `worker`）。已同步 Go 入口、Dockerfile、Makefile、Helm 资源与 values、环境变量、etcd 注册键、Kafka 消费组与客户端标识、Prometheus job、Grafana 看板/规则、demo、部署脚本、README、上下文、ADR 和架构图。
+- 本地部署边界：四个业务服务由 Helm 部署在 Kind 的 `iot` namespace；PostgreSQL、Kafka、EMQX、TDengine、etcd、Prometheus、Grafana 和 demo 由 `monitoring/docker-compose.yml` 运行。Prometheus/Grafana 属于 IoT 观测链路，但不随业务 Helm release 发布；Prometheus 通过 Docker 网络内的 `k8s-forward-management-api*`、`k8s-forward-iot-core`、`k8s-forward-telemetry-ingestor`、`k8s-forward-device-worker` 抓取指标。
+- Kafka 迁移策略：新的 `iot-device-worker-command` 和 `iot-device-worker-telemetry` group 首次从 `LastOffset` 启动，避免新服务名重放迁移前已完成的业务消息；已有 group 的已提交 offset 不受影响。
+- E2E 测试 MQTT client ID 与 trace 文件名也已改用新服务术语，`CHANGELOG.md` 的入口清单同步为新名称。
+- 本地全链路已实际验证：四个业务 Deployment 均为 `1/1 Ready`；Prometheus 的 `demo-docker`、`management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 五个 target 均为 `up`。一分钟窗口内 Demo telemetry 约 `12.4/s`、telemetry-ingestor MQTT/Kafka 约 `12.3/s`、device-worker telemetry 约 `12.3/s`、命令 ACK 约 `8.3/s`，worker error 为 `0`；两个新 Kafka group 的 lag 均为 `0`，日志持续出现 `command consumed` 与 `command ack consumed`。
+- 验证期间 `device-worker` 曾因 TDengine 内 `taosd` 未就绪而重启；`docker restart tdengine` 后 `SHOW DATABASES` 成功且 `iot` 数据库仍在，worker 已恢复。若再次出现 `Unable to establish connection`，先检查 `docker exec tdengine taos -s 'show databases'`，再恢复 TDengine，不要误判为服务命名问题。
+- 已通过 `go test ./...`、`docker compose -f monitoring/docker-compose.yml config`、Grafana 钉钉模板回归（6/6）以及 Grafana 新看板/告警规则 API 查询；告警联系人 URL 未修改。
+
 ## 2026-09-16 钉钉独立链接修复
 - 用户反馈卡片正文多个链接点击目标相同。捕获原生 DingDing 请求确认正文链接不同，但 actionCard 还包含固定到 `/alerting/list` 的 singleURL；未直接验证钉钉客户端拦截行为。
 - 改为 Webhook v1 + Custom Payload，发送钉钉 markdown JSON，移除整体跳转 singleURL，保留联系人名称“钉钉”、UID `ffyeiqivgwi68f` 及机器人 URL。模板新增 `iot.dingtalk.payload`，使用 coll.Dict/tmpl.Exec/data.ToJSON 安全编码。

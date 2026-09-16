@@ -1,33 +1,36 @@
-{{- if .Values.ingress.enabled }}
+{{- if .Values.iotCore.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: ingress
+  name: iot-core
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   selector:
-    app: ingress
+    app: iot-core
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+    - name: grpc
+      port: 9001
+      targetPort: 9001
+    - name: metrics
+      port: 9101
+      targetPort: 9101
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ingress
+  name: iot-core
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ingress
+      app: iot-core
   template:
     metadata:
       labels:
-        app: ingress
+        app: iot-core
     spec:
       {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
@@ -45,33 +48,32 @@ spec:
             - >
               until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
               && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
-              && nc -z {{ .Values.externalDependencies.wait.emqxHost }} {{ .Values.externalDependencies.wait.emqxPort }};
-              do echo waiting for docker postgres/kafka/emqx; sleep 2; done
+              && nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
+              do echo waiting for docker postgres/kafka/etcd; sleep 2; done
             {{- else }}
             - >
-              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z emqx 1883;
-              do echo waiting for postgres/kafka/emqx; sleep 2; done
+              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z etcd 2379;
+              do echo waiting for postgres/kafka/etcd; sleep 2; done
             {{- end }}
       containers:
-        - name: ingress
+        - name: iot-core
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/ingress"]
+          command: ["/usr/local/bin/iot-core"]
           envFrom:
             - configMapRef:
                 name: iot-common-config
           ports:
-            - containerPort: 8080
+            - containerPort: 9001
+            - containerPort: 9101
           readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
+            tcpSocket:
+              port: 9001
             initialDelaySeconds: 15
             periodSeconds: 10
 {{- end }}

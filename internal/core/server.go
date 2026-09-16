@@ -20,7 +20,7 @@ import (
 )
 
 func Run() error {
-	platform.ConfigureStdLogger("core-rpc")
+	platform.ConfigureStdLogger("iot-core")
 	metrics := platform.NewMetrics()
 	store, closer, err := buildStore(5 * time.Minute)
 	if err != nil {
@@ -44,13 +44,13 @@ func Run() error {
 
 	server := zrpc.MustNewServer(zrpc.RpcServerConf{
 		ServiceConf: service.ServiceConf{
-			Name:      "core-rpc",
-			Telemetry: platform.TraceConfig("core-rpc"),
+			Name:      "iot-core",
+			Telemetry: platform.TraceConfig("iot-core"),
 		},
 		ListenOn: rpcListenOn(),
 		Etcd: discov.EtcdConf{
-			Hosts: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
-			Key:   runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
+			Hosts: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_HOSTS", "localhost:2379")),
+			Key:   runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_KEY", "iot/iot-core"),
 		},
 		Middlewares: zrpc.ServerMiddlewaresConf{
 			Trace:      true,
@@ -64,7 +64,7 @@ func Run() error {
 	})
 	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor(), metrics.UnaryServerInterceptor())
 
-	go serveCoreRPCMetrics(metrics.Handler(), coreRPCPrometheusHost(), coreRPCPrometheusPort(), runtimeconfig.EnvOrDefault("CORE_RPC_PROMETHEUS_PATH", "/metrics"))
+	go serveIotCoreMetrics(metrics.Handler(), iotCorePrometheusHost(), iotCorePrometheusPort(), runtimeconfig.EnvOrDefault("IOT_CORE_PROMETHEUS_PATH", "/metrics"))
 
 	server.Start()
 	return nil
@@ -93,7 +93,7 @@ func buildPublisher() (platform.MessagePublisher, func() error, error) {
 }
 
 func rpcListenOn() string {
-	if addr := os.Getenv("CORE_RPC_LISTEN_ON"); addr != "" {
+	if addr := os.Getenv("IOT_CORE_LISTEN_ON"); addr != "" {
 		return addr
 	}
 	if addr := os.Getenv("LISTEN_ADDR"); addr != "" && strings.HasPrefix(addr, ":") {
@@ -104,20 +104,20 @@ func rpcListenOn() string {
 	return ":9001"
 }
 
-func coreRPCPrometheusHost() string {
-	return runtimeconfig.EnvOrDefault("CORE_RPC_PROMETHEUS_HOST", "0.0.0.0")
+func iotCorePrometheusHost() string {
+	return runtimeconfig.EnvOrDefault("IOT_CORE_PROMETHEUS_HOST", "0.0.0.0")
 }
 
-func coreRPCPrometheusPort() int {
-	return runtimeconfig.Int("CORE_RPC_PROMETHEUS_PORT", 9101)
+func iotCorePrometheusPort() int {
+	return runtimeconfig.Int("IOT_CORE_PROMETHEUS_PORT", 9101)
 }
 
-func serveCoreRPCMetrics(handler http.Handler, host string, port int, path string) {
+func serveIotCoreMetrics(handler http.Handler, host string, port int, path string) {
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("starting core-rpc metrics server at %s%s", addr, path)
+	log.Printf("starting iot-core metrics server at %s%s", addr, path)
 	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Printf("core-rpc metrics server stopped: %v", err)
+		log.Printf("iot-core metrics server stopped: %v", err)
 	}
 }

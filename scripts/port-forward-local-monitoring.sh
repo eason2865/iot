@@ -19,11 +19,11 @@ start_forward() {
   echo "${label} -> localhost:${local_port} started, log: ${log_file}"
 }
 
-start_forward admin  admin 18080 8080
-start_forward admin-metrics admin 18090 9100
-start_forward ingress ingress 18081 8080
-start_forward worker worker 18082 8080
-start_forward core-rpc core-rpc 18091 9101
+start_forward management-api management-api 18080 8080
+start_forward management-api-metrics management-api 18090 9100
+start_forward telemetry-ingestor telemetry-ingestor 18081 8080
+start_forward device-worker device-worker 18082 8080
+start_forward iot-core iot-core 18091 9101
 
 echo
 echo "Local monitoring forwards are ready."

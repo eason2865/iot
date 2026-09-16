@@ -1,13 +1,13 @@
-{{- if .Values.admin.enabled }}
+{{- if .Values.managementApi.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: admin
+  name: management-api
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   selector:
-    app: admin
+    app: management-api
   ports:
     - name: http
       port: 8080
@@ -19,18 +19,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: admin
+  name: management-api
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: admin
+      app: management-api
   template:
     metadata:
       labels:
-        app: admin
+        app: management-api
     spec:
       {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
@@ -54,10 +54,10 @@ spec:
               do echo waiting for etcd; sleep 2; done
             {{- end }}
       containers:
-        - name: admin
+        - name: management-api
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/admin"]
+          command: ["/usr/local/bin/management-api"]
           envFrom:
             - configMapRef:
                 name: iot-common-config

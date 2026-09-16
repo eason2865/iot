@@ -33,12 +33,12 @@ func Run() error {
 	}
 	defer client.Conn().Close()
 
-	platform.ConfigureStdLogger("admin-api")
+	platform.ConfigureStdLogger("management-api")
 	metrics := platform.NewMetrics()
 	httpServer := rest.MustNewServer(rest.RestConf{
 		ServiceConf: service.ServiceConf{
-			Name:      "admin-api",
-			Telemetry: platform.TraceConfig("admin-api"),
+			Name:      "management-api",
+			Telemetry: platform.TraceConfig("management-api"),
 		},
 		Host:    listenHost(),
 		Port:    listenPort(),
@@ -56,7 +56,7 @@ func Run() error {
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
 	defer httpServer.Stop()
 
-	go serveAdminMetrics(metrics.Handler(), adminMetricsHost(), adminMetricsPort(), runtimeconfig.EnvOrDefault("ADMIN_METRICS_PATH", "/metrics"))
+	go serveManagementAPIMetrics(metrics.Handler(), managementAPIMetricsHost(), managementAPIMetricsPort(), runtimeconfig.EnvOrDefault("MANAGEMENT_API_METRICS_PATH", "/metrics"))
 
 	api := &Server{
 		rpc:     corev1.NewCoreServiceClient(client.Conn()),
@@ -69,9 +69,9 @@ func Run() error {
 
 func newRPCClient() (zrpc.Client, error) {
 	conf := zrpc.NewEtcdClientConf(
-		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_HOSTS", "localhost:2379")),
-		runtimeconfig.EnvOrDefault("CORE_RPC_ETCD_KEY", "iot/core-rpc"),
-		"admin-api",
+		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_HOSTS", "localhost:2379")),
+		runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_KEY", "iot/iot-core"),
+		"management-api",
 		"",
 	)
 	conf.Timeout = 5000
@@ -111,7 +111,7 @@ func (s *Server) routes() []rest.Route {
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":      "ok",
-		"serviceName": "admin-api",
+		"serviceName": "management-api",
 	})
 }
 
@@ -341,21 +341,21 @@ func (s *Server) ackCommandHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commandFromPB(resp.GetCommand()))
 }
 
-func adminMetricsHost() string {
-	return runtimeconfig.EnvOrDefault("ADMIN_METRICS_HOST", "0.0.0.0")
+func managementAPIMetricsHost() string {
+	return runtimeconfig.EnvOrDefault("MANAGEMENT_API_METRICS_HOST", "0.0.0.0")
 }
 
-func adminMetricsPort() int {
-	return runtimeconfig.Int("ADMIN_METRICS_PORT", 9100)
+func managementAPIMetricsPort() int {
+	return runtimeconfig.Int("MANAGEMENT_API_METRICS_PORT", 9100)
 }
 
-func serveAdminMetrics(handler http.Handler, host string, port int, path string) {
+func serveManagementAPIMetrics(handler http.Handler, host string, port int, path string) {
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("starting admin metrics server at %s%s", addr, path)
+	log.Printf("starting management-api metrics server at %s%s", addr, path)
 	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Printf("admin metrics server stopped: %v", err)
+		log.Printf("management-api metrics server stopped: %v", err)
 	}
 }
 

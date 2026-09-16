@@ -16,7 +16,7 @@ import (
 )
 
 func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "admin"})
+	app := platform.New(platform.Config{ServiceName: "management-api"})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -53,7 +53,7 @@ func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
 }
 
 func TestCommandAckFlow(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "admin"})
+	app := platform.New(platform.Config{ServiceName: "management-api"})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -86,7 +86,7 @@ func TestCommandAckFlow(t *testing.T) {
 }
 
 func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "admin"})
+	app := platform.New(platform.Config{ServiceName: "management-api"})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -122,7 +122,7 @@ func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
 
 func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
 	metrics := platform.NewMetrics()
-	app := platform.New(platform.Config{ServiceName: "admin", Metrics: metrics})
+	app := platform.New(platform.Config{ServiceName: "management-api", Metrics: metrics})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -148,7 +148,7 @@ func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
 
 func TestMetricsEndpointExposesTraffic(t *testing.T) {
 	metrics := platform.NewMetrics()
-	app := platform.New(platform.Config{ServiceName: "admin", Metrics: metrics})
+	app := platform.New(platform.Config{ServiceName: "management-api", Metrics: metrics})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 

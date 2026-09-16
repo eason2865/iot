@@ -28,18 +28,18 @@ class DingTalkTemplateTest(unittest.TestCase):
         now = datetime.datetime.now(datetime.timezone.utc)
         labels = {"alertname": f"Template fixture {index}"}
         if not minimal:
-            labels.update(severity="warning", service="admin", route="/healthz", status="2xx")
+            labels.update(severity="warning", service="management-api", route="/healthz", status="2xx")
         return {
             "labels": labels,
             "annotations": {
                 "summary": "Notification template validation",
                 "description": "Synthetic fixture; not a business incident.",
-                "__dashboardUid__": "iot-admin-api",
+                "__dashboardUid__": "iot-management-api",
                 "__panelId__": "6",
             },
             "startsAt": (now - datetime.timedelta(minutes=10)).isoformat(),
             "endsAt": (now + datetime.timedelta(minutes=-1 if resolved else 10)).isoformat(),
-            "generatorURL": self.base + "/alerting/grafana/iot-admin-healthz-qps/view",
+            "generatorURL": self.base + "/alerting/grafana/iot-management-api-healthz-qps/view",
         }
 
     def render(self, alerts):
@@ -105,7 +105,7 @@ class DingTalkTemplateTest(unittest.TestCase):
         panel, dashboard, rule, silence = [urllib.parse.urlparse(url) for url in selected]
         self.assertEqual(urllib.parse.parse_qs(panel.query)["viewPanel"], ["6"])
         self.assertNotIn("viewPanel", urllib.parse.parse_qs(dashboard.query))
-        self.assertEqual(rule.path, "/alerting/grafana/iot-admin-healthz-qps/view")
+        self.assertEqual(rule.path, "/alerting/grafana/iot-management-api-healthz-qps/view")
         self.assertEqual(silence.path, "/alerting/silence/new")
 
     def test_contact_uses_markdown_payload(self):

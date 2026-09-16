@@ -74,7 +74,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(up{job=~\"admin|core-rpc|ingress|worker|demo-docker\"})",
+          "expr": "sum(up{job=~\"management-api|iot-core|telemetry-ingestor|device-worker|demo-docker\"})",
           "refId": "A"
         }
       ]
@@ -300,7 +300,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{kind=\"ack\",result=\"ok\"}[5m])) / clamp_min(sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])), 1)",
+          "expr": "sum(rate(iot_device_worker_total{kind=\"ack\",result=\"ok\"}[5m])) / clamp_min(sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])), 1)",
           "refId": "A"
         }
       ]
@@ -321,7 +321,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "遥测链路吞吐：设备 -> MQTT -> Kafka -> Worker -> TDengine",
+      "title": "遥测链路吞吐：设备 -> MQTT -> Kafka -> Device Worker -> TDengine",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -384,9 +384,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{kind=\"telemetry\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_device_worker_total{kind=\"telemetry\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "D",
-          "legendFormat": "worker telemetry"
+          "legendFormat": "device-worker telemetry"
         },
         {
           "datasource": {
@@ -402,7 +402,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "命令闭环：创建 -> 下发 -> 设备 ACK -> Worker ACK",
+      "title": "命令闭环：创建 -> 下发 -> 设备 ACK -> Device Worker ACK",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -449,16 +449,16 @@
           },
           "expr": "sum(rate(iot_commands_total{kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "B",
-          "legendFormat": "admin/core created"
+          "legendFormat": "management-api/iot-core created"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{kind=\"command\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_device_worker_total{kind=\"command\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "C",
-          "legendFormat": "worker downlink"
+          "legendFormat": "device-worker downlink"
         },
         {
           "datasource": {
@@ -474,9 +474,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{kind=\"ack\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_device_worker_total{kind=\"ack\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "E",
-          "legendFormat": "worker ack consumed"
+          "legendFormat": "device-worker ack consumed"
         }
       ]
     },
@@ -541,9 +541,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"iot-core\"}[5m])) by (le))",
           "refId": "B",
-          "legendFormat": "core-rpc gRPC p95"
+          "legendFormat": "iot-core gRPC p95"
         }
       ]
     },
@@ -622,9 +622,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{result=\"error\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_device_worker_total{result=\"error\"}[5m])) or vector(0)",
           "refId": "E",
-          "legendFormat": "worker error"
+          "legendFormat": "device-worker error"
         },
         {
           "datasource": {

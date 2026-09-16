@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/segmentio/kafka-go"
+
 	"iot/internal/contracts"
 	"iot/internal/platform"
 	"iot/internal/runtimeconfig"
@@ -115,16 +117,16 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	}
 
 	switch serviceName {
-	case "ingress":
+	case "telemetry-ingestor":
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 			BrokerURL:   runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			ClientID:    runtimeconfig.EnvOrDefault("EMQX_INGRESS_CLIENT_ID", "iot-ingress"),
+			ClientID:    runtimeconfig.EnvOrDefault("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
 			Username:    os.Getenv("EMQX_USERNAME"),
 			Password:    os.Getenv("EMQX_PASSWORD"),
 			TopicFilter: runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
 		}, publisher, res.metrics)
 		res.bridge = bridge
-	case "worker":
+	case "device-worker":
 		tdWriter, closer, err := buildTDengineWriter(res.metrics)
 		if err != nil {
 			return nil, err
@@ -133,13 +135,15 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			res.closers = append(res.closers, closer)
 		}
 		res.worker = platform.NewWorker(platform.WorkerConfig{
-			KafkaBrokers:   runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
-			TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
-			CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
-			MQTTBrokerURL:  runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			MQTTClientID:   runtimeconfig.EnvOrDefault("EMQX_WORKER_CLIENT_ID", "iot-worker"),
-			MQTTUsername:   os.Getenv("EMQX_USERNAME"),
-			MQTTPassword:   os.Getenv("EMQX_PASSWORD"),
+			KafkaBrokers:     runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
+			KafkaGroupID:     "iot-device-worker",
+			KafkaStartOffset: kafka.LastOffset,
+			TelemetryTopic:   runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
+			CommandTopic:     runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+			MQTTBrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
+			MQTTClientID:     runtimeconfig.EnvOrDefault("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
+			MQTTUsername:     os.Getenv("EMQX_USERNAME"),
+			MQTTPassword:     os.Getenv("EMQX_PASSWORD"),
 		}, store, tdWriter, res.metrics)
 	}
 

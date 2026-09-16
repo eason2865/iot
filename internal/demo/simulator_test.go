@@ -14,7 +14,7 @@ import (
 
 func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 	ctx := context.Background()
-	admin := newRecordingAdmin()
+	managementAPI := newRecordingManagementAPI()
 	buses := newRecordingBusFactory()
 
 	svc := NewService(Config{
@@ -22,16 +22,16 @@ func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 		DevicesPerTenant: 2,
 		TenantPrefix:     "demo",
 		ProductID:        "product-demo",
-	}, admin, buses, rand.New(rand.NewSource(7)))
+	}, managementAPI, buses, rand.New(rand.NewSource(7)))
 
 	if err := svc.EnsureTopology(ctx); err != nil {
 		t.Fatalf("EnsureTopology() error = %v", err)
 	}
 
-	if got := len(admin.tenants); got != 2 {
+	if got := len(managementAPI.tenants); got != 2 {
 		t.Fatalf("tenant seed count = %d, want 2", got)
 	}
-	if got := len(admin.devices); got != 4 {
+	if got := len(managementAPI.devices); got != 4 {
 		t.Fatalf("device seed count = %d, want 4", got)
 	}
 
@@ -45,12 +45,12 @@ func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 	if got := len(buses.publishCalls); got < 1 {
 		t.Fatalf("publish calls = %d, want >= 1", got)
 	}
-	if got := len(admin.commands); got != 1 {
+	if got := len(managementAPI.commands); got != 1 {
 		t.Fatalf("command create count = %d, want 1", got)
 	}
 
-	tenantID := admin.tenants[0].id
-	deviceID := admin.devices[0].deviceID
+	tenantID := managementAPI.tenants[0].id
+	deviceID := managementAPI.devices[0].deviceID
 	downlinkTopic, err := contracts.BuildCommandTopic(tenantID, deviceID)
 	if err != nil {
 		t.Fatalf("BuildCommandTopic() error = %v", err)
@@ -83,25 +83,25 @@ func TestServiceSeedsTopologyAndEmitsTraffic(t *testing.T) {
 	}
 }
 
-type recordingAdmin struct {
+type recordingManagementAPI struct {
 	tenants  []struct{ id, name string }
 	devices  []struct{ tenantID, deviceID, productID string }
 	commands []platform.Command
 }
 
-func newRecordingAdmin() *recordingAdmin { return &recordingAdmin{} }
+func newRecordingManagementAPI() *recordingManagementAPI { return &recordingManagementAPI{} }
 
-func (r *recordingAdmin) CreateTenant(ctx context.Context, id, name string) error {
+func (r *recordingManagementAPI) CreateTenant(ctx context.Context, id, name string) error {
 	r.tenants = append(r.tenants, struct{ id, name string }{id: id, name: name})
 	return nil
 }
 
-func (r *recordingAdmin) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
+func (r *recordingManagementAPI) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
 	r.devices = append(r.devices, struct{ tenantID, deviceID, productID string }{tenantID: tenantID, deviceID: deviceID, productID: productID})
 	return nil
 }
 
-func (r *recordingAdmin) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
+func (r *recordingManagementAPI) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
 	cmd := platform.Command{ID: fmt.Sprintf("cmd-%d", len(r.commands)+1), TenantID: tenantID, DeviceID: deviceID, Payload: payload}
 	r.commands = append(r.commands, cmd)
 	return cmd, nil

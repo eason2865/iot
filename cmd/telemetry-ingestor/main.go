@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	if err := bootstrap.Run("ingress"); err != nil {
+	if err := bootstrap.Run("telemetry-ingestor"); err != nil {
 		log.Fatal(err)
 	}
 }

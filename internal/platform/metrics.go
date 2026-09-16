@@ -24,7 +24,7 @@ type Metrics struct {
 	commandsTotal          *prometheus.CounterVec
 	kafkaPublishTotal      *prometheus.CounterVec
 	mqttBridgeTotal        *prometheus.CounterVec
-	workerTotal            *prometheus.CounterVec
+	deviceWorkerTotal      *prometheus.CounterVec
 	tdengineWriteTotal     *prometheus.CounterVec
 	demoEventsTotal        *prometheus.CounterVec
 	demoTopologyTenants    prometheus.Gauge
@@ -78,9 +78,9 @@ func NewMetrics() *Metrics {
 			Name: "iot_mqtt_bridge_total",
 			Help: "MQTT bridge message counts.",
 		}, []string{"result"}),
-		workerTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "iot_worker_total",
-			Help: "Worker pipeline event counts.",
+		deviceWorkerTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "iot_device_worker_total",
+			Help: "Device worker pipeline event counts.",
 		}, []string{"kind", "result"}),
 		tdengineWriteTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "iot_tdengine_write_total",
@@ -117,7 +117,7 @@ func NewMetrics() *Metrics {
 		m.commandsTotal,
 		m.kafkaPublishTotal,
 		m.mqttBridgeTotal,
-		m.workerTotal,
+		m.deviceWorkerTotal,
 		m.tdengineWriteTotal,
 		m.demoEventsTotal,
 		m.demoTopologyTenants,
@@ -207,8 +207,8 @@ func (m *Metrics) IncMQTTBridge(result string) {
 	incCounterVec(m.mqttBridgeTotal, result)
 }
 
-func (m *Metrics) IncWorker(kind, result string) {
-	incCounterVec(m.workerTotal, kind, result)
+func (m *Metrics) IncDeviceWorker(kind, result string) {
+	incCounterVec(m.deviceWorkerTotal, kind, result)
 }
 
 func (m *Metrics) IncTDengineWrite(result string) {
@@ -252,7 +252,7 @@ func (m *Metrics) seedSeries() {
 	}
 	for _, kind := range []string{"telemetry", "command", "ack"} {
 		for _, result := range results {
-			m.workerTotal.WithLabelValues(kind, result).Add(0)
+			m.deviceWorkerTotal.WithLabelValues(kind, result).Add(0)
 		}
 	}
 	for _, kind := range []string{"topology", "telemetry", "command", "ack"} {

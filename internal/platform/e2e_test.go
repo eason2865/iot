@@ -64,7 +64,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	defer tdWriter.Close()
 
 	app := platform.New(platform.Config{
-		ServiceName: "admin",
+		ServiceName: "management-api",
 		Store:       store,
 		Publisher:   publisher,
 		Metrics:     metrics,
@@ -94,7 +94,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		AckTopicFilter:   ackTopicFilter,
 		TenantIDs:        []string{tenantID},
 		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     clientIDPrefix + "-worker",
+		MQTTClientID:     clientIDPrefix + "-device-worker",
 	}, store, tdWriter, metrics)
 	if worker == nil {
 		t.Fatal("NewWorker() returned nil")

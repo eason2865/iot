@@ -1,36 +1,33 @@
-{{- if .Values.coreRpc.enabled }}
+{{- if .Values.deviceWorker.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: core-rpc
+  name: device-worker
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   selector:
-    app: core-rpc
+    app: device-worker
   ports:
-    - name: grpc
-      port: 9001
-      targetPort: 9001
-    - name: metrics
-      port: 9101
-      targetPort: 9101
+    - name: http
+      port: 8080
+      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: core-rpc
+  name: device-worker
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: core-rpc
+      app: device-worker
   template:
     metadata:
       labels:
-        app: core-rpc
+        app: device-worker
     spec:
       {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
@@ -48,32 +45,34 @@ spec:
             - >
               until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
               && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
-              && nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
-              do echo waiting for docker postgres/kafka/etcd; sleep 2; done
+              && nc -z {{ .Values.externalDependencies.wait.emqxHost }} {{ .Values.externalDependencies.wait.emqxPort }}
+              && nc -z {{ .Values.externalDependencies.wait.tdengineHost }} {{ .Values.externalDependencies.wait.tdenginePort }};
+              do echo waiting for docker postgres/kafka/emqx/tdengine; sleep 2; done
             {{- else }}
             - >
-              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z etcd 2379;
-              do echo waiting for postgres/kafka/etcd; sleep 2; done
+              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z emqx 1883 && nc -z tdengine 6030;
+              do echo waiting for postgres/kafka/emqx/tdengine; sleep 2; done
             {{- end }}
       containers:
-        - name: core-rpc
+        - name: device-worker
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/core-rpc"]
+          command: ["/usr/local/bin/device-worker"]
           envFrom:
             - configMapRef:
                 name: iot-common-config
           ports:
-            - containerPort: 9001
-            - containerPort: 9101
+            - containerPort: 8080
           readinessProbe:
-            tcpSocket:
-              port: 9001
+            httpGet:
+              path: /healthz
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: 9001
+            httpGet:
+              path: /healthz
+              port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
 {{- end }}

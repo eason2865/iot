@@ -40,11 +40,11 @@ func Run() error {
 		Metrics:           metrics,
 	}
 
-	admin, err := newHTTPAdminClient(runtimeconfig.EnvOrDefault("DEMO_ADMIN_URL", "http://127.0.0.1:8080"))
+	managementAPI, err := newHTTPManagementAPIClient(runtimeconfig.EnvOrDefault("DEMO_MANAGEMENT_API_URL", "http://127.0.0.1:8080"))
 	if err != nil {
 		return err
 	}
-	defer admin.Close()
+	defer managementAPI.Close()
 
 	factory, err := newMQTTBusFactory(MQTTBusFactoryConfig{
 		BrokerURL:  runtimeconfig.EnvOrDefault("DEMO_MQTT_URL", "tcp://127.0.0.1:1883"),
@@ -57,7 +57,7 @@ func Run() error {
 	}
 	defer factory.Close()
 
-	service := NewService(cfg, admin, factory, randSource())
+	service := NewService(cfg, managementAPI, factory, randSource())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -91,29 +91,29 @@ func Run() error {
 	}
 }
 
-type httpAdminClient struct {
+type httpManagementAPIClient struct {
 	baseURL string
 	client  *http.Client
 }
 
-func newHTTPAdminClient(baseURL string) (*httpAdminClient, error) {
+func newHTTPManagementAPIClient(baseURL string) (*httpManagementAPIClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" {
-		return nil, fmt.Errorf("DEMO_ADMIN_URL is required")
+		return nil, fmt.Errorf("DEMO_MANAGEMENT_API_URL is required")
 	}
-	return &httpAdminClient{
+	return &httpManagementAPIClient{
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
 
-func (c *httpAdminClient) Close() error { return nil }
+func (c *httpManagementAPIClient) Close() error { return nil }
 
-func (c *httpAdminClient) CreateTenant(ctx context.Context, id, name string) error {
+func (c *httpManagementAPIClient) CreateTenant(ctx context.Context, id, name string) error {
 	return c.postJSON(ctx, c.baseURL+"/api/v1/tenants", map[string]any{"id": id, "name": name}, nil, http.StatusConflict)
 }
 
-func (c *httpAdminClient) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
+func (c *httpManagementAPIClient) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
 	return c.postJSON(ctx, c.baseURL+"/api/v1/devices", map[string]any{
 		"tenantId":  tenantID,
 		"deviceId":  deviceID,
@@ -122,7 +122,7 @@ func (c *httpAdminClient) CreateDevice(ctx context.Context, tenantID, deviceID, 
 	}, nil, http.StatusConflict)
 }
 
-func (c *httpAdminClient) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
+func (c *httpManagementAPIClient) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
 	var created platform.Command
 	err := c.postJSON(ctx, c.baseURL+"/api/v1/commands", map[string]any{
 		"tenantId": tenantID,
@@ -132,7 +132,7 @@ func (c *httpAdminClient) CreateCommand(ctx context.Context, tenantID, deviceID 
 	return created, err
 }
 
-func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, out any, okStatuses ...int) error {
+func (c *httpManagementAPIClient) postJSON(ctx context.Context, url string, body any, out any, okStatuses ...int) error {
 	ctx, requestID := platform.EnsureRequestID(ctx, "")
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -145,7 +145,7 @@ func (c *httpAdminClient) postJSON(ctx context.Context, url string, body any, ou
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-Id", requestID)
 
-	ctx, span := otel.Tracer("demo-http").Start(req.Context(), "admin-api POST "+req.URL.Path,
+	ctx, span := otel.Tracer("demo-http").Start(req.Context(), "management-api POST "+req.URL.Path,
 		oteltrace.WithSpanKind(oteltrace.SpanKindClient))
 	defer span.End()
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))

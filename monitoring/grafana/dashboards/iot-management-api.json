@@ -23,14 +23,14 @@
     {
       "type": "link",
       "title": "HTTP 5xx 告警规则",
-      "url": "/alerting/grafana/iot-admin-http-5xx/view",
+      "url": "/alerting/grafana/iot-management-api-http-5xx/view",
       "targetBlank": false,
       "icon": "external link"
     },
     {
       "type": "link",
       "title": "healthz > 0.3 告警规则",
-      "url": "/alerting/grafana/iot-admin-healthz-qps/view",
+      "url": "/alerting/grafana/iot-management-api-healthz-qps/view",
       "targetBlank": false,
       "icon": "external link"
     }
@@ -39,7 +39,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Admin API 流量与质量",
+      "title": "Management API 流量与质量",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -52,7 +52,7 @@
     {
       "id": 10,
       "type": "alertlist",
-      "title": "Admin API 告警状态",
+      "title": "Management API 告警状态",
       "description": "显示关联此看板的告警及实例标签。展开实例可定位 route/status，点击规则查看详情；HTTP 图表上的告警标记显示状态变化时间。",
       "gridPos": { "x": 0, "y": 1, "w": 24, "h": 6 },
       "options": {
@@ -118,7 +118,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total{job=\"admin\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_http_requests_total{job=\"management-api\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ]
@@ -163,7 +163,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total{job=\"admin\",status=\"5xx\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_http_requests_total{job=\"management-api\",status=\"5xx\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ]
@@ -208,7 +208,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(iot_commands_total{job=\"admin\",kind=\"created\",result=\"ok\"}) or vector(0)",
+          "expr": "sum(iot_commands_total{job=\"management-api\",kind=\"created\",result=\"ok\"}) or vector(0)",
           "refId": "A"
         }
       ]
@@ -253,7 +253,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(iot_commands_total{job=\"admin\",kind=\"acked\",result=\"ok\"}) or vector(0)",
+          "expr": "sum(iot_commands_total{job=\"management-api\",kind=\"acked\",result=\"ok\"}) or vector(0)",
           "refId": "A"
         }
       ]
@@ -322,7 +322,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total{job=\"admin\"}[5m])) by (route, status)",
+          "expr": "sum(rate(iot_http_requests_total{job=\"management-api\"}[5m])) by (route, status)",
           "legendFormat": "{{route}} / {{status}}",
           "refId": "A"
         }
@@ -367,7 +367,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(iot_http_request_duration_seconds_bucket{job=\"admin\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.95, sum(rate(iot_http_request_duration_seconds_bucket{job=\"management-api\"}[5m])) by (le, route))",
           "refId": "A"
         }
       ]
@@ -411,7 +411,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_tenants_total{job=\"admin\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_tenants_total{job=\"management-api\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "A",
           "legendFormat": "tenant ok"
         },
@@ -420,7 +420,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_devices_total{job=\"admin\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_devices_total{job=\"management-api\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "B",
           "legendFormat": "device ok"
         },
@@ -429,7 +429,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_commands_total{job=\"admin\",kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_commands_total{job=\"management-api\",kind=\"created\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "C",
           "legendFormat": "command created"
         },
@@ -438,7 +438,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_commands_total{job=\"admin\",kind=\"acked\",result=\"ok\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_commands_total{job=\"management-api\",kind=\"acked\",result=\"ok\"}[5m])) or vector(0)",
           "refId": "D",
           "legendFormat": "command acked"
         }
@@ -447,7 +447,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Admin Error Breakdown",
+      "title": "Management API Error Breakdown",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -483,7 +483,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_http_requests_total{job=\"admin\",status=~\"4xx|5xx\"}[5m])) by (route, status) or vector(0)",
+          "expr": "sum(rate(iot_http_requests_total{job=\"management-api\",status=~\"4xx|5xx\"}[5m])) by (route, status) or vector(0)",
           "refId": "A"
         },
         {
@@ -491,7 +491,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_tenants_total{job=\"admin\",result=\"error\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_tenants_total{job=\"management-api\",result=\"error\"}[5m])) or vector(0)",
           "refId": "B",
           "legendFormat": "tenant error"
         },
@@ -500,7 +500,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_devices_total{job=\"admin\",result=\"error\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_devices_total{job=\"management-api\",result=\"error\"}[5m])) or vector(0)",
           "refId": "C",
           "legendFormat": "device error"
         },
@@ -509,7 +509,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_commands_total{job=\"admin\",result=\"error\"}[5m])) by (kind) or vector(0)",
+          "expr": "sum(rate(iot_commands_total{job=\"management-api\",result=\"error\"}[5m])) by (kind) or vector(0)",
           "refId": "D"
         }
       ]
@@ -532,8 +532,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "IoT Admin API",
-  "uid": "iot-admin-api",
-  "version": 5,
+  "title": "IoT Management API",
+  "uid": "iot-management-api",
+  "version": 6,
   "weekStart": ""
 }

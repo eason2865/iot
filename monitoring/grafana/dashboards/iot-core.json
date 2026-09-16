@@ -24,7 +24,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Core RPC 健康",
+      "title": "IoT Core 健康",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -74,7 +74,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ]
@@ -119,7 +119,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",code!=\"OK\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\",code!=\"OK\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ]
@@ -164,7 +164,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le)) or vector(0)",
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"iot-core\"}[5m])) by (le)) or vector(0)",
           "refId": "A"
         }
       ]
@@ -209,7 +209,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(up{job=\"core-rpc\"}) or vector(0)",
+          "expr": "max(up{job=\"iot-core\"}) or vector(0)",
           "refId": "A"
         }
       ]
@@ -253,7 +253,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\"}[5m])) by (method, code)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\"}[5m])) by (method, code)",
           "refId": "A"
         }
       ]
@@ -297,7 +297,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"core-rpc\"}[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.95, sum(rate(iot_grpc_request_duration_seconds_bucket{job=\"iot-core\"}[5m])) by (le, method))",
           "refId": "A"
         }
       ]
@@ -341,7 +341,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/CreateTenant|.*/CreateDevice\",code=\"OK\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\",method=~\".*/CreateTenant|.*/CreateDevice\",code=\"OK\"}[5m])) or vector(0)",
           "refId": "A",
           "legendFormat": "topology"
         },
@@ -350,7 +350,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/CreateCommand\",code=\"OK\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\",method=~\".*/CreateCommand\",code=\"OK\"}[5m])) or vector(0)",
           "refId": "B",
           "legendFormat": "create command"
         },
@@ -359,7 +359,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/AckCommand\",code=\"OK\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\",method=~\".*/AckCommand\",code=\"OK\"}[5m])) or vector(0)",
           "refId": "C",
           "legendFormat": "ack command"
         },
@@ -368,7 +368,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_grpc_requests_total{job=\"core-rpc\",method=~\".*/IngestTelemetry|.*/RecordTelemetry\",code=\"OK\"}[5m])) or vector(0)",
+          "expr": "sum(rate(iot_grpc_requests_total{job=\"iot-core\",method=~\".*/IngestTelemetry|.*/RecordTelemetry\",code=\"OK\"}[5m])) or vector(0)",
           "refId": "D",
           "legendFormat": "telemetry"
         }
@@ -392,8 +392,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "IoT Core RPC",
-  "uid": "iot-core-rpc",
-  "version": 2,
+  "title": "IoT Core",
+  "uid": "iot-core",
+  "version": 3,
   "weekStart": ""
 }

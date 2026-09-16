@@ -1,13 +1,13 @@
-{{- if .Values.worker.enabled }}
+{{- if .Values.telemetryIngestor.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: worker
+  name: telemetry-ingestor
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   selector:
-    app: worker
+    app: telemetry-ingestor
   ports:
     - name: http
       port: 8080
@@ -16,18 +16,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: worker
+  name: telemetry-ingestor
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: worker
+      app: telemetry-ingestor
   template:
     metadata:
       labels:
-        app: worker
+        app: telemetry-ingestor
     spec:
       {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
@@ -45,19 +45,18 @@ spec:
             - >
               until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
               && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
-              && nc -z {{ .Values.externalDependencies.wait.emqxHost }} {{ .Values.externalDependencies.wait.emqxPort }}
-              && nc -z {{ .Values.externalDependencies.wait.tdengineHost }} {{ .Values.externalDependencies.wait.tdenginePort }};
-              do echo waiting for docker postgres/kafka/emqx/tdengine; sleep 2; done
+              && nc -z {{ .Values.externalDependencies.wait.emqxHost }} {{ .Values.externalDependencies.wait.emqxPort }};
+              do echo waiting for docker postgres/kafka/emqx; sleep 2; done
             {{- else }}
             - >
-              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z emqx 1883 && nc -z tdengine 6030;
-              do echo waiting for postgres/kafka/emqx/tdengine; sleep 2; done
+              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z emqx 1883;
+              do echo waiting for postgres/kafka/emqx; sleep 2; done
             {{- end }}
       containers:
-        - name: worker
+        - name: telemetry-ingestor
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
-          command: ["/usr/local/bin/worker"]
+          command: ["/usr/local/bin/telemetry-ingestor"]
           envFrom:
             - configMapRef:
                 name: iot-common-config

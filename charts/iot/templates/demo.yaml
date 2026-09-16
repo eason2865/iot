@@ -36,16 +36,16 @@ spec:
             - sh
             - -c
             - >
-              until nc -z admin 8080 && nc -z emqx 1883;
-              do echo waiting for admin/emqx; sleep 2; done
+              until nc -z management-api 8080 && nc -z emqx 1883;
+              do echo waiting for management-api/emqx; sleep 2; done
       containers:
         - name: demo
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/demo"]
           env:
-            - name: DEMO_ADMIN_URL
-              value: http://admin:8080
+            - name: DEMO_MANAGEMENT_API_URL
+              value: http://management-api:8080
             - name: DEMO_MQTT_URL
               value: tcp://emqx:1883
             - name: DEMO_TENANT_COUNT

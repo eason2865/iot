@@ -3,25 +3,25 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: admin
+  - job_name: management-api
     static_configs:
       - targets:
-          - k8s-forward-admin-metrics:18090
+          - k8s-forward-management-api-metrics:18090
 
-  - job_name: ingress
+  - job_name: telemetry-ingestor
     static_configs:
       - targets:
-          - k8s-forward-ingress:18081
+          - k8s-forward-telemetry-ingestor:18081
 
-  - job_name: worker
+  - job_name: device-worker
     static_configs:
       - targets:
-          - k8s-forward-worker:18082
+          - k8s-forward-device-worker:18082
 
-  - job_name: core-rpc
+  - job_name: iot-core
     static_configs:
       - targets:
-          - k8s-forward-core-rpc:18091
+          - k8s-forward-iot-core:18091
 
   - job_name: demo-docker
     static_configs:

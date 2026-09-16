@@ -1,45 +1,45 @@
 services:
-  k8s-forward-admin:
+  k8s-forward-management-api:
     image: rancher/kubectl:v1.26.8
-    container_name: iot-k8s-forward-admin
+    container_name: iot-k8s-forward-management-api
     restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/admin", "18080:8080", "-n", "iot"]
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/management-api", "18080:8080", "-n", "iot"]
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
-  k8s-forward-admin-metrics:
+  k8s-forward-management-api-metrics:
     image: rancher/kubectl:v1.26.8
-    container_name: iot-k8s-forward-admin-metrics
+    container_name: iot-k8s-forward-management-api-metrics
     restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/admin", "18090:9100", "-n", "iot"]
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/management-api", "18090:9100", "-n", "iot"]
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
-  k8s-forward-ingress:
+  k8s-forward-telemetry-ingestor:
     image: rancher/kubectl:v1.26.8
-    container_name: iot-k8s-forward-ingress
+    container_name: iot-k8s-forward-telemetry-ingestor
     restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/ingress", "18081:8080", "-n", "iot"]
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/telemetry-ingestor", "18081:8080", "-n", "iot"]
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
-  k8s-forward-worker:
+  k8s-forward-device-worker:
     image: rancher/kubectl:v1.26.8
-    container_name: iot-k8s-forward-worker
+    container_name: iot-k8s-forward-device-worker
     restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/worker", "18082:8080", "-n", "iot"]
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/device-worker", "18082:8080", "-n", "iot"]
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
-  k8s-forward-core-rpc:
+  k8s-forward-iot-core:
     image: rancher/kubectl:v1.26.8
-    container_name: iot-k8s-forward-core-rpc
+    container_name: iot-k8s-forward-iot-core
     restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/core-rpc", "18091:9101", "-n", "iot"]
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/iot-core", "18091:9101", "-n", "iot"]
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
@@ -119,7 +119,7 @@ services:
     ports:
       - "18084:8080"
     environment:
-      DEMO_ADMIN_URL: http://k8s-forward-admin:18080
+      DEMO_MANAGEMENT_API_URL: http://k8s-forward-management-api:18080
       DEMO_MQTT_URL: tcp://host.docker.internal:1883
       DEMO_TENANT_COUNT: "5"
       DEMO_DEVICES_PER_TENANT: "10"

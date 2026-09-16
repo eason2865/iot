@@ -1,9 +1,9 @@
 {
-  "uid": "iot-admin-healthz-qps",
+  "uid": "iot-management-api-healthz-qps",
   "orgID": 1,
   "folderUID": "efobmswzeefi8d",
-  "ruleGroup": "Admin HTTP",
-  "title": "Admin healthz QPS 超过 0.3",
+  "ruleGroup": "Management API HTTP",
+  "title": "Management API healthz QPS 超过 0.3",
   "condition": "C",
   "data": [
     {
@@ -14,7 +14,7 @@
         "refId": "A",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "editorMode": "code",
-        "expr": "sum by (route, status) (rate(iot_http_requests_total{job=\"admin\",route=\"/healthz\",status=\"2xx\"}[5m]))",
+        "expr": "sum by (route, status) (rate(iot_http_requests_total{job=\"management-api\",route=\"/healthz\",status=\"2xx\"}[5m]))",
         "instant": true,
         "range": false,
         "intervalMs": 1000,
@@ -46,12 +46,12 @@
   "execErrState": "Error",
   "for": "0s",
   "annotations": {
-    "__dashboardUid__": "iot-admin-api",
+    "__dashboardUid__": "iot-management-api",
     "__panelId__": "6",
     "summary": "grafana：{{ $labels.route }} / {{ $labels.status }} QPS 检测（阈值 0.3 req/s）",
     "description": "路由 {{ $labels.route }}、状态 {{ $labels.status }} 最近 5 分钟平均请求速率为 {{ $values.A.Value }} req/s。触发条件：严格大于 0.3 req/s，不额外等待 pending 周期。请打开关联图表查看触发时间。"
   },
-  "labels": { "service": "admin", "severity": "warning" },
+  "labels": { "service": "management-api", "severity": "warning" },
   "isPaused": false,
   "notification_settings": {
     "receiver": "钉钉",

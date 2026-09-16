@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
-	handler := server.NewHealthHandler("ingress")
+	handler := server.NewHealthHandler("telemetry-ingestor")
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 

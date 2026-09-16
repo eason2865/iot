@@ -362,7 +362,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Worker Processing by Kind",
+      "title": "Device Worker Processing by Kind",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -398,7 +398,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total[5m])) by (job, kind, result)",
+          "expr": "sum(rate(iot_device_worker_total[5m])) by (job, kind, result)",
           "refId": "A"
         }
       ]
@@ -524,7 +524,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(iot_worker_total{result=\"error\"}[5m])) by (kind) or vector(0)",
+          "expr": "sum(rate(iot_device_worker_total{result=\"error\"}[5m])) by (kind) or vector(0)",
           "refId": "D"
         },
         {

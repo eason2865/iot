@@ -79,7 +79,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	defer tdWriter.Close()
 
 	app := platform.New(platform.Config{
-		ServiceName: "admin",
+		ServiceName: "management-api",
 		Store:       store,
 		Publisher:   publisher,
 		Metrics:     metrics,
@@ -101,7 +101,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 		AckTopicFilters:  ackTopicFilters,
 		TenantIDs:        tenantIDs,
 		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     clientIDPrefix + "-worker",
+		MQTTClientID:     clientIDPrefix + "-device-worker",
 	}, store, tdWriter, metrics)
 
 	runErr := make(chan error, 2)

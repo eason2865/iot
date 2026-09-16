@@ -12,30 +12,30 @@ data:
   KAFKA_BROKERS: {{ .Values.externalDependencies.kafkaBrokers | quote }}
   EMQX_URL: {{ .Values.externalDependencies.emqxUrl | quote }}
   TDENGINE_DSN: {{ .Values.externalDependencies.tdengineDsn | quote }}
-  CORE_RPC_ETCD_HOSTS: {{ .Values.externalDependencies.etcdHosts | quote }}
-  CORE_RPC_ETCD_KEY: {{ .Values.externalDependencies.etcdKey | quote }}
+  IOT_CORE_ETCD_HOSTS: {{ .Values.externalDependencies.etcdHosts | quote }}
+  IOT_CORE_ETCD_KEY: {{ .Values.externalDependencies.etcdKey | quote }}
   {{- else }}
   POSTGRES_DSN: postgres://iot:iot123@postgres:5432/iot?sslmode=disable
   KAFKA_BROKERS: kafka:9092
   EMQX_URL: tcp://emqx:1883
   TDENGINE_DSN: root:taosdata@http(tdengine:6041)/iot
-  CORE_RPC_ETCD_HOSTS: etcd:2379
-  CORE_RPC_ETCD_KEY: iot/core-rpc
+  IOT_CORE_ETCD_HOSTS: etcd:2379
+  IOT_CORE_ETCD_KEY: iot/iot-core
   {{- end }}
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
   EMQX_TOPIC_FILTER: tenant/+/device/+/telemetry
-  EMQX_INGRESS_CLIENT_ID: iot-ingress
-  EMQX_WORKER_CLIENT_ID: iot-worker
+  EMQX_TELEMETRY_INGESTOR_CLIENT_ID: iot-telemetry-ingestor
+  EMQX_DEVICE_WORKER_CLIENT_ID: iot-device-worker
   TDENGINE_TABLE: telemetry
   LISTEN_ADDR: :8080
-  ADMIN_METRICS_HOST: 0.0.0.0
-  ADMIN_METRICS_PORT: "9100"
-  ADMIN_METRICS_PATH: /metrics
-  CORE_RPC_LISTEN_ON: :9001
-  CORE_RPC_PROMETHEUS_HOST: 0.0.0.0
-  CORE_RPC_PROMETHEUS_PORT: "9101"
-  CORE_RPC_PROMETHEUS_PATH: /metrics
+  MANAGEMENT_API_METRICS_HOST: 0.0.0.0
+  MANAGEMENT_API_METRICS_PORT: "9100"
+  MANAGEMENT_API_METRICS_PATH: /metrics
+  IOT_CORE_LISTEN_ON: :9001
+  IOT_CORE_PROMETHEUS_HOST: 0.0.0.0
+  IOT_CORE_PROMETHEUS_PORT: "9101"
+  IOT_CORE_PROMETHEUS_PATH: /metrics
 {{- if .Values.postgres.enabled }}
 ---
 apiVersion: v1

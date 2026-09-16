@@ -11,18 +11,18 @@ data:
       scrape_interval: 5s
       evaluation_interval: 5s
     scrape_configs:
-      - job_name: admin
+      - job_name: management-api
         static_configs:
-          - targets: ['admin:9100']
-      - job_name: ingress
+          - targets: ['management-api:9100']
+      - job_name: telemetry-ingestor
         static_configs:
-          - targets: ['ingress:8080']
-      - job_name: worker
+          - targets: ['telemetry-ingestor:8080']
+      - job_name: device-worker
         static_configs:
-          - targets: ['worker:8080']
-      - job_name: core-rpc
+          - targets: ['device-worker:8080']
+      - job_name: iot-core
         static_configs:
-          - targets: ['core-rpc:9101']
+          - targets: ['iot-core:9101']
       {{- if .Values.demo.enabled }}
       - job_name: demo
         static_configs:

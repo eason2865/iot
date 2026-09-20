@@ -288,17 +288,19 @@ iot/
 ├── migrations/     # 数据库迁移
 ├── proto/          # iot-core protobuf 契约
 ├── monitoring/     # 本地 Prometheus / Grafana 配置
-└── docs/           # OpenAPI、Schema、技术方案和 ADR
+└── docs/           # OpenAPI、Schema、生产部署指南和 ADR
 ```
 
 ## 文档
 
-- [整体技术方案](docs/物联网平台技术方案.html)
-- [生产部署指南](docs/生产部署指南.md)
-- [EMQX 长连接集群清单](deploy/emqx/README.md)
-- [OpenAPI 定义](docs/openapi.json)
-- [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)
-- [初始化迁移](migrations/001_init.sql)
+文档按用途分层，避免维护多份重复架构说明：
+
+- [生产部署指南](docs/生产部署指南.md)：生产拓扑、部署边界、长连接、扩容和灾备基线
+- [EMQX 长连接集群清单](deploy/emqx/README.md)：EMQX Operator、本地单节点和生产多节点配置
+- [OpenAPI 定义](docs/openapi.json)：管理 API 机器契约
+- [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)：MQTT 消息机器契约
+- [架构决策记录](docs/adr/)：关键架构决策，不重复编写完整方案
+- [初始化迁移](migrations/001_init.sql)：PostgreSQL 初始化结构
 
 ## 本地 Helm + Docker 部署
 

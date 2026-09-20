@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -120,7 +121,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	case "telemetry-ingestor":
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 			BrokerURL:   runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			ClientID:    runtimeconfig.EnvOrDefault("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
+			ClientID:    mqttClientID("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
 			Username:    os.Getenv("EMQX_USERNAME"),
 			Password:    os.Getenv("EMQX_PASSWORD"),
 			TopicFilter: runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
@@ -141,13 +142,22 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			TelemetryTopic:   runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 			CommandTopic:     runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 			MQTTBrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			MQTTClientID:     runtimeconfig.EnvOrDefault("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
+			AckTopicFilter:   runtimeconfig.EnvOrDefault("EMQX_ACK_TOPIC_FILTER", contracts.AckTopicFilter),
+			MQTTClientID:     mqttClientID("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
 			MQTTUsername:     os.Getenv("EMQX_USERNAME"),
 			MQTTPassword:     os.Getenv("EMQX_PASSWORD"),
 		}, store, tdWriter, res.metrics)
 	}
 
 	return res, nil
+}
+
+func mqttClientID(key, fallback string) string {
+	clientID := runtimeconfig.EnvOrDefault(key, fallback)
+	if suffix := strings.TrimSpace(os.Getenv("EMQX_CLIENT_ID_SUFFIX")); suffix != "" {
+		return clientID + "-" + suffix
+	}
+	return clientID
 }
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {

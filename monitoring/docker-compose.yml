@@ -9,6 +9,8 @@ services:
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
+    ports:
+      - "18080:18080"
 
   k8s-forward-management-api-metrics:
     image: rancher/kubectl:v1.26.8
@@ -18,6 +20,8 @@ services:
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
+    ports:
+      - "18090:18090"
 
   k8s-forward-telemetry-ingestor:
     image: rancher/kubectl:v1.26.8
@@ -27,6 +31,8 @@ services:
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
+    ports:
+      - "18081:18081"
 
   k8s-forward-device-worker:
     image: rancher/kubectl:v1.26.8
@@ -36,12 +42,38 @@ services:
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
+    ports:
+      - "18082:18082"
 
   k8s-forward-iot-core:
     image: rancher/kubectl:v1.26.8
     container_name: iot-k8s-forward-iot-core
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/iot-core", "18091:9101", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+    ports:
+      - "18091:18091"
+
+  k8s-forward-emqx-listeners:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-emqx-listeners
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-listeners", "1883:1883", "-n", "emqx"]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
+  k8s-forward-emqx-dashboard:
+    image: rancher/kubectl:v1.26.8
+    container_name: iot-k8s-forward-emqx-dashboard
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-dashboard", "18083:18083", "-n", "emqx"]
+    ports:
+      - "18083:18083"
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
@@ -105,30 +137,6 @@ services:
       - tdengine-log:/var/log/taos
       - tdengine-corefile:/corefile
 
-  emqx:
-    image: emqx/emqx-enterprise:6.3.1
-    container_name: emqx
-    restart: unless-stopped
-    environment:
-      # Keep the existing single-node Mnesia identity stable across upgrades.
-      EMQX_NODE_NAME: emqx@127.0.0.1
-    ports:
-      - "1883:1883"
-      - "8083:8083"
-      - "8084:8084"
-      - "8883:8883"
-      - "18083:18083"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - emqx-data:/opt/emqx/data
-      - emqx-log:/opt/emqx/log
-    healthcheck:
-      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
-      interval: 10s
-      timeout: 10s
-      retries: 12
-
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -175,7 +183,7 @@ services:
       - "18084:8080"
     environment:
       DEMO_MANAGEMENT_API_URL: http://k8s-forward-management-api:18080
-      DEMO_MQTT_URL: tcp://host.docker.internal:1883
+      DEMO_MQTT_URL: tcp://k8s-forward-emqx-listeners:1883
       DEMO_TENANT_COUNT: "5"
       DEMO_DEVICES_PER_TENANT: "10"
       DEMO_TENANT_PREFIX: demo
@@ -189,8 +197,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      emqx:
-        condition: service_healthy
+      k8s-forward-emqx-listeners:
+        condition: service_started
       prometheus:
         condition: service_started
 
@@ -205,10 +213,6 @@ volumes:
     name: iot-tdengine-log
   tdengine-corefile:
     name: iot-tdengine-corefile
-  emqx-data:
-    name: iot-emqx-data
-  emqx-log:
-    name: iot-emqx-log
   prometheus-data:
     name: iot-prometheus-data
   grafana-data:

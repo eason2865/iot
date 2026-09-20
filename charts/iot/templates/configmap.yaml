@@ -12,7 +12,8 @@ data:
   IOT_CORE_ENDPOINTS: iot-core:9001
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
-  EMQX_TOPIC_FILTER: tenant/+/device/+/telemetry
+  EMQX_TOPIC_FILTER: "$share/iot-telemetry/tenant/+/device/+/telemetry"
+  EMQX_ACK_TOPIC_FILTER: "$share/iot-device-worker/tenant/+/device/+/ack"
   EMQX_TELEMETRY_INGESTOR_CLIENT_ID: iot-telemetry-ingestor
   EMQX_DEVICE_WORKER_CLIENT_ID: iot-device-worker
   TDENGINE_TABLE: telemetry

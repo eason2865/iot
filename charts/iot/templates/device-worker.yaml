@@ -19,7 +19,7 @@ metadata:
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas.deviceWorker }}
   selector:
     matchLabels:
       app: device-worker
@@ -54,6 +54,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: iot-common-config
+          env:
+            - name: EMQX_CLIENT_ID_SUFFIX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - containerPort: 8080
           readinessProbe:

@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: emqx
+---
+apiVersion: apps.emqx.io/v2
+kind: EMQX
+metadata:
+  name: emqx
+  namespace: emqx
+spec:
+  image: emqx/emqx-enterprise:6.3.1
+  imagePullPolicy: IfNotPresent
+  updateStrategy:
+    type: Recreate
+    initialDelaySeconds: 30
+    evacuationStrategy:
+      connEvictRate: 100
+      sessEvictRate: 100
+      waitHealthCheck: 15
+      waitTakeover: 30
+  coreTemplate:
+    spec:
+      replicas: 3
+      minAvailable: 2
+      env:
+        - name: EMQX_LICENSE__KEY
+          valueFrom:
+            secretKeyRef:
+              name: emqx-license
+              key: key
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      volumeClaimTemplates:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+  replicantTemplate:
+    spec:
+      replicas: 2
+      minAvailable: 1
+      env:
+        - name: EMQX_LICENSE__KEY
+          valueFrom:
+            secretKeyRef:
+              name: emqx-license
+              key: key
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+  listenersServiceTemplate:
+    spec:
+      type: LoadBalancer
+  dashboardServiceTemplate:
+    spec:
+      type: LoadBalancer

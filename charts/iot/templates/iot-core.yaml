@@ -22,7 +22,7 @@ metadata:
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas.iotCore }}
   selector:
     matchLabels:
       app: iot-core

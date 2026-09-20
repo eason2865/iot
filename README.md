@@ -282,6 +282,7 @@ iot/
 
 - [整体技术方案](docs/物联网平台技术方案.html)
 - [生产部署指南](docs/生产部署指南.md)
+- [EMQX 长连接集群清单](deploy/emqx/README.md)
 - [OpenAPI 定义](docs/openapi.json)
 - [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)
 - [初始化迁移](migrations/001_init.sql)
@@ -290,14 +291,14 @@ iot/
 
 当前推荐的本地形态是：
 
-- Docker：PostgreSQL / Kafka / EMQX / TDengine / Prometheus / Grafana / demo
-- Kubernetes + Helm：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`
+- Docker：PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo，以及访问 Kubernetes 服务的转发器
+- Kubernetes：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`，以及独立 `emqx` 命名空间中的 EMQX 集群
 
 Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
-本地 EMQX 由同一 Compose 文件管理，版本固定为 `emqx/emqx-enterprise:6.3.1`，使用命名卷 `iot-emqx-data` 和 `iot-emqx-log` 持久化状态与日志。生产环境不要使用 `latest` 标签；升级前应备份数据卷并验证 MQTT 上报、订阅与命令 ACK。
+本地与生产都通过 EMQX Operator 在独立 `emqx` 命名空间管理 EMQX 集群。生产使用持证多节点清单 [`deploy/emqx/cluster.yaml`](deploy/emqx/cluster.yaml)，本地使用社区许可可运行的单节点清单 [`deploy/emqx/cluster.local.yaml`](deploy/emqx/cluster.local.yaml)。本地 Compose 仅转发 MQTT `1883` 和 Dashboard `18083` 到该集群；生产环境应通过 L4 负载均衡和 TLS 暴露 MQTT，Dashboard 保持私网访问。
 
-Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`emqx`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。
+Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。EMQX 运行在 Kubernetes 的 `emqx` 命名空间。
 
 先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 
@@ -325,9 +326,11 @@ docker inspect kafka --format '{{range .Config.Env}}{{println .}}{{end}}' | grep
 
 宿主机运行 Go E2E 时使用 `localhost:9092`，k8s Pod 访问 Docker Kafka 时使用 `192.168.65.254:29092`。如果 Kafka 只配置单个 advertised listener，客户端会在拿到 broker metadata 后被引导到另一侧不可达的地址，表现为 `iot-core` / `telemetry-ingestor` / `device-worker` Kafka 写入或消费超时。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
 
-安装业务服务：
+先启动本地 EMQX，再安装业务服务：
 
 ```bash
+kubectl apply -f deploy/emqx/cluster.local.yaml
+kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout 180s
 kubectl rollout status deploy/iot-core -n iot
 kubectl rollout status deploy/management-api -n iot
@@ -341,11 +344,11 @@ kubectl rollout status deploy/device-worker -n iot
 scripts/helm-deploy-local.sh
 ```
 
-该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
+该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
 在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.0`。
 
-Helm Chart 只定义四个业务服务，并通过 Docker Desktop 网关 IP 连接外部依赖。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
+Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 
@@ -457,7 +460,7 @@ scripts/helm-deploy-local.sh
 CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 ```
 
-当前 Helm 部署固定只包含应用本身和共享配置。PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana、demo 都由独立平台或本地 Docker Compose 管理，不进入业务 Helm release，也没有可重新启用的内置依赖模板。
+当前 Helm 部署固定只包含应用本身和共享配置。PostgreSQL、Kafka、TDengine、Prometheus、Grafana、demo 都由独立平台或本地 Docker Compose 管理；EMQX 由独立的 Operator Release 管理，均不进入业务 Helm release，也没有可重新启用的内置依赖模板。
 
 ## 开发建议
 

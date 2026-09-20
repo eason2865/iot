@@ -1,5 +1,12 @@
 # AI Handover
 
+## 2026-09-20 EMQX 长连接集群方案
+- 已安装 EMQX Operator `2.3.0` 到本地 Kubernetes 的 `emqx-operator-system` 命名空间；该 Operator 作为独立基础设施保留，当前为 `1/1 Available`。
+- 新增 `deploy/emqx/cluster.yaml`：独立 `emqx` 命名空间、3 个持久化 Core 节点、2 个 Replicant 节点、LoadBalancer listener/dashboard Service、PDB、平滑连接迁移参数与 `standard` StorageClass PVC。应用侧 Helm 默认改用 `emqx-listeners.emqx.svc.cluster.local:1883`。
+- 应用已支持 `EMQX_CLIENT_ID_SUFFIX`；Helm 将 Pod 名注入为后缀，并使用 EMQX 共享订阅处理遥测和 ACK。`telemetry-ingestor` 默认 2 副本；`device-worker` 暂保持 1 副本，后续扩容需先增加 Kafka 分区并验证消费语义。
+- 本地已实际应用 `deploy/emqx/cluster.local.yaml`：`emqx/emqx` 为单 Core、PVC 已 Bound、CR 状态 `Ready`。Compose 已移除旧 Docker EMQX 和 `iot-emqx-data`/`iot-emqx-log` 卷，改为转发 `emqx-listeners:1883` 与 `emqx-dashboard:18083`；业务入口转发器也发布宿主机 `18080/18081/18082/18090/18091`。四个业务 Deployment 已发布为 `iot-app:local-cdbcd42483ee`，分别为 2/2、2/2、2/2、1/1 Ready。
+- 实测发现 EMQX 6.3.1 的默认社区许可仅允许单节点，多节点 Core 会报 `SINGLE_NODE_LICENSE`。生产集群清单要求 `emqx-license` Secret 的 `key` 字段；收到商业或试用许可证后，创建 Secret、应用 `cluster.yaml`、等待 `emqx/emqx Ready`，再完成持证 3 Core + 2 Replicant 切流验证。本地全链路已通过 `IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=1`，并确认 Prometheus 5 个 target 均 `up`、EMQX 中两条 telemetry-ingestor 和一条 device-worker 长连接在线。
+
 ## 2026-09-20 移除业务 etcd 服务发现
 - 用户确认按 Kubernetes Service DNS 直接调用的方案执行。`management-api` 现在读取 `IOT_CORE_ENDPOINTS`，默认直连 `127.0.0.1:9001`；Helm 环境设置为 `iot-core:9001`。
 - `iot-core` 不再向 etcd 注册，`management-api` 不再从 etcd 发现服务；两侧均保留 go-zero gRPC 的原有中间件、超时和重试逻辑。新增单元测试，断言客户端使用 direct endpoints、服务端没有 etcd 配置。

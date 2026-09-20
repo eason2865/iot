@@ -10,6 +10,8 @@ APP_IMAGE="${APP_IMAGE:-iot-app:2.0}"
 DEPLOY_APP_IMAGE="$APP_IMAGE"
 DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
+EMQX_HOST="${EMQX_HOST:-emqx-listeners.emqx.svc.cluster.local}"
+EMQX_PORT="${EMQX_PORT:-1883}"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -21,10 +23,12 @@ wait_for_docker_deps() {
     -n "$NAMESPACE" \
     --env="DOCKER_GATEWAY_HOST=$DOCKER_GATEWAY_HOST" \
     --env="DOCKER_GATEWAY_KAFKA_PORT=$DOCKER_GATEWAY_KAFKA_PORT" \
+    --env="EMQX_HOST=$EMQX_HOST" \
+    --env="EMQX_PORT=$EMQX_PORT" \
     -- sh -c 'set -e
       nc -z "$DOCKER_GATEWAY_HOST" 5432
       nc -z "$DOCKER_GATEWAY_HOST" "$DOCKER_GATEWAY_KAFKA_PORT"
-      nc -z "$DOCKER_GATEWAY_HOST" 1883
+      nc -z "$EMQX_HOST" "$EMQX_PORT"
       nc -z "$DOCKER_GATEWAY_HOST" 6041
       echo external-deps-ok'
 }
@@ -95,8 +99,11 @@ load_local_image
 COMMON_HELM_ARGS="
   --set images.app=${DEPLOY_APP_IMAGE}
   --set externalDependencies.kafkaBrokers=${DOCKER_GATEWAY_HOST}:${DOCKER_GATEWAY_KAFKA_PORT}
+  --set externalDependencies.emqxUrl=tcp://${EMQX_HOST}:${EMQX_PORT}
   --set externalDependencies.wait.kafkaHost=${DOCKER_GATEWAY_HOST}
   --set externalDependencies.wait.kafkaPort=${DOCKER_GATEWAY_KAFKA_PORT}
+  --set externalDependencies.wait.emqxHost=${EMQX_HOST}
+  --set externalDependencies.wait.emqxPort=${EMQX_PORT}
 "
 
 helm upgrade --install "$RELEASE" "$CHART" \

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: emqx
+---
+apiVersion: apps.emqx.io/v2
+kind: EMQX
+metadata:
+  name: emqx
+  namespace: emqx
+spec:
+  # The bundled community license supports one node for local integration.
+  image: emqx/emqx-enterprise:6.3.1
+  imagePullPolicy: IfNotPresent
+  coreTemplate:
+    spec:
+      replicas: 1
+      minAvailable: 1
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      volumeClaimTemplates:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+  listenersServiceTemplate:
+    spec:
+      type: LoadBalancer
+  dashboardServiceTemplate:
+    spec:
+      type: LoadBalancer

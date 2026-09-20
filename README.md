@@ -296,6 +296,10 @@ iot/
 
 Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
+本地 EMQX 由同一 Compose 文件管理，版本固定为 `emqx/emqx-enterprise:6.3.1`，使用命名卷 `iot-emqx-data` 和 `iot-emqx-log` 持久化状态与日志。生产环境不要使用 `latest` 标签；升级前应备份数据卷并验证 MQTT 上报、订阅与命令 ACK。
+
+Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`emqx`、`etcd`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。
+
 先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 
 ```bash
@@ -350,7 +354,7 @@ scripts/helm-deploy-local.sh
 scripts/port-forward-local-monitoring.sh
 ```
 
-启动 Docker Prometheus、Grafana 和 demo：
+启动全部本地 Docker 依赖、监控和 demo：
 
 ```bash
 docker compose -f monitoring/docker-compose.yml up -d
@@ -368,7 +372,7 @@ docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
 
 ## 本地监控
 
-Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 通过本机 port-forward 抓取 k8s 业务服务的 `/metrics`，Grafana 数据源已经预置为 Docker Compose 内部地址 `http://prometheus:9090`。
+Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 通过 Docker 网络内的 `iot-k8s-forward-*` 容器抓取 k8s 业务服务的 `/metrics`，Grafana 数据源已经预置为 Compose 内部地址 `http://prometheus:9090`。
 现在本地监控会同时覆盖 `management-api / iot-core / telemetry-ingestor / device-worker / demo`，其中 `iot-core` 走独立的 gRPC 指标端口 `9101`。
 
 ```bash

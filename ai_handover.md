@@ -1,5 +1,13 @@
 # AI Handover
 
+## 2026-09-20 本地 Docker 项目统一与 EMQX 升级
+- 用户要求不保留历史数据或兼容性，按干净状态重建本地 IoT Docker 环境。`monitoring/docker-compose.yml` 现在使用 Compose 项目名 `iot`，Docker Desktop 中所有相关容器归入同一 `iot` 组。
+- 命名规则：原生依赖使用 `postgres`、`kafka`、`tdengine`、`emqx`、`etcd`、`prometheus`、`grafana`；项目自定义容器使用 `iot-` 前缀，例如 `iot-demo` 和 `iot-k8s-forward-*`。所有持久卷也使用 `iot-` 前缀。
+- PostgreSQL、Kafka、TDengine、EMQX、etcd、Prometheus、Grafana 与 demo 都由同一 Compose 文件声明；旧独立容器、旧 `monitoring` Compose 网络和历史数据卷已按用户授权删除。TDengine 现在也使用 Docker 命名卷而非 `~/tdengine` bind mount。
+- EMQX 固定为 `emqx/emqx-enterprise:6.3.1`，不再使用 `latest`；单节点名固定为 `emqx@127.0.0.1`，数据与日志卷分别为 `iot-emqx-data`、`iot-emqx-log`。已验证 `emqx ctl status` 显示 `6.3.1` 且 healthcheck 正常。
+- 清空 Grafana 数据卷意味着此前仅保存在 Grafana 数据库中的钉钉联系人、通知策略和已导入告警规则已被重置；仓库 provisioning 已自动恢复数据源和 4 个 IoT 看板。钉钉 Webhook 不存储在仓库，需要用户在新的 Grafana 中重新配置后才能恢复通知。
+- 已重启 `iot` namespace 的四个业务 Deployment；从空 PostgreSQL、Kafka、TDengine 和 EMQX 环境完成验证：四个 Pod 均 `1/1 Ready`，Prometheus 五个 target 均 `up`，Demo 约 `12/s` telemetry、worker ACK 约 `11/s`、worker error 为 `0`，EMQX 有 7 个在线客户端。
+
 ## 2026-09-16 运行服务命名统一与全链路验证
 - 用户要求不保留兼容别名，运行服务已统一重命名为：`management-api`（原 `admin`）、`iot-core`（原 `core-rpc`）、`telemetry-ingestor`（原 `ingress`）、`device-worker`（原 `worker`）。已同步 Go 入口、Dockerfile、Makefile、Helm 资源与 values、环境变量、etcd 注册键、Kafka 消费组与客户端标识、Prometheus job、Grafana 看板/规则、demo、部署脚本、README、上下文、ADR 和架构图。
 - 本地部署边界：四个业务服务由 Helm 部署在 Kind 的 `iot` namespace；PostgreSQL、Kafka、EMQX、TDengine、etcd、Prometheus、Grafana 和 demo 由 `monitoring/docker-compose.yml` 运行。Prometheus/Grafana 属于 IoT 观测链路，但不随业务 Helm release 发布；Prometheus 通过 Docker 网络内的 `k8s-forward-management-api*`、`k8s-forward-iot-core`、`k8s-forward-telemetry-ingestor`、`k8s-forward-device-worker` 抓取指标。

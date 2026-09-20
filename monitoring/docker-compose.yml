@@ -1,3 +1,5 @@
+name: iot
+
 services:
   k8s-forward-management-api:
     image: rancher/kubectl:v1.26.8
@@ -44,9 +46,68 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot123}
+      POSTGRES_DB: ${POSTGRES_DB:-iot}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: bitnamilegacy/kafka:latest
+    container_name: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENERS: HOST://:9092,DOCKER://:29092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: HOST://localhost:9092,DOCKER://192.168.65.254:29092
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,HOST:PLAINTEXT,DOCKER:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: HOST
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_DELETE_TOPIC_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-data:/bitnami/kafka
+
+  tdengine:
+    image: tdengine/tdengine:latest
+    container_name: tdengine
+    restart: unless-stopped
+    ports:
+      - "6030:6030"
+      - "6041:6041"
+      - "6043:6043"
+      - "6044:6044"
+      - "6046:6046"
+      - "6047:6047"
+      - "6048:6048"
+      - "6049:6049"
+      - "6060:6060"
+    volumes:
+      - tdengine-data:/var/lib/taos
+      - tdengine-log:/var/log/taos
+      - tdengine-corefile:/corefile
+
   etcd:
     image: quay.io/coreos/etcd:v3.6.14
-    container_name: iot-etcd
+    container_name: etcd
     restart: unless-stopped
     ports:
       - "2379:2379"
@@ -74,9 +135,33 @@ services:
     volumes:
       - etcd-data:/etcd-data
 
+  emqx:
+    image: emqx/emqx-enterprise:6.3.1
+    container_name: emqx
+    restart: unless-stopped
+    environment:
+      # Keep the existing single-node Mnesia identity stable across upgrades.
+      EMQX_NODE_NAME: emqx@127.0.0.1
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "8084:8084"
+      - "8883:8883"
+      - "18083:18083"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - emqx-data:/opt/emqx/data
+      - emqx-log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
   prometheus:
     image: prom/prometheus:latest
-    container_name: iot-prometheus
+    container_name: prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
@@ -88,10 +173,11 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
 
   grafana:
     image: grafana/grafana:latest
-    container_name: iot-grafana
+    container_name: grafana
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -134,10 +220,30 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - prometheus
+      emqx:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
 
 volumes:
+  postgres-data:
+    name: iot-postgres-data
+  kafka-data:
+    name: iot-kafka-data
+  tdengine-data:
+    name: iot-tdengine-data
+  tdengine-log:
+    name: iot-tdengine-log
+  tdengine-corefile:
+    name: iot-tdengine-corefile
   etcd-data:
+    name: iot-etcd-data
+  emqx-data:
+    name: iot-emqx-data
+  emqx-log:
+    name: iot-emqx-log
+  prometheus-data:
+    name: iot-prometheus-data
   grafana-data:
     name: iot-grafana-data
 

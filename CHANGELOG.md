@@ -14,6 +14,6 @@ All notable changes to this project will be documented in this file.
 - Demo simulator for multi-tenant device traffic.
 - OpenAPI and MQTT JSON Schema documents.
 - PostgreSQL migration script.
-- Helm chart, local Kubernetes manifests, Dockerfile, and monitoring assets.
+- Helm chart, Dockerfile, and monitoring assets.
 - Grafana dashboards and Prometheus deployment support.
 - Open source governance files for the 1.0 release.

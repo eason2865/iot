@@ -18,13 +18,12 @@
 
 - External dependencies mode: 默认 Helm 部署模式，应用 Pod 连接 Docker Desktop 或外部 PostgreSQL、Kafka、EMQX、TDengine。
 - Application release: Helm release 中的 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 业务服务。
-- Device worker offset policy: 本地新建 `iot-device-worker` group 首次从最新 offset 启动，避免服务命名迁移时重放历史业务事件；已提交的 group offset 仍正常续消费。
 
 ## Module Ownership
 
 - `internal/contracts`: 外部契约和领域约束，包括 topic、Envelope、命令状态机、OpenAPI 和 MQTT Schema。
 - `internal/core`: IoT Core 服务实现，承载核心业务用例。
 - `internal/adminapi`: Management API 的 REST 网关，负责 HTTP 到 IoT Core 的协议转换。
-- `internal/platform`: 运行时适配和旧内存 HTTP app，包含仓储、消息、指标、device-worker、MQTT bridge、TDengine writer 等实现。
+- `internal/platform`: 运行时适配和平台能力，包含仓储、消息、指标、device-worker、MQTT bridge、TDengine writer 等实现。
 - `internal/bootstrap`: `telemetry-ingestor` 和 `device-worker` 的运行时装配。
 - `internal/demo`: Demo 造流运行时和模拟业务。

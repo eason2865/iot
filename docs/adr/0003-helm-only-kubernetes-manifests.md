@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The repository previously had both Helm charts and `k8s/local` Kustomize manifests. Maintaining both caused duplicated deployment definitions and drift risk.
+Kubernetes deployment definitions need one authoritative source to avoid duplicated manifests and drift.
 
 ## Decision
 
@@ -17,4 +17,4 @@ Use `charts/iot` as the Kubernetes manifest source for the four application serv
 - Kubernetes changes should be made in the Helm chart first.
 - Local dependencies and demo run through `monitoring/docker-compose.yml`; production dependencies use their own platform-managed deployment.
 - Namespace creation is handled by Helm commands with `--create-namespace`.
-- The removed `k8s/local` directory should not be recreated unless there is a new explicit deployment strategy decision.
+- Kubernetes changes are made in `charts/iot`; no second manifest source is maintained.

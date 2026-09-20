@@ -31,7 +31,6 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - 设备接入链路：MQTT -> EMQX -> Go `telemetry-ingestor`
 - 核心服务拆分：`management-api` 负责 REST 网关，`iot-core` 负责核心业务
 - 服务调用：`management-api` 在 Kubernetes 内通过 `iot-core:9001` Service DNS 访问核心服务
-- 本地改名部署：新的 `iot-device-worker` Kafka 消费组从最新 offset 开始，避免重放迁移前已完成的命令和遥测；后续重启继续使用已提交的 offset。
 - 异步解耦：遥测、命令和事件统一进入 Kafka
 - 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
 - 命令闭环：创建、下发、ACK、状态机更新
@@ -416,7 +415,7 @@ Grafana 默认账号：
 
 `IoT Management API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
 
-看板顶部另有两条固定 UID 的规则入口，避免通过目录显示名拼接规则地址。若旧浏览器页面中的 `View alert rule` 跳到 `pri%24grafana%24IoT...` 并报 403，请完整刷新浏览器页面（不是仅点击看板的 Refresh），或使用顶部固定入口；不要为此扩大目录权限。Alert list 的内置数据源名称为 `-- Grafana --`，与 API 中的规则源标识 `grafana` 不同。
+看板顶部提供固定 UID 的规则入口；Alert list 的内置数据源名称为 `-- Grafana --`，与 API 中的规则源标识 `grafana` 不同。
 
 规则模板为 `monitoring/grafana/alerts/management-api-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
 
@@ -442,7 +441,7 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 - 正文按实例展示级别、服务、路由、HTTP 状态、摘要、详情，以及 UTC+8 开始/恢复时间；无值的可选字段不展示。JSON 由 `data.ToJSON` 编码，不手动拼接文案，以正确处理引号和换行。
 - 按规则提供的 URL 展示图表、看板、规则、处理手册和临时静默链接，单条消息最多展示 10 个实例。链接继承 Grafana 对外地址，目前为 localhost，其他设备访问需另行配置可达地址。
 - `disableResolveMessage: false` 开启恢复通知；此次模板规范化不改变规则阈值、评估周期、分组或重复通知频率。
-- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再应用联系人片段并保留 UID、名称和原始 URL。由原生 DingDing 迁移到 Webhook 时，只在内存中读取原 URL，并替换类型对应的 settings、清除旧 secureFields，不能将 `[REDACTED]` 当作 URL 保存。Webhook 的 URL 是受保护配置字段而非原生 DingDing 的加密秘密字段，需限制联系人读取权限；不要打印、导出到仓库或提交机器人 token。
+- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再应用联系人片段。Webhook URL 是受保护配置，需限制联系人读取权限；不要打印、导出到仓库或提交机器人 token。
 - 修改模板优先在通知模板组中进行。已打开的联系人编辑页必须刷新后再保存，避免旧表单覆盖模板引用。
 
 设置 `GRAFANA_ADMIN_PASSWORD` 后运行 `python3 scripts/test-grafana-notification-template.py -v`，通过本地 Grafana 模板预览 API 验证触发、恢复、缺失字段、多实例截断、Markdown JSON 和四个独立链接；不会向钉钉发消息。可用 `GRAFANA_URL`、`GRAFANA_USER` 指定其他测试实例。钉钉历史卡片不会随模板更新，应在新消息上验证；联系人测试通知可能缺少规则 GeneratorURL，因此不展示“查看规则”，真实规则通知才包含该链接。

@@ -606,3 +606,9 @@
 - 已执行并通过：
   - `helm template iot charts/iot ... apps-only 参数`
   - `helm lint charts/iot`
+
+## 2026-09-20 生产鉴权全链路 E2E
+- `internal/platform/e2e_test.go` 已同步生产 EMQX 鉴权模型：服务组件使用 `iot-service`，设备使用 `tenantID:deviceID` 用户名和设备密钥。
+- E2E 的遥测查询已切换到生产使用的 `telemetry_v2` 超表，不再查询旧 `telemetry` 表。
+- 已通过真实本地依赖执行：`IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=1 -v`。
+- 该测试覆盖 MQTT 设备上报、EMQX 鉴权、Kafka 遥测消费、TDengine 入库、管理 API 创建设备命令、MQTT 下发、设备 ACK、PostgreSQL 状态落库。

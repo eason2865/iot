@@ -34,6 +34,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	kafkaBrokers := splitCSV(envOr("KAFKA_BROKERS", "localhost:9092"))
 	emqxURL := envOr("EMQX_URL", "tcp://127.0.0.1:1883")
 	tdengineDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
+	emqxInternalPassword := envOr("EMQX_PASSWORD", "local-mqtt-service-password")
 
 	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
 	if err != nil {
@@ -79,7 +80,9 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
 		BrokerURL:   emqxURL,
-		ClientID:    clientIDPrefix + "-bridge",
+		ClientID:    "iot-telemetry-ingestor-" + clientIDPrefix,
+		Username:    "iot-service",
+		Password:    emqxInternalPassword,
 		TopicFilter: contracts.TelemetryTopicFilter,
 	}, publisher, metrics)
 	if bridge == nil {
@@ -94,7 +97,9 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		AckTopicFilter:   ackTopicFilter,
 		TenantIDs:        []string{tenantID},
 		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     clientIDPrefix + "-device-worker",
+		MQTTClientID:     "iot-device-worker-" + clientIDPrefix,
+		MQTTUsername:     "iot-service",
+		MQTTPassword:     emqxInternalPassword,
 	}, store, tdWriter, metrics)
 	if worker == nil {
 		t.Fatal("NewWorker() returned nil")
@@ -129,7 +134,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	e2eCreateTenant(t, ts.URL, tenantID, "Tenant E2E")
 	e2eCreateDevice(t, ts.URL, tenantID, deviceID, "product-x")
 
-	telemetryClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-telemetry")
+	telemetryClient := mustMQTTDeviceClient(t, emqxURL, clientIDPrefix+"-telemetry", tenantID, deviceID)
 	defer telemetryClient.Disconnect(250)
 	telemetryTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixTelemetry)
 	telemetryPayload := map[string]any{
@@ -166,7 +171,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return err == nil && got >= 1
 	})
 
-	commandClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-device")
+	commandClient := mustMQTTDeviceClient(t, emqxURL, clientIDPrefix+"-device", tenantID, deviceID)
 	defer commandClient.Disconnect(250)
 	commandTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixCommand)
 	commandCh := make(chan commandEnvelope, 1)
@@ -203,7 +208,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		t.Fatalf("command downlink context mismatch: %+v", gotCommand)
 	}
 
-	ackClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-ack")
+	ackClient := mustMQTTDeviceClient(t, emqxURL, clientIDPrefix+"-ack", tenantID, deviceID)
 	defer ackClient.Disconnect(250)
 	ackTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixAck)
 	publishMQTTJSON(t, ackClient, ackTopic, map[string]any{
@@ -249,7 +254,7 @@ func tdengineTelemetryCount(dsn, tenantID, deviceID string) (int, error) {
 	}
 	defer db.Close()
 	var count int
-	query := fmt.Sprintf("select count(*) from telemetry where tenant_id='%s' and device_id='%s';", tenantID, deviceID)
+	query := fmt.Sprintf("select count(*) from telemetry_v2 where tenant_id='%s' and device_id='%s';", tenantID, deviceID)
 	if err := db.QueryRow(query).Scan(&count); err != nil {
 		return 0, err
 	}
@@ -258,7 +263,9 @@ func tdengineTelemetryCount(dsn, tenantID, deviceID string) (int, error) {
 
 func mqttReachable(url string) bool {
 	opts := mqtt.NewClientOptions().AddBroker(url)
-	opts.SetClientID(fmt.Sprintf("probe-%d", time.Now().UnixNano()))
+	opts.SetClientID(fmt.Sprintf("iot-device-worker-probe-%d", time.Now().UnixNano()))
+	opts.SetUsername("iot-service")
+	opts.SetPassword(envOr("EMQX_PASSWORD", "local-mqtt-service-password"))
 	opts.SetConnectTimeout(3 * time.Second)
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
@@ -281,6 +288,23 @@ func mustMQTTClient(t *testing.T, brokerURL, clientID string) mqtt.Client {
 	token.Wait()
 	if err := token.Error(); err != nil {
 		t.Fatalf("MQTT connect error = %v", err)
+	}
+	return client
+}
+
+func mustMQTTDeviceClient(t *testing.T, brokerURL, clientID, tenantID, deviceID string) mqtt.Client {
+	t.Helper()
+	opts := mqtt.NewClientOptions().AddBroker(brokerURL)
+	opts.SetClientID(clientID)
+	opts.SetUsername(tenantID + ":" + deviceID)
+	opts.SetPassword("secret-1")
+	opts.SetConnectTimeout(5 * time.Second)
+	opts.SetAutoReconnect(false)
+	client := mqtt.NewClient(opts)
+	token := client.Connect()
+	token.Wait()
+	if err := token.Error(); err != nil {
+		t.Fatalf("MQTT device connect error = %v", err)
 	}
 	return client
 }

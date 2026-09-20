@@ -2,10 +2,12 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/segmentio/kafka-go"
 
 	"iot/internal/contracts"
 )
@@ -18,6 +20,8 @@ type MQTTBridgeConfig struct {
 	TopicFilter        string
 	PublishConcurrency int
 	PublishSlotTimeout time.Duration
+	KafkaBrokers       []string
+	DLQTopic           string
 }
 
 type MQTTBridge struct {
@@ -25,6 +29,7 @@ type MQTTBridge struct {
 	filter       string
 	metrics      *Metrics
 	publishSlots chan struct{}
+	dlqWriter    *kafka.Writer
 }
 
 func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Metrics) *MQTTBridge {
@@ -43,6 +48,13 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	if publishSlotTimeout <= 0 {
 		publishSlotTimeout = 30 * time.Second
 	}
+	dlqTopic := cfg.DLQTopic
+	if dlqTopic == "" {
+		dlqTopic = "iot.dlq"
+	}
+	if len(cfg.KafkaBrokers) > 0 {
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, dlqTopic)
+	}
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.BrokerURL)
 	opts.SetClientID(cfg.ClientID)
@@ -56,6 +68,9 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	opts.SetConnectRetry(true)
 	opts.SetConnectRetryInterval(2 * time.Second)
 	bridge := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, publishConcurrency)}
+	if len(cfg.KafkaBrokers) > 0 {
+		bridge.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
+	}
 	opts.OnConnect = func(_ mqtt.Client) {
 		log.Printf("mqtt bridge connected: filter=%s", filter)
 		token := bridge.client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
@@ -65,6 +80,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
+				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, "mqtt.decode", err)
 				return
 			}
 			rec := TelemetryRecord{
@@ -85,6 +101,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 						if bridge.metrics != nil {
 							bridge.metrics.IncMQTTBridge("error")
 						}
+						_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, "mqtt.kafka", err)
 						return
 					}
 					if bridge.metrics != nil {
@@ -141,5 +158,10 @@ func (b *MQTTBridge) Run(ctx context.Context) error {
 	}
 	<-ctx.Done()
 	b.client.Disconnect(250)
+	if b.dlqWriter != nil {
+		_ = b.dlqWriter.Close()
+	}
 	return nil
 }
+
+var errMQTTBridgeDLQ = errors.New("mqtt bridge dead-letter unavailable")

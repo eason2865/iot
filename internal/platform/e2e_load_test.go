@@ -68,7 +68,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 
 	tdWriter, err := platform.NewTDengineWriter(platform.TDengineConfig{
 		DSN:   tdengineDSN,
-		Table: "telemetry",
+		Table: "telemetry_v2",
 	}, metrics)
 	if err != nil {
 		t.Fatalf("NewTDengineWriter() error = %v", err)

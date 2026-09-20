@@ -1,5 +1,14 @@
 # AI Handover
 
+## 2026-09-20 生产风险整改与 Go 升级
+- 当前源码与构建基线升级到 Go `1.27.1`：`go.mod` 使用 `go 1.27.0` 和 `toolchain go1.27.1`；`go.sum` 已由 `go mod tidy` 更新，README/生产文档同步。
+- MQTT 认证已收敛到 `iot-core` 内部 HTTP 回调：设备用户名为 `tenantId:deviceId`，PostgreSQL 保存 bcrypt `secret_hash`，EMQX 配置 `authorization.no_match=deny` 并按设备下发 ACL；管理 API 业务路由要求 Bearer Token，健康检查和契约端点保持公开。旧本地明文 secret 在启动迁移时转哈希并清空。
+- 命令投递改为 PostgreSQL `created` 入库、`FOR UPDATE SKIP LOCKED` 领取租约、发布成功后 `sent`、deadline 扫描 `timeout`；UUIDv7 作为命令 ID；ACK 写入 `command_ack`/`command_events`，允许发布和 ACK 的竞态顺序以及重复/迟到 ACK。
+- Kafka 解码、业务落库、TDengine 和 MQTT 投递失败先进入 `iot.dlq`，成功后才提交原位点；新增 `cmd/dlq-replay`，人工审核后按批重放。TDengine 改为 `telemetry_v2` supertable + 每设备子表，租户/设备为 Tags，写入 payload hash/size，完整长 payload 由 PostgreSQL JSONB 保存。
+- 租户/命令列表新增 protobuf cursor 分页，REST 返回 `items/nextCursor`，单页上限 100；生成的 `core.pb.go`/`core_grpc.pb.go` 已同步。
+- Helm 为业务服务注入 `iot-runtime-secrets`，`iot-core` 暴露 9090 MQTT 认证端口；本地部署脚本负责创建开发 Secret。EMQX 本地/生产清单都包含 HTTP 认证回调配置。
+- 验证结果：`go test ./...`、`make build`、Docker 镜像构建、`helm lint charts/iot`、Helm revision 31 本地滚动部署均通过；7 个业务 Pod 全部 `1/1`，管理 API 无 Token 返回 401、带 Token 返回 200，设备正确密钥 allow/错误密钥 deny，新命令实测 `created -> acked`，DLQ 主题存在，Prometheus 的 5 个 target 均 `up`，TDengine `telemetry_v2` 已有数据和设备子表。
+
 ## 2026-09-20 EMQX 长连接集群方案
 - 已安装 EMQX Operator `2.3.0` 到本地 Kubernetes 的 `emqx-operator-system` 命名空间；该 Operator 作为独立基础设施保留，当前为 `1/1 Available`。
 - 新增 `deploy/emqx/cluster.yaml`：独立 `emqx` 命名空间、3 个持久化 Core 节点、2 个 Replicant 节点、LoadBalancer listener/dashboard Service、PDB、平滑连接迁移参数与 `standard` StorageClass PVC。应用侧 Helm 默认改用 `emqx-listeners.emqx.svc.cluster.local:1883`。

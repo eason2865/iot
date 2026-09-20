@@ -5,5 +5,6 @@ COPY bin/iot-core /usr/local/bin/iot-core
 COPY bin/telemetry-ingestor /usr/local/bin/telemetry-ingestor
 COPY bin/device-worker /usr/local/bin/device-worker
 COPY bin/demo /usr/local/bin/demo
+COPY bin/dlq-replay /usr/local/bin/dlq-replay
 
 EXPOSE 8080

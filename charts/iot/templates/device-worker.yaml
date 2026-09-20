@@ -54,6 +54,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: iot-common-config
+            - secretRef:
+                name: {{ .Values.security.existingSecret }}
           env:
             - name: EMQX_CLIENT_ID_SUFFIX
               valueFrom:

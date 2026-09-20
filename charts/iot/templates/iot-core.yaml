@@ -14,6 +14,9 @@ spec:
     - name: metrics
       port: 9101
       targetPort: 9101
+    - name: mqtt-auth
+      port: 9090
+      targetPort: 9090
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,9 +58,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: iot-common-config
+            - secretRef:
+                name: {{ .Values.security.existingSecret }}
           ports:
             - containerPort: 9001
             - containerPort: 9101
+            - containerPort: 9090
           readinessProbe:
             tcpSocket:
               port: 9001

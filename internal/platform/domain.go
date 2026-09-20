@@ -39,13 +39,15 @@ type TelemetryRecord struct {
 }
 
 type Command struct {
-	ID        string                  `json:"id"`
-	TenantID  string                  `json:"tenantId"`
-	DeviceID  string                  `json:"deviceId"`
-	Status    contracts.CommandStatus `json:"status"`
-	Payload   json.RawMessage         `json:"payload"`
-	CreatedAt time.Time               `json:"createdAt"`
-	UpdatedAt time.Time               `json:"updatedAt"`
+	ID               string                  `json:"id"`
+	TenantID         string                  `json:"tenantId"`
+	DeviceID         string                  `json:"deviceId"`
+	Status           contracts.CommandStatus `json:"status"`
+	Payload          json.RawMessage         `json:"payload"`
+	CreatedAt        time.Time               `json:"createdAt"`
+	UpdatedAt        time.Time               `json:"updatedAt"`
+	DispatchAttempts int                     `json:"dispatchAttempts"`
+	DeadlineAt       time.Time               `json:"deadlineAt,omitempty"`
 }
 
 const (

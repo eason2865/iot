@@ -120,11 +120,13 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 	switch serviceName {
 	case "telemetry-ingestor":
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
-			BrokerURL:   runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			ClientID:    mqttClientID("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
-			Username:    os.Getenv("EMQX_USERNAME"),
-			Password:    os.Getenv("EMQX_PASSWORD"),
-			TopicFilter: runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
+			BrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
+			ClientID:     mqttClientID("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
+			Username:     os.Getenv("EMQX_USERNAME"),
+			Password:     os.Getenv("EMQX_PASSWORD"),
+			TopicFilter:  runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
+			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
+			DLQTopic:     runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
 		}, publisher, res.metrics)
 		res.bridge = bridge
 	case "device-worker":
@@ -141,6 +143,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			KafkaStartOffset: kafka.LastOffset,
 			TelemetryTopic:   runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 			CommandTopic:     runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+			DLQTopic:         runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
 			MQTTBrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
 			AckTopicFilter:   runtimeconfig.EnvOrDefault("EMQX_ACK_TOPIC_FILTER", contracts.AckTopicFilter),
 			MQTTClientID:     mqttClientID("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
@@ -186,7 +189,7 @@ func buildTDengineWriter(metrics *platform.Metrics) (*platform.TDengineWriter, f
 	dsn := runtimeconfig.EnvOrDefault("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
 	writer, err := platform.NewTDengineWriter(platform.TDengineConfig{
 		DSN:   dsn,
-		Table: runtimeconfig.EnvOrDefault("TDENGINE_TABLE", "telemetry"),
+		Table: runtimeconfig.EnvOrDefault("TDENGINE_TABLE", "telemetry_v2"),
 	}, metrics)
 	if err != nil {
 		return nil, nil, err

@@ -7,6 +7,11 @@ replicas:
   telemetryIngestor: 2
   deviceWorker: 1
 
+security:
+  # Supply real values from an external secret manager in production. The local
+  # deployment script creates this Kubernetes Secret for integration tests.
+  existingSecret: iot-runtime-secrets
+
 # The chart deploys application services only. Dependencies are managed outside
 # this release, locally by Docker Compose and in production by their own stack.
 externalDependencies:

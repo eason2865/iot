@@ -12,16 +12,20 @@ data:
   IOT_CORE_ENDPOINTS: iot-core:9001
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
+  KAFKA_DLQ_TOPIC: iot.dlq
   EMQX_TOPIC_FILTER: "$share/iot-telemetry/tenant/+/device/+/telemetry"
   EMQX_ACK_TOPIC_FILTER: "$share/iot-device-worker/tenant/+/device/+/ack"
   EMQX_TELEMETRY_INGESTOR_CLIENT_ID: iot-telemetry-ingestor
   EMQX_DEVICE_WORKER_CLIENT_ID: iot-device-worker
-  TDENGINE_TABLE: telemetry
+  TDENGINE_TABLE: telemetry_v2
   LISTEN_ADDR: :8080
   MANAGEMENT_API_METRICS_HOST: 0.0.0.0
   MANAGEMENT_API_METRICS_PORT: "9100"
   MANAGEMENT_API_METRICS_PATH: /metrics
   IOT_CORE_LISTEN_ON: :9001
+  IOT_CORE_MQTT_AUTH_LISTEN: :9090
+  COMMAND_ACK_TIMEOUT: 5m
+  EMQX_USERNAME: iot-service
   IOT_CORE_PROMETHEUS_HOST: 0.0.0.0
   IOT_CORE_PROMETHEUS_PORT: "9101"
   IOT_CORE_PROMETHEUS_PATH: /metrics

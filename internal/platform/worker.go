@@ -19,6 +19,7 @@ type WorkerConfig struct {
 	KafkaStartOffset int64
 	TelemetryTopic   string
 	CommandTopic     string
+	DLQTopic         string
 	AckTopicFilter   string
 	AckTopicFilters  []string
 	TenantIDs        []string
@@ -34,6 +35,7 @@ type Worker struct {
 	mqtt            mqtt.Client
 	telemetryReader *kafka.Reader
 	commandReader   *kafka.Reader
+	dlqWriter       *kafka.Writer
 	metrics         *Metrics
 	tenantAllowlist map[string]struct{}
 }
@@ -54,7 +56,12 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		if commandTopic == "" {
 			commandTopic = "iot.command"
 		}
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, telemetryTopic, commandTopic)
+		dlqTopic := cfg.DLQTopic
+		if dlqTopic == "" {
+			dlqTopic = "iot.dlq"
+		}
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, telemetryTopic, commandTopic, dlqTopic)
+		w.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
 			groupID = "iot-device-worker"
@@ -170,6 +177,9 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		defer w.mqtt.Disconnect(250)
 	}
+	if w.dlqWriter != nil {
+		defer w.dlqWriter.Close()
+	}
 	errCh := make(chan error, 2)
 	if w.telemetryReader != nil {
 		go func() { errCh <- w.consumeTelemetry(ctx) }()
@@ -221,7 +231,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry", "error")
 			}
-			_ = w.telemetryReader.CommitMessages(ctx, msg)
+			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.decode", err); err != nil {
+				return err
+			}
 			continue
 		}
 		if !w.tenantAllowed(rec.TenantID) {
@@ -244,7 +256,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")
 				}
-				_ = w.telemetryReader.CommitMessages(ctx, msg)
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.postgres", err); dlqErr != nil {
+					return dlqErr
+				}
 				continue
 			}
 		}
@@ -254,7 +268,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")
 				}
-				_ = w.telemetryReader.CommitMessages(ctx, msg)
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.tdengine", err); dlqErr != nil {
+					return dlqErr
+				}
 				continue
 			}
 		}
@@ -288,7 +304,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("command", "error")
 			}
-			_ = w.commandReader.CommitMessages(ctx, msg)
+			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.decode", err); err != nil {
+				return err
+			}
 			continue
 		}
 		if !w.tenantAllowed(cmd.TenantID) {
@@ -303,7 +321,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				_ = w.commandReader.CommitMessages(ctx, msg)
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.topic", err); dlqErr != nil {
+					return dlqErr
+				}
 				continue
 			}
 			payload, err := json.Marshal(CommandDownlink{
@@ -320,7 +340,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				_ = w.commandReader.CommitMessages(ctx, msg)
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.encode", err); dlqErr != nil {
+					return dlqErr
+				}
 				continue
 			}
 			token := w.mqtt.Publish(topic, 1, false, payload)
@@ -330,7 +352,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				_ = w.commandReader.CommitMessages(ctx, msg)
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.mqtt", err); dlqErr != nil {
+					return dlqErr
+				}
 				continue
 			}
 		}

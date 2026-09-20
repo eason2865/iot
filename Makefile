@@ -1,6 +1,6 @@
 .PHONY: all test fmt fmt-check build clean helm-local
 
-BINS := management-api iot-core demo telemetry-ingestor device-worker
+BINS := management-api iot-core demo telemetry-ingestor device-worker dlq-replay
 GOOS ?= linux
 GOARCH ?= arm64
 CGO_ENABLED ?= 0

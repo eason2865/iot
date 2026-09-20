@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -64,8 +65,6 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 		_ = db.Close()
 		return nil, err
 	}
-	w.wg.Add(1)
-	go w.run()
 	return w, nil
 }
 
@@ -90,14 +89,16 @@ func (w *TDengineWriter) Close() error {
 func (w *TDengineWriter) ensureSchema() error {
 	stmts := []string{
 		"CREATE DATABASE IF NOT EXISTS iot",
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s (
   ts TIMESTAMP,
-  tenant_id NCHAR(64),
-  device_id NCHAR(64),
-  msg_id NCHAR(64),
-  type NCHAR(64),
-  version NCHAR(32),
-  payload NCHAR(4096)
+  msg_id VARCHAR(64),
+  type VARCHAR(64),
+  version VARCHAR(32),
+  payload_hash BINARY(64),
+  payload_bytes INT
+) TAGS (
+  tenant_id VARCHAR(64),
+  device_id VARCHAR(64)
 )`, w.table),
 	}
 	for _, stmt := range stmts {
@@ -112,31 +113,15 @@ func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
 	if w == nil || w.db == nil {
 		return nil
 	}
-	if w.closedCh == nil {
-		w.closedCh = make(chan struct{})
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return errTDengineWriterClosed
 	}
-	for {
-		w.mu.Lock()
-		if w.closed {
-			w.mu.Unlock()
-			return errTDengineWriterClosed
-		}
-		select {
-		case w.pendingCh <- rec:
-			w.mu.Unlock()
-			return nil
-		default:
-			w.mu.Unlock()
-		}
-
-		// Backpressure is preferable to dropping telemetry, but shutdown must
-		// still be able to interrupt a blocked writer without closing under send.
-		select {
-		case <-w.closedCh:
-			return errTDengineWriterClosed
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	w.mu.Unlock()
+	// A Kafka offset is committed only after this call returns successfully, so
+	// TDengine failures are routed to the DLQ instead of being logged and lost.
+	return w.writeBatch([]TelemetryRecord{rec})
 }
 
 func escapeTD(s string) string {
@@ -182,35 +167,24 @@ func (w *TDengineWriter) writeBatch(records []TelemetryRecord) error {
 		return nil
 	}
 
-	var b strings.Builder
-	b.Grow(len(records) * 256)
-	b.WriteString("INSERT INTO ")
-	b.WriteString(w.table)
-	b.WriteString(" VALUES ")
-
-	for i, rec := range records {
-		if i > 0 {
-			b.WriteString(", ")
+	for _, rec := range records {
+		hash := fmt.Sprintf("%x", sha256.Sum256(rec.Payload))
+		// One subtable per device makes tenant/device dimensions TDengine tags.
+		// Raw JSON remains in PostgreSQL JSONB, eliminating a second bounded copy.
+		tableHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rec.TenantID+"\x00"+rec.DeviceID)))[:24]
+		childTable := w.table + "_" + tableHash
+		statement := fmt.Sprintf(
+			"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES ('%s', '%s', '%s', '%s', '%s', %d)",
+			childTable, w.table, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
+			time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
+			escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
+		)
+		if _, err := w.db.Exec(statement); err != nil {
+			if w.metrics != nil {
+				w.metrics.IncTDengineWrite("error")
+			}
+			return err
 		}
-		payload := escapeTD(string(rec.Payload))
-		b.WriteString(fmt.Sprintf(
-			"('%s', '%s', '%s', '%s', '%s', '%s', '%s')",
-			time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"),
-			escapeTD(rec.TenantID),
-			escapeTD(rec.DeviceID),
-			escapeTD(rec.MsgID),
-			escapeTD(rec.Type),
-			escapeTD(rec.Version),
-			escapeTD(payload),
-		))
-	}
-
-	_, err := w.db.Exec(b.String())
-	if err != nil {
-		if w.metrics != nil {
-			w.metrics.IncTDengineWrite("error")
-		}
-		return err
 	}
 	if w.metrics != nil {
 		w.metrics.IncTDengineWrite("ok")

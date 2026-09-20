@@ -37,13 +37,25 @@ func (s *Service) CreateTenant(_ context.Context, req *corev1.CreateTenantReques
 	return &corev1.Tenant{Id: tenant.ID, Name: tenant.Name}, nil
 }
 
-func (s *Service) ListTenants(context.Context, *corev1.ListTenantsRequest) (*corev1.ListTenantsResponse, error) {
-	tenants := s.repo.ListTenants()
+func (s *Service) ListTenants(_ context.Context, req *corev1.ListTenantsRequest) (*corev1.ListTenantsResponse, error) {
+	var tenants []platform.Tenant
+	nextCursor := ""
+	if paged, ok := s.repo.(interface {
+		ListTenantsPage(platform.PageRequest) ([]platform.Tenant, string, error)
+	}); ok {
+		var err error
+		tenants, nextCursor, err = paged.ListTenantsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		tenants = s.repo.ListTenants()
+	}
 	out := make([]*corev1.Tenant, 0, len(tenants))
 	for _, tenant := range tenants {
 		out = append(out, &corev1.Tenant{Id: tenant.ID, Name: tenant.Name})
 	}
-	return &corev1.ListTenantsResponse{Tenants: out}, nil
+	return &corev1.ListTenantsResponse{Tenants: out, NextCursor: nextCursor}, nil
 }
 
 func (s *Service) CreateDevice(_ context.Context, req *corev1.CreateDeviceRequest) (*corev1.Device, error) {
@@ -104,7 +116,7 @@ func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetry
 	if err != nil {
 		return nil, err
 	}
-	if s.publisher != nil {
+	if _, dispatchesAsync := s.repo.(platform.CommandDispatchStore); s.publisher != nil && !dispatchesAsync {
 		if err := s.publisher.PublishTelemetry(record); err != nil {
 			return nil, err
 		}
@@ -139,13 +151,25 @@ func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequ
 	return &corev1.CreateCommandResponse{Command: commandToPB(command)}, nil
 }
 
-func (s *Service) ListCommands(context.Context, *corev1.ListCommandsRequest) (*corev1.ListCommandsResponse, error) {
-	commands := s.repo.ListCommands()
+func (s *Service) ListCommands(_ context.Context, req *corev1.ListCommandsRequest) (*corev1.ListCommandsResponse, error) {
+	var commands []platform.Command
+	nextCursor := ""
+	if paged, ok := s.repo.(interface {
+		ListCommandsPage(platform.PageRequest) ([]platform.Command, string, error)
+	}); ok {
+		var err error
+		commands, nextCursor, err = paged.ListCommandsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		commands = s.repo.ListCommands()
+	}
 	out := make([]*corev1.Command, 0, len(commands))
 	for _, command := range commands {
 		out = append(out, commandToPB(command))
 	}
-	return &corev1.ListCommandsResponse{Commands: out}, nil
+	return &corev1.ListCommandsResponse{Commands: out, NextCursor: nextCursor}, nil
 }
 
 func (s *Service) GetCommand(_ context.Context, req *corev1.GetCommandRequest) (*corev1.GetCommandResponse, error) {
@@ -196,7 +220,6 @@ func deviceToPB(device platform.Device) *corev1.Device {
 		TenantId:  device.TenantID,
 		DeviceId:  device.DeviceID,
 		ProductId: device.ProductID,
-		Secret:    device.Secret,
 		CreatedAt: toTimestamp(device.CreatedAt),
 	}
 }

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,7 +31,6 @@ func Run() error {
 			_ = closer()
 		}
 	}()
-
 	publisher, closer, err := buildPublisher()
 	if err != nil {
 		return err
@@ -40,6 +40,12 @@ func Run() error {
 			_ = closer()
 		}
 	}()
+	if dispatchStore, ok := store.(platform.CommandDispatchStore); ok && publisher != nil {
+		go platform.NewCommandDispatcher(dispatchStore, publisher, runtimeconfig.Duration("COMMAND_ACK_TIMEOUT", 5*time.Minute)).Run(context.Background())
+	}
+	if authenticator, ok := store.(platform.DeviceAuthenticator); ok {
+		go serveMQTTAuthentication(authenticator, runtimeconfig.EnvOrDefault("EMQX_INTERNAL_PASSWORD", ""))
+	}
 
 	server := zrpc.MustNewServer(rpcServerConf(), func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
@@ -118,5 +124,15 @@ func serveIotCoreMetrics(handler http.Handler, host string, port int, path strin
 	log.Printf("starting iot-core metrics server at %s%s", addr, path)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Printf("iot-core metrics server stopped: %v", err)
+	}
+}
+
+func serveMQTTAuthentication(authenticator platform.DeviceAuthenticator, internalPassword string) {
+	mux := http.NewServeMux()
+	mux.Handle("/internal/mqtt/authenticate", platform.MQTTAuthenticationHandler(authenticator, internalPassword))
+	addr := runtimeconfig.EnvOrDefault("IOT_CORE_MQTT_AUTH_LISTEN", ":9090")
+	log.Printf("starting iot-core MQTT authentication server at %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Printf("iot-core MQTT authentication server stopped: %v", err)
 	}
 }

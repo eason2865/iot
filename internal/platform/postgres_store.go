@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"iot/internal/contracts"
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS devices (
   tenant_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
-  secret TEXT NOT NULL,
+  secret_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (tenant_id, device_id),
@@ -93,16 +94,88 @@ CREATE TABLE IF NOT EXISTS commands (
   device_id TEXT NOT NULL,
   status TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  next_dispatch_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  dispatch_attempts INTEGER NOT NULL DEFAULT 0,
+  deadline_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS command_events (
+  id BIGSERIAL PRIMARY KEY,
+  command_id TEXT NOT NULL REFERENCES commands(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS command_ack (
+	id BIGSERIAL PRIMARY KEY,
+	command_id TEXT NOT NULL REFERENCES commands(id) ON DELETE CASCADE,
+	tenant_id TEXT NOT NULL,
+	device_id TEXT NOT NULL,
+	ack_status TEXT NOT NULL,
+	ack_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_commands_tenant_device ON commands(tenant_id, device_id);
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tenant_id, device_id, received_at DESC);
 `
-	_, err := s.db.ExecContext(ctx, schema)
-	return err
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	// Existing local environments used a plaintext secret column. Preserve the
+	// device identities while replacing every credential with a bcrypt hash.
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN IF NOT EXISTS secret_hash TEXT`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE devices ALTER COLUMN secret DROP NOT NULL`); err != nil && !strings.Contains(err.Error(), "column \"secret\" does not exist") {
+		return err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS next_dispatch_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS dispatch_attempts INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ`,
+		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_status TEXT NOT NULL DEFAULT 'acked'`,
+		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+	} {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_commands_dispatch ON commands(status, next_dispatch_at)`); err != nil {
+		return err
+	}
+	return s.migrateLegacyDeviceSecrets(ctx)
+}
+
+func (s *PostgresStore) migrateLegacyDeviceSecrets(ctx context.Context) error {
+	var hasLegacy bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'secret')`).Scan(&hasLegacy); err != nil || !hasLegacy {
+		return err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id, device_id, secret FROM devices WHERE secret_hash IS NULL AND secret IS NOT NULL AND secret <> ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tenantID, deviceID, secret string
+		if err := rows.Scan(&tenantID, &deviceID, &secret); err != nil {
+			return err
+		}
+		hash, err := HashDeviceSecret(secret)
+		if err != nil {
+			return err
+		}
+		if _, err = s.db.ExecContext(ctx, `UPDATE devices SET secret_hash = $1, secret = NULL WHERE tenant_id = $2 AND device_id = $3`, hash, tenantID, deviceID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
@@ -129,6 +202,43 @@ func (s *PostgresStore) ListTenants() []Tenant {
 	return out
 }
 
+func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, error) {
+	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	parts, err := decodeCursor(page.Cursor, 1)
+	if err != nil {
+		return nil, "", err
+	}
+	after := ""
+	if len(parts) == 1 {
+		after = parts[0]
+	}
+	rows, err := s.db.Query(`SELECT id, name FROM tenants WHERE id > $1 ORDER BY id LIMIT $2`, after, page.Size+1)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var out []Tenant
+	for rows.Next() {
+		var item Tenant
+		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+			return nil, "", err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > page.Size {
+		next = encodeCursor(out[page.Size-1].ID)
+		out = out[:page.Size]
+	}
+	return out, next, nil
+}
+
 func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -143,8 +253,12 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 		return Device{}, fmt.Errorf("tenant not found")
 	}
 	d.CreatedAt = time.Now().UTC()
-	_, err = tx.Exec(`INSERT INTO devices (tenant_id, device_id, product_id, secret, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)`,
-		d.TenantID, d.DeviceID, d.ProductID, d.Secret, d.CreatedAt)
+	hash, err := HashDeviceSecret(d.Secret)
+	if err != nil {
+		return Device{}, err
+	}
+	_, err = tx.Exec(`INSERT INTO devices (tenant_id, device_id, product_id, secret_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)`,
+		d.TenantID, d.DeviceID, d.ProductID, hash, d.CreatedAt)
 	if err != nil {
 		return Device{}, translateSQLError(err, "device")
 	}
@@ -157,11 +271,12 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 	if err := tx.Commit(); err != nil {
 		return Device{}, err
 	}
+	d.Secret = ""
 	return d, nil
 }
 
 func (s *PostgresStore) ListDevices() []Device {
-	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, secret, created_at FROM devices ORDER BY tenant_id, device_id`)
+	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, created_at FROM devices ORDER BY tenant_id, device_id`)
 	if err != nil {
 		return nil
 	}
@@ -169,7 +284,7 @@ func (s *PostgresStore) ListDevices() []Device {
 	var out []Device
 	for rows.Next() {
 		var d Device
-		if err := rows.Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.Secret, &d.CreatedAt); err == nil {
+		if err := rows.Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.CreatedAt); err == nil {
 			out = append(out, d)
 		}
 	}
@@ -178,12 +293,20 @@ func (s *PostgresStore) ListDevices() []Device {
 
 func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
 	var d Device
-	err := s.db.QueryRow(`SELECT tenant_id, device_id, product_id, secret, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
-		tenantID, deviceID).Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.Secret, &d.CreatedAt)
+	err := s.db.QueryRow(`SELECT tenant_id, device_id, product_id, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
+		tenantID, deviceID).Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.CreatedAt)
 	if err != nil {
 		return Device{}, false
 	}
 	return d, true
+}
+
+func (s *PostgresStore) AuthenticateDevice(tenantID, deviceID, secret string) bool {
+	var hash string
+	if err := s.db.QueryRow(`SELECT secret_hash FROM devices WHERE tenant_id = $1 AND device_id = $2`, tenantID, deviceID).Scan(&hash); err != nil {
+		return false
+	}
+	return VerifyDeviceSecret(hash, secret)
 }
 
 func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
@@ -275,13 +398,13 @@ func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.Ra
 	if _, ok := s.GetDevice(tenantID, deviceID); !ok {
 		return Command{}, fmt.Errorf("device not found")
 	}
-	id := fmt.Sprintf("cmd-%d", time.Now().UTC().UnixNano())
+	id := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	cmd := Command{
 		ID:        id,
 		TenantID:  tenantID,
 		DeviceID:  deviceID,
-		Status:    contracts.CommandStatusSent,
+		Status:    contracts.CommandStatusCreated,
 		Payload:   payload,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -290,10 +413,13 @@ func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.Ra
 	if err != nil {
 		return Command{}, err
 	}
-	_, err = tx.Exec(`INSERT INTO commands (id, tenant_id, device_id, status, payload, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+	_, err = tx.Exec(`INSERT INTO commands (id, tenant_id, device_id, status, payload, next_dispatch_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$6,$7)`,
 		cmd.ID, cmd.TenantID, cmd.DeviceID, cmd.Status, payloadBytes, cmd.CreatedAt, cmd.UpdatedAt)
 	if err != nil {
+		return Command{}, err
+	}
+	if _, err = tx.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'created')`, cmd.ID); err != nil {
 		return Command{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -303,29 +429,115 @@ func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.Ra
 }
 
 func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	cmd, exists := s.GetCommand(id)
-	if !exists {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Command{}, err
+	}
+	defer tx.Rollback()
+	var cmd Command
+	var payload []byte
+	var deadline sql.NullTime
+	err = tx.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
+	if err == sql.ErrNoRows {
 		return Command{}, fmt.Errorf("command not found")
+	}
+	if err != nil {
+		return Command{}, err
+	}
+	cmd.Payload = json.RawMessage(payload)
+	if deadline.Valid {
+		cmd.DeadlineAt = deadline.Time
 	}
 	if cmd.TenantID != tenantID || cmd.DeviceID != deviceID {
 		return Command{}, fmt.Errorf("command does not belong to device")
+	}
+	// ACK delivery is at-least-once. Duplicate or late ACKs are harmless and
+	// must not turn a healthy consumer into an error loop.
+	if cmd.Status == contracts.CommandStatusAcked || cmd.Status == contracts.CommandStatusTimeout || cmd.Status == contracts.CommandStatusFailed {
+		if err := tx.Commit(); err != nil {
+			return Command{}, err
+		}
+		return cmd, nil
 	}
 	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEventAcked)
 	if err != nil {
 		return Command{}, err
 	}
 	now := time.Now().UTC()
-	_, err = s.db.Exec(`UPDATE commands SET status = $1, updated_at = $2 WHERE id = $3`, next, now, id)
+	_, err = tx.Exec(`UPDATE commands SET status = $1, updated_at = $2 WHERE id = $3`, next, now, id)
 	if err != nil {
 		return Command{}, err
 	}
 	cmd.Status = next
 	cmd.UpdatedAt = now
+	if _, err = tx.Exec(`INSERT INTO command_ack (command_id, tenant_id, device_id, ack_status, created_at)
+		SELECT $1, $2, $3, 'acked', $4 WHERE NOT EXISTS (SELECT 1 FROM command_ack WHERE command_id = $1 AND ack_status = 'acked')`, id, tenantID, deviceID, now); err != nil {
+		return Command{}, err
+	}
+	if _, err = tx.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'acked')`, id); err != nil {
+		return Command{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Command{}, err
+	}
 	return cmd, nil
 }
 
+func (s *PostgresStore) ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error) {
+	if limit < 1 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`WITH claimed AS (
+  SELECT id FROM commands WHERE status = 'created' AND next_dispatch_at <= NOW()
+  ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1
+) UPDATE commands c SET dispatch_attempts = c.dispatch_attempts + 1, next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
+FROM claimed WHERE c.id = claimed.id
+RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at`, limit, lease.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCommands(rows)
+}
+
+func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
+	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status = 'created'`, id, deadline)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 1 {
+		_, err = s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'published')`, id)
+	}
+	return err
+}
+
+func (s *PostgresStore) RescheduleCommand(id string, retryAfter time.Duration) error {
+	_, err := s.db.Exec(`UPDATE commands SET next_dispatch_at = NOW() + $2::interval, updated_at = NOW() WHERE id = $1 AND status = 'created'`, id, retryAfter.String())
+	return err
+}
+
+func (s *PostgresStore) ExpireCommands(now time.Time) (int64, error) {
+	rows, err := s.db.Query(`UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND deadline_at <= $1 RETURNING id`, now)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int64
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'timeout')`, id); err != nil {
+			return 0, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
 func (s *PostgresStore) ListCommands() []Command {
-	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at FROM commands ORDER BY created_at DESC`)
+	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil
 	}
@@ -334,24 +546,92 @@ func (s *PostgresStore) ListCommands() []Command {
 	for rows.Next() {
 		var cmd Command
 		var payload []byte
-		if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt); err == nil {
+		var deadline sql.NullTime
+		if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err == nil {
 			cmd.Payload = json.RawMessage(payload)
+			if deadline.Valid {
+				cmd.DeadlineAt = deadline.Time
+			}
 			out = append(out, cmd)
 		}
 	}
 	return out
 }
 
+func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, error) {
+	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	createdAt, id, err := decodeCommandCursor(page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at
+FROM commands WHERE ($1::timestamptz IS NULL OR created_at < $1 OR (created_at = $1 AND id < $2))
+ORDER BY created_at DESC, id DESC LIMIT $3`, nullTime(createdAt), id, page.Size+1)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	out, err := scanCommands(rows)
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > page.Size {
+		last := out[page.Size-1]
+		next = encodeCommandCursor(last.CreatedAt, last.ID)
+		out = out[:page.Size]
+	}
+	return out, next, nil
+}
+
+func nullTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
+}
+
 func (s *PostgresStore) GetCommand(id string) (Command, bool) {
 	var cmd Command
 	var payload []byte
-	err := s.db.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at FROM commands WHERE id = $1`, id).
-		Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt)
+	var deadline sql.NullTime
+	err := s.db.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1`, id).
+		Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
 	if err != nil {
 		return Command{}, false
 	}
 	cmd.Payload = json.RawMessage(payload)
+	if deadline.Valid {
+		cmd.DeadlineAt = deadline.Time
+	}
 	return cmd, true
+}
+
+type commandRows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+func scanCommands(rows commandRows) ([]Command, error) {
+	var out []Command
+	for rows.Next() {
+		var cmd Command
+		var payload []byte
+		var deadline sql.NullTime
+		if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err != nil {
+			return nil, err
+		}
+		cmd.Payload = json.RawMessage(payload)
+		if deadline.Valid {
+			cmd.DeadlineAt = deadline.Time
+		}
+		out = append(out, cmd)
+	}
+	return out, rows.Err()
 }
 
 func translateSQLError(err error, kind string) error {

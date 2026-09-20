@@ -12,6 +12,8 @@ DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
 EMQX_HOST="${EMQX_HOST:-emqx-listeners.emqx.svc.cluster.local}"
 EMQX_PORT="${EMQX_PORT:-1883}"
+MANAGEMENT_API_TOKEN="${IOT_MANAGEMENT_API_TOKEN:-local-development-token}"
+EMQX_INTERNAL_PASSWORD="${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -92,6 +94,13 @@ wait_for_deployment() {
 if [ "$CHECK_EXTERNAL_DEPS" = "1" ]; then
   wait_for_docker_deps
 fi
+
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
+  --from-literal=MANAGEMENT_API_TOKEN="$MANAGEMENT_API_TOKEN" \
+  --from-literal=EMQX_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
+  --from-literal=EMQX_INTERNAL_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 prepare_local_app_image
 load_local_image

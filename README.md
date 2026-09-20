@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Go version" src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" />
+  <img alt="Go version" src="https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white" />
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" />
 </p>
 
@@ -35,13 +35,18 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - 异步解耦：遥测、命令和事件统一进入 Kafka
 - 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
 - 命令闭环：创建、下发、ACK、状态机更新
+- 命令可靠投递：数据库领取租约、发布确认、超时扫描、UUIDv7 命令 ID、ACK 事件审计
+- 失败消息进入 `iot.dlq`，可通过 `dlq-replay` 按批次审核后重放
+- EMQX 通过 `iot-core` HTTP 回调认证设备 bcrypt 密钥并下发租户级 MQTT ACL
+- 管理 API 除健康检查和契约端点外均要求 Bearer Token
+- TDengine 使用设备子表 + 租户/设备 Tags；完整长载荷保存在 PostgreSQL JSONB，时序库仅存哈希和索引字段
 - 多租户隔离：`tenantId` 贯穿 topic、消息、存储和查询
 - 标准契约：提供 OpenAPI、MQTT JSON Schema、gRPC proto 和数据库迁移脚本
 - 本地可运行：默认可以连接本机 Docker 的 PostgreSQL / Kafka / EMQX / TDengine
 
 ## 当前实现
 
-- 5 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`
+- 6 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
 - 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
@@ -104,7 +109,10 @@ export KAFKA_COMMAND_TOPIC=iot.command
 export EMQX_TOPIC_FILTER=tenant/+/device/+/telemetry
 export EMQX_TELEMETRY_INGESTOR_CLIENT_ID=iot-telemetry-ingestor
 export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
-export TDENGINE_TABLE=telemetry
+export TDENGINE_TABLE=telemetry_v2
+export KAFKA_DLQ_TOPIC=iot.dlq
+export MANAGEMENT_API_TOKEN=change-me
+export EMQX_INTERNAL_PASSWORD=change-me
 ```
 
 监听地址默认是 `:8080`，也可以通过以下变量覆盖：
@@ -141,6 +149,8 @@ make build
 - `GET /openapi.json`
 - `GET /schemas/mqtt-envelope.json`
 
+除上述健康检查和契约端点外，管理 API 请求必须携带 `Authorization: Bearer <MANAGEMENT_API_TOKEN>`。
+
 核心业务接口：
 
 - `POST /api/v1/tenants`
@@ -148,6 +158,8 @@ make build
 - `POST /api/v1/devices`
 - `GET /api/v1/devices`
 - `GET /api/v1/devices/{tenantId}/{deviceId}`
+
+列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
 - `GET /api/v1/devices/{tenantId}/{deviceId}/status`
 - `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
 - `POST /api/v1/telemetry`

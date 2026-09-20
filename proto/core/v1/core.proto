@@ -77,10 +77,14 @@ message GetDeviceStatusResponse {
   DeviceStatus status = 1;
 }
 
-message ListTenantsRequest {}
+message ListTenantsRequest {
+  int32 page_size = 1;
+  string cursor = 2;
+}
 
 message ListTenantsResponse {
   repeated Tenant tenants = 1;
+  string next_cursor = 2;
 }
 
 message ListDevicesRequest {}
@@ -130,10 +134,14 @@ message CreateCommandResponse {
   Command command = 1;
 }
 
-message ListCommandsRequest {}
+message ListCommandsRequest {
+  int32 page_size = 1;
+  string cursor = 2;
+}
 
 message ListCommandsResponse {
   repeated Command commands = 1;
+  string next_cursor = 2;
 }
 
 message GetCommandRequest {

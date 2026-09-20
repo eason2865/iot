@@ -54,6 +54,7 @@ func Run() error {
 	})
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
+	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddleware(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", ""))))
 	defer httpServer.Stop()
 
 	go serveManagementAPIMetrics(metrics.Handler(), managementAPIMetricsHost(), managementAPIMetricsPort(), runtimeconfig.EnvOrDefault("MANAGEMENT_API_METRICS_PATH", "/metrics"))
@@ -144,7 +145,12 @@ func (s *Server) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTenantsHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.rpc.ListTenants(r.Context(), &corev1.ListTenantsRequest{})
+	pageSize, cursor, err := pageFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListTenants(r.Context(), &corev1.ListTenantsRequest{PageSize: int32(pageSize), Cursor: cursor})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -153,7 +159,7 @@ func (s *Server) listTenantsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, tenant := range resp.GetTenants() {
 		tenants = append(tenants, platform.Tenant{ID: tenant.GetId(), Name: tenant.GetName()})
 	}
-	writeJSON(w, http.StatusOK, tenants)
+	writeJSON(w, http.StatusOK, map[string]any{"items": tenants, "nextCursor": resp.GetNextCursor()})
 }
 
 func (s *Server) createDeviceHandler(w http.ResponseWriter, r *http.Request) {
@@ -292,7 +298,12 @@ func (s *Server) createCommandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{})
+	pageSize, cursor, err := pageFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{PageSize: int32(pageSize), Cursor: cursor})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -301,7 +312,18 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, command := range resp.GetCommands() {
 		commands = append(commands, commandFromPB(command))
 	}
-	writeJSON(w, http.StatusOK, commands)
+	writeJSON(w, http.StatusOK, map[string]any{"items": commands, "nextCursor": resp.GetNextCursor()})
+}
+
+func pageFromRequest(r *http.Request) (int, string, error) {
+	pageSize := 0
+	if raw := r.URL.Query().Get("pageSize"); raw != "" {
+		if _, err := fmt.Sscan(raw, &pageSize); err != nil {
+			return 0, "", fmt.Errorf("pageSize must be an integer")
+		}
+	}
+	page, err := platform.NormalizePageRequest(pageSize, r.URL.Query().Get("cursor"))
+	return page.Size, page.Cursor, err
 }
 
 func (s *Server) getCommandHandler(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +410,6 @@ func deviceFromPB(device *corev1.Device) platform.Device {
 		TenantID:  device.GetTenantId(),
 		DeviceID:  device.GetDeviceId(),
 		ProductID: device.GetProductId(),
-		Secret:    device.GetSecret(),
 		CreatedAt: timestampToTime(device.GetCreatedAt()),
 	}
 }

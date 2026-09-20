@@ -184,6 +184,9 @@ services:
     environment:
       DEMO_MANAGEMENT_API_URL: http://k8s-forward-management-api:18080
       DEMO_MQTT_URL: tcp://k8s-forward-emqx-listeners:1883
+      DEMO_MANAGEMENT_API_TOKEN: ${IOT_MANAGEMENT_API_TOKEN:-local-development-token}
+      DEMO_MQTT_USERNAME: iot-service
+      DEMO_MQTT_PASSWORD: ${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}
       DEMO_TENANT_COUNT: "5"
       DEMO_DEVICES_PER_TENANT: "10"
       DEMO_TENANT_PREFIX: demo

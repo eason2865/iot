@@ -26,8 +26,13 @@ var ErrInvalidCommandTransition = errors.New("invalid command transition")
 func AdvanceCommandStatus(current CommandStatus, event CommandEvent) (CommandStatus, error) {
 	switch current {
 	case CommandStatusCreated:
-		if event == CommandEventPublished {
+		switch event {
+		case CommandEventPublished:
 			return CommandStatusSent, nil
+		case CommandEventAcked:
+			// A device can ACK immediately after MQTT publish, before the
+			// dispatcher commits the sent transition.
+			return CommandStatusAcked, nil
 		}
 	case CommandStatusSent:
 		switch event {

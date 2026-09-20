@@ -12,6 +12,23 @@ spec:
   # The bundled community license supports one node for local integration.
   image: emqx/emqx-enterprise:6.3.1
   imagePullPolicy: IfNotPresent
+  config:
+    data: |
+      authentication = [
+        {
+          mechanism = password_based
+          backend = http
+          method = post
+          url = "http://iot-core.iot.svc.cluster.local:9090/internal/mqtt/authenticate"
+          headers { "content-type" = "application/json" }
+          body {
+            username = "${username}"
+            password = "${password}"
+            clientid = "${clientid}"
+          }
+        }
+      ]
+      authorization.no_match = deny
   coreTemplate:
     spec:
       replicas: 1

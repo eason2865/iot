@@ -54,6 +54,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: iot-common-config
+            - secretRef:
+                name: {{ .Values.security.existingSecret }}
           ports:
             - containerPort: 8080
             - containerPort: 9100

@@ -48,7 +48,7 @@ func Run() error {
 
 	factory, err := newMQTTBusFactory(MQTTBusFactoryConfig{
 		BrokerURL:  runtimeconfig.EnvOrDefault("DEMO_MQTT_URL", "tcp://127.0.0.1:1883"),
-		Username:   os.Getenv("DEMO_MQTT_USERNAME"),
+		Username:   runtimeconfig.EnvOrDefault("DEMO_MQTT_USERNAME", "iot-service"),
 		Password:   os.Getenv("DEMO_MQTT_PASSWORD"),
 		ClientPref: runtimeconfig.EnvOrDefault("DEMO_CLIENT_ID_PREFIX", "iot-demo"),
 	})
@@ -93,6 +93,7 @@ func Run() error {
 
 type httpManagementAPIClient struct {
 	baseURL string
+	token   string
 	client  *http.Client
 }
 
@@ -103,6 +104,7 @@ func newHTTPManagementAPIClient(baseURL string) (*httpManagementAPIClient, error
 	}
 	return &httpManagementAPIClient{
 		baseURL: baseURL,
+		token:   runtimeconfig.EnvOrDefault("DEMO_MANAGEMENT_API_TOKEN", ""),
 		client:  &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
@@ -144,6 +146,9 @@ func (c *httpManagementAPIClient) postJSON(ctx context.Context, url string, body
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-Id", requestID)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 
 	ctx, span := otel.Tracer("demo-http").Start(req.Context(), "management-api POST "+req.URL.Path,
 		oteltrace.WithSpanKind(oteltrace.SpanKindClient))

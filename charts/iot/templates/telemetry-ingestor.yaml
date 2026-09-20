@@ -1,4 +1,3 @@
-{{- if .Values.telemetryIngestor.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -29,7 +28,7 @@ spec:
       labels:
         app: telemetry-ingestor
     spec:
-      {{- if and .Values.externalDependencies.enabled .Values.externalDependencies.hostGatewayIP }}
+      {{- if .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
         - ip: {{ .Values.externalDependencies.hostGatewayIP | quote }}
           hostnames:
@@ -41,17 +40,11 @@ spec:
           command:
             - sh
             - -c
-            {{- if .Values.externalDependencies.enabled }}
             - >
               until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
               && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
               && nc -z {{ .Values.externalDependencies.wait.emqxHost }} {{ .Values.externalDependencies.wait.emqxPort }};
               do echo waiting for docker postgres/kafka/emqx; sleep 2; done
-            {{- else }}
-            - >
-              until nc -z postgres 5432 && nc -z kafka 9092 && nc -z emqx 1883;
-              do echo waiting for postgres/kafka/emqx; sleep 2; done
-            {{- end }}
       containers:
         - name: telemetry-ingestor
           image: {{ .Values.images.app }}
@@ -74,4 +67,3 @@ spec:
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
-{{- end }}

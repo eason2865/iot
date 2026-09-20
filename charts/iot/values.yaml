@@ -1,13 +1,9 @@
 images:
   app: iot-app:2.0
-  postgres: postgres:15-alpine
-  kafka: bitnamilegacy/kafka:latest
-  emqx: emqx/emqx-enterprise:latest
-  tdengine: tdengine/tdengine:latest
-  prometheus: prom/prometheus:latest
 
+# The chart deploys application services only. Dependencies are managed outside
+# this release, locally by Docker Compose and in production by their own stack.
 externalDependencies:
-  enabled: true
   hostGatewayIP: 192.168.65.254
   postgresDsn: postgres://iot:iot123@192.168.65.254:5432/iot?sslmode=disable
   kafkaBrokers: 192.168.65.254:29092
@@ -26,43 +22,3 @@ externalDependencies:
     tdenginePort: 6041
     etcdHost: 192.168.65.254
     etcdPort: 2379
-
-managementApi:
-  enabled: true
-
-iotCore:
-  enabled: true
-
-telemetryIngestor:
-  enabled: true
-
-deviceWorker:
-  enabled: true
-
-demo:
-  enabled: false
-
-postgres:
-  enabled: false
-  storage: 1Gi
-
-kafka:
-  enabled: false
-  storage: 1Gi
-
-emqx:
-  enabled: false
-  storage: 1Gi
-
-tdengine:
-  enabled: false
-  storage: 1Gi
-
-prometheus:
-  enabled: false
-  nodePort: 30900
-  retention: 7d
-  extraScrapeTargets:
-    - jobName: demo-docker
-      targets:
-        - host.docker.internal:18084

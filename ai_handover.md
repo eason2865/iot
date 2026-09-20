@@ -1,5 +1,11 @@
 # AI Handover
 
+## 2026-09-20 Helm 禁用依赖清理
+- 用户要求清理当前 Helm 中所有已禁用的旧部署分支。`charts/iot` 已收敛为固定部署四个业务服务：`management-api`、`iot-core`、`telemetry-ingestor`、`device-worker`。
+- 已删除 Kubernetes 内置 PostgreSQL、Kafka、EMQX、TDengine、etcd、Prometheus、demo 及其 Secret/初始化 SQL 模板，同时删除 `values-local-stack.yaml`；这些依赖不再存在可重新启用的 Helm 开关。
+- `externalDependencies` 现在是唯一配置来源；业务 Pod 始终等待并连接外部 PostgreSQL、Kafka、EMQX、TDengine、etcd。本地依赖、监控和 demo 仍由 `monitoring/docker-compose.yml` 管理。
+- 已同步 `README.md`、`CONTEXT.md` 和 ADR 0003。后续生产化 EMQX 应独立于此 Chart，在 `emqx` namespace 由 EMQX Operator 管理。
+
 ## 2026-09-20 本地 Docker 项目统一与 EMQX 升级
 - 用户要求不保留历史数据或兼容性，按干净状态重建本地 IoT Docker 环境。`monitoring/docker-compose.yml` 现在使用 Compose 项目名 `iot`，Docker Desktop 中所有相关容器归入同一 `iot` 组。
 - 命名规则：原生依赖使用 `postgres`、`kafka`、`tdengine`、`emqx`、`etcd`、`prometheus`、`grafana`；项目自定义容器使用 `iot-` 前缀，例如 `iot-demo` 和 `iot-k8s-forward-*`。所有持久卷也使用 `iot-` 前缀。

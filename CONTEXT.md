@@ -17,7 +17,6 @@
 ## Runtime Terms
 
 - External dependencies mode: 默认 Helm 部署模式，应用 Pod 连接 Docker Desktop 或外部 PostgreSQL、Kafka、EMQX、TDengine、etcd。
-- Local stack mode: `charts/iot/values-local-stack.yaml` 模式，在 Kubernetes 内同时部署应用和依赖。
 - Application release: Helm release 中的 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 业务服务。
 - Device worker offset policy: 本地新建 `iot-device-worker` group 首次从最新 offset 启动，避免服务命名迁移时重放历史业务事件；已提交的 group offset 仍正常续消费。
 

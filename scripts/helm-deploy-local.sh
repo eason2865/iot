@@ -76,20 +76,9 @@ load_local_image
 
 COMMON_HELM_ARGS="
   --set images.app=${DEPLOY_APP_IMAGE}
-  --set externalDependencies.enabled=true
   --set externalDependencies.kafkaBrokers=${DOCKER_GATEWAY_HOST}:${DOCKER_GATEWAY_KAFKA_PORT}
   --set externalDependencies.wait.kafkaHost=${DOCKER_GATEWAY_HOST}
   --set externalDependencies.wait.kafkaPort=${DOCKER_GATEWAY_KAFKA_PORT}
-  --set managementApi.enabled=true
-  --set iotCore.enabled=true
-  --set telemetryIngestor.enabled=true
-  --set deviceWorker.enabled=true
-  --set postgres.enabled=false
-  --set kafka.enabled=false
-  --set emqx.enabled=false
-  --set tdengine.enabled=false
-  --set demo.enabled=false
-  --set prometheus.enabled=false
 "
 
 helm upgrade --install "$RELEASE" "$CHART" \

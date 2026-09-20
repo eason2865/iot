@@ -346,7 +346,7 @@ scripts/helm-deploy-local.sh
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
 脚本从当前本地 `APP_IMAGE` 读取仓库摘要（RepoDigest），以 `iot-app@sha256:...` 传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像。本地只保留 `iot-app:2.0`，不再生成 `local-<hash>` tag；若镜像尚无仓库摘要，脚本会提示先拉取或发布镜像再部署。
 
-默认 Helm values 会跳过 Postgres/Kafka/EMQX/TDengine/Prometheus/demo 的 k8s 资源，并通过 Docker Desktop 网关 IP 连接 Docker 服务。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
+Helm Chart 只定义四个业务服务，并通过 Docker Desktop 网关 IP 连接外部依赖。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 
@@ -439,17 +439,6 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout 180s
 ```
 
-如果需要复刻旧本地集群内全量依赖部署，使用本地 stack values：
-
-```bash
-helm upgrade --install iot charts/iot \
-  -n iot \
-  --create-namespace \
-  --wait \
-  --timeout 180s \
-  -f charts/iot/values-local-stack.yaml
-```
-
 本地一键脚本：
 
 ```bash
@@ -469,15 +458,7 @@ scripts/helm-deploy-local.sh
 CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 ```
 
-当前 Helm 部署只允许包含应用本身和共享配置。PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana、demo 都作为外部依赖或本地 Docker 服务，不进入业务 Helm release。
-
-如果你已经用旧 Helm values 起过同名/依赖资源，先清理旧资源再装：
-
-```bash
-helm uninstall iot -n iot --ignore-not-found
-kubectl delete pvc postgres-data kafka-data emqx-data tdengine-data -n iot --ignore-not-found
-scripts/helm-deploy-local.sh
-```
+当前 Helm 部署固定只包含应用本身和共享配置。PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana、demo 都由独立平台或本地 Docker Compose 管理，不进入业务 Helm release，也没有可重新启用的内置依赖模板。
 
 ## 开发建议
 

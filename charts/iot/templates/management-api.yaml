@@ -44,8 +44,8 @@ spec:
             - sh
             - -c
             - >
-              until nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
-              do echo waiting for docker etcd; sleep 2; done
+              until nc -z iot-core 9001;
+              do echo waiting for iot-core; sleep 2; done
       containers:
         - name: management-api
           image: {{ .Values.images.app }}

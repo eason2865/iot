@@ -215,11 +215,11 @@
       <h1>物联网平台技术方案</h1>
       <p class="lead">
         这是一个面向工业设备接入、数据采集、状态管理和业务控制的物联网平台项目，
-        采用 go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的组合，
+        采用 go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的组合，
         支撑设备接入、消息流转、核心业务拆分、时序存储、命令下发和多租户管理等能力。
       </p>
       <div class="chips">
-        <span class="chip">技术栈：go-zero / gRPC / protobuf / etcd / MQTT / EMQX / Kafka</span>
+        <span class="chip">技术栈：go-zero / gRPC / protobuf / MQTT / EMQX / Kafka</span>
         <span class="chip">存储分工：TDengine / PostgreSQL</span>
         <span class="chip">架构风格：先拆核心业务服务，保持边界清晰</span>
         <span class="chip">多租户：逻辑隔离优先</span>
@@ -282,7 +282,7 @@
               <p>
                 平台的核心链路可以理解为：设备通过 MQTT 接入 EMQX，telemetry-ingestor 做鉴权和标准化，
                 将事件写入 Kafka，再由 device-worker 异步落 TDengine 和 PostgreSQL；管理后台通过 go-zero REST
-                调用 iot-core，核心业务通过 gRPC + protobuf + etcd 独立提供租户、设备、遥测和命令能力。
+                调用 iot-core，核心业务通过 gRPC + protobuf 独立提供租户、设备、遥测和命令能力；Kubernetes 内通过 Service DNS 直连。
               </p>
               <div class="diagram">
                 <div class="mermaid">
@@ -297,7 +297,6 @@ graph TD
   A --> R[iot-core]
   R --> P
   R --> T
-  R --> M[etcd]
   I -->|命令下发| E
   E -->|ACK/状态| I
                 </div>
@@ -310,7 +309,7 @@ graph TD
                     <li><strong>Kafka</strong>：接入解耦、削峰、重试、DLQ、重放。</li>
                     <li><strong>TDengine</strong>：时序写入、时序查询、聚合分析。</li>
                     <li><strong>PostgreSQL</strong>：业务元数据、命令、告警、权限、当前态。</li>
-                    <li><strong>go-zero + gRPC + protobuf + etcd</strong>：拆分核心业务服务、统一接口契约和服务发现。</li>
+                    <li><strong>go-zero + gRPC + protobuf</strong>：拆分核心业务服务、统一接口契约；Kubernetes Service DNS 负责服务寻址。</li>
                   </ul>
                 </div>
                 <div class="panel">
@@ -360,7 +359,6 @@ flowchart LR
   A --> R
   R --> P
   R --> T
-  R --> Z[etcd]
   PR -. scrape .-> I
   PR -. scrape .-> A
   PR -. scrape .-> W
@@ -812,7 +810,6 @@ flowchart LR
   A --> R[iot-core]
   R --> P
   R --> T
-  R --> Z[etcd]
   PR[Prometheus] -. scrape .-> I
   PR -. scrape .-> A
   PR -. scrape .-> R
@@ -956,7 +953,7 @@ flowchart LR
                   <h3>已定决策</h3>
                   <ul>
                     <li>设备直连 EMQX。</li>
-                    <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf + etcd 独立拆分。</li>
+                    <li>Go 订阅 MQTT 后写 Kafka，核心业务通过 gRPC + protobuf 独立拆分，并通过 Kubernetes Service DNS 调用。</li>
                     <li>当前只保留一个核心微服务拆分点 `iot-core`，优先保持服务边界清晰，避免过早膨胀成多服务矩阵。</li>
                     <li>Kafka topic 按业务域拆，分区键用 deviceId。</li>
                     <li>TDengine 采用超级表 + 标签。</li>

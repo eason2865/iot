@@ -9,8 +9,7 @@ data:
   KAFKA_BROKERS: {{ .Values.externalDependencies.kafkaBrokers | quote }}
   EMQX_URL: {{ .Values.externalDependencies.emqxUrl | quote }}
   TDENGINE_DSN: {{ .Values.externalDependencies.tdengineDsn | quote }}
-  IOT_CORE_ETCD_HOSTS: {{ .Values.externalDependencies.etcdHosts | quote }}
-  IOT_CORE_ETCD_KEY: {{ .Values.externalDependencies.etcdKey | quote }}
+  IOT_CORE_ENDPOINTS: iot-core:9001
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command
   EMQX_TOPIC_FILTER: tenant/+/device/+/telemetry

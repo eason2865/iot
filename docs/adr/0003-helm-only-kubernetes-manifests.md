@@ -10,7 +10,7 @@ The repository previously had both Helm charts and `k8s/local` Kustomize manifes
 
 ## Decision
 
-Use `charts/iot` as the Kubernetes manifest source for the four application services only. PostgreSQL, Kafka, EMQX, TDengine, etcd, Prometheus, Grafana, and the demo are independently managed dependencies and are not rendered by this chart.
+Use `charts/iot` as the Kubernetes manifest source for the four application services only. PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, and the demo are independently managed dependencies and are not rendered by this chart. `management-api` uses the `iot-core` Kubernetes Service directly, so no business etcd deployment is required.
 
 ## Consequences
 

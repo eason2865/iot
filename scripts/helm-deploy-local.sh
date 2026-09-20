@@ -26,13 +26,31 @@ wait_for_docker_deps() {
       nc -z "$DOCKER_GATEWAY_HOST" "$DOCKER_GATEWAY_KAFKA_PORT"
       nc -z "$DOCKER_GATEWAY_HOST" 1883
       nc -z "$DOCKER_GATEWAY_HOST" 6041
-      nc -z "$DOCKER_GATEWAY_HOST" 2379
       echo external-deps-ok'
 }
 
 load_local_image() {
   if command -v kind >/dev/null 2>&1; then
     kind load docker-image "$APP_IMAGE"
+    return
+  fi
+
+  # Docker Desktop Kubernetes has its own containerd image store. Import an
+  # immutable tag so a reused local tag cannot resolve to an older cached image.
+  if command -v docker >/dev/null 2>&1 \
+    && docker inspect desktop-control-plane >/dev/null 2>&1 \
+    && docker exec desktop-control-plane ctr version >/dev/null 2>&1; then
+    image_id="$(docker image inspect --format '{{.Id}}' "$APP_IMAGE")"
+    image_name="${APP_IMAGE%@*}"
+    case "${image_name##*/}" in
+      *:*) image_name="${image_name%:*}" ;;
+    esac
+    image_suffix="$(printf '%s' "${image_id#sha256:}" | cut -c1-12)"
+    local_image="${image_name}:local-${image_suffix}"
+    docker tag "$APP_IMAGE" "$local_image"
+    docker save "$local_image" | docker exec -i desktop-control-plane ctr -n k8s.io images import -
+    docker image rm "$local_image" >/dev/null
+    DEPLOY_APP_IMAGE="$local_image"
   fi
 }
 

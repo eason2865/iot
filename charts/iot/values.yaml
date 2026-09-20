@@ -9,8 +9,6 @@ externalDependencies:
   kafkaBrokers: 192.168.65.254:29092
   emqxUrl: tcp://192.168.65.254:1883
   tdengineDsn: root:taosdata@http(192.168.65.254:6041)/iot
-  etcdHosts: 192.168.65.254:2379
-  etcdKey: iot/iot-core
   wait:
     postgresHost: 192.168.65.254
     postgresPort: 5432
@@ -20,5 +18,3 @@ externalDependencies:
     emqxPort: 1883
     tdengineHost: 192.168.65.254
     tdenginePort: 6041
-    etcdHost: 192.168.65.254
-    etcdPort: 2379

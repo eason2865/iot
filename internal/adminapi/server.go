@@ -68,12 +68,7 @@ func Run() error {
 }
 
 func newRPCClient() (zrpc.Client, error) {
-	conf := zrpc.NewEtcdClientConf(
-		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_HOSTS", "localhost:2379")),
-		runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_KEY", "iot/iot-core"),
-		"management-api",
-		"",
-	)
+	conf := rpcClientConf()
 	conf.Timeout = 5000
 	var lastErr error
 	for attempt := 0; attempt < 30; attempt++ {
@@ -86,6 +81,14 @@ func newRPCClient() (zrpc.Client, error) {
 		time.Sleep(1 * time.Second)
 	}
 	return nil, lastErr
+}
+
+func rpcClientConf() zrpc.RpcClientConf {
+	return zrpc.NewDirectClientConf(
+		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ENDPOINTS", "127.0.0.1:9001")),
+		"management-api",
+		"",
+	)
 }
 
 func (s *Server) routes() []rest.Route {

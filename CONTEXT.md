@@ -9,14 +9,14 @@
 - ACK: 设备对命令的回执，运行时 topic 为 `tenant/{tenantId}/device/{deviceId}/ack`。
 - Envelope: MQTT 上行消息的 JSON 外壳，包含 `msgId`、`tenantId`、`deviceId`、`ts`、`type`、`version` 和 `payload`。
 - IoT Core: 核心业务 gRPC 服务，负责租户、设备、遥测、命令和 ACK 的业务行为。
-- Management API: 对外 REST 网关，通过 etcd 发现并调用 IoT Core。
+- Management API: 对外 REST 网关，通过固定 gRPC endpoint 调用 IoT Core；在 Kubernetes 内使用 `iot-core` Service DNS。
 - Telemetry Ingestor: MQTT telemetry 接入模块，负责解析 Envelope 并写入 Kafka telemetry topic。
 - Device Worker: Kafka 消费和下行处理模块，负责遥测落库、TDengine 写入、命令投递和 ACK 更新。
 - Demo: 本地造流模拟器，负责创建多租户多设备拓扑、发布 telemetry、创建 command 并回 ACK。
 
 ## Runtime Terms
 
-- External dependencies mode: 默认 Helm 部署模式，应用 Pod 连接 Docker Desktop 或外部 PostgreSQL、Kafka、EMQX、TDengine、etcd。
+- External dependencies mode: 默认 Helm 部署模式，应用 Pod 连接 Docker Desktop 或外部 PostgreSQL、Kafka、EMQX、TDengine。
 - Application release: Helm release 中的 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 业务服务。
 - Device worker offset policy: 本地新建 `iot-device-worker` group 首次从最新 offset 启动，避免服务命名迁移时重放历史业务事件；已提交的 group offset 仍正常续消费。
 

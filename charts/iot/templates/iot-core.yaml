@@ -45,9 +45,8 @@ spec:
             - -c
             - >
               until nc -z {{ .Values.externalDependencies.wait.postgresHost }} {{ .Values.externalDependencies.wait.postgresPort }}
-              && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }}
-              && nc -z {{ .Values.externalDependencies.wait.etcdHost }} {{ .Values.externalDependencies.wait.etcdPort }};
-              do echo waiting for docker postgres/kafka/etcd; sleep 2; done
+              && nc -z {{ .Values.externalDependencies.wait.kafkaHost }} {{ .Values.externalDependencies.wait.kafkaPort }};
+              do echo waiting for docker postgres/kafka; sleep 2; done
       containers:
         - name: iot-core
           image: {{ .Values.images.app }}

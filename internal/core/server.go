@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zeromicro/go-zero/core/discov"
 	"github.com/zeromicro/go-zero/core/service"
 	"github.com/zeromicro/go-zero/zrpc"
 	"google.golang.org/grpc"
@@ -42,24 +41,7 @@ func Run() error {
 		}
 	}()
 
-	server := zrpc.MustNewServer(zrpc.RpcServerConf{
-		ServiceConf: service.ServiceConf{
-			Name:      "iot-core",
-			Telemetry: platform.TraceConfig("iot-core"),
-		},
-		ListenOn: rpcListenOn(),
-		Etcd: discov.EtcdConf{
-			Hosts: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_HOSTS", "localhost:2379")),
-			Key:   runtimeconfig.EnvOrDefault("IOT_CORE_ETCD_KEY", "iot/iot-core"),
-		},
-		Middlewares: zrpc.ServerMiddlewaresConf{
-			Trace:      true,
-			Recover:    true,
-			Stat:       true,
-			Prometheus: true,
-			Breaker:    true,
-		},
-	}, func(grpcServer *grpc.Server) {
+	server := zrpc.MustNewServer(rpcServerConf(), func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
 	})
 	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor(), metrics.UnaryServerInterceptor())
@@ -68,6 +50,23 @@ func Run() error {
 
 	server.Start()
 	return nil
+}
+
+func rpcServerConf() zrpc.RpcServerConf {
+	return zrpc.RpcServerConf{
+		ServiceConf: service.ServiceConf{
+			Name:      "iot-core",
+			Telemetry: platform.TraceConfig("iot-core"),
+		},
+		ListenOn: rpcListenOn(),
+		Middlewares: zrpc.ServerMiddlewaresConf{
+			Trace:      true,
+			Recover:    true,
+			Stat:       true,
+			Prometheus: true,
+			Breaker:    true,
+		},
+	}
 }
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {

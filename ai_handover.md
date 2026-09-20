@@ -1,9 +1,17 @@
 # AI Handover
 
+## 2026-09-20 移除业务 etcd 服务发现
+- 用户确认按 Kubernetes Service DNS 直接调用的方案执行。`management-api` 现在读取 `IOT_CORE_ENDPOINTS`，默认直连 `127.0.0.1:9001`；Helm 环境设置为 `iot-core:9001`。
+- `iot-core` 不再向 etcd 注册，`management-api` 不再从 etcd 发现服务；两侧均保留 go-zero gRPC 的原有中间件、超时和重试逻辑。新增单元测试，断言客户端使用 direct endpoints、服务端没有 etcd 配置。
+- 已从 `monitoring/docker-compose.yml` 删除 `etcd` 容器及 `iot-etcd-data` 卷；Helm values、ConfigMap、initContainer 检查和本地部署脚本不再引用 etcd。`go.mod` 中的 etcd 仍可能是 go-zero 间接编译依赖，不代表运行时需要 etcd。
+- 已同步 `.env.example`、README、CONTEXT、ADR 0001/0003 与技术方案 HTML。旧 handover 条目中的 etcd 记载仅为历史记录。
+- Docker Desktop 本地发布会将当前应用镜像临时标记为 `iot-app:local-<image-id>` 并导入 `desktop-control-plane` 的 containerd，再使用该不可变标签滚动发布；导入后自动删除本机临时标签，避免重用 `iot-app:2.0` 时命中集群旧镜像缓存。
+- 实机验证：Helm revision 26 的四个业务 Pod 均为 `1/1 Running`；`iot-common-config` 为 `IOT_CORE_ENDPOINTS=iot-core:9001`；通过 management API 新建并读取临时租户，iot-core 的 `CreateTenant` 成功指标为 1。Prometheus 四个业务 target 均为 `up`，EMQX 有 7 个在线客户端，两个实时 Kafka 消费组 lag 为 0。Compose 已移除 etcd 容器和 `iot-etcd-data` 卷。
+
 ## 2026-09-20 Helm 禁用依赖清理
 - 用户要求清理当前 Helm 中所有已禁用的旧部署分支。`charts/iot` 已收敛为固定部署四个业务服务：`management-api`、`iot-core`、`telemetry-ingestor`、`device-worker`。
 - 已删除 Kubernetes 内置 PostgreSQL、Kafka、EMQX、TDengine、etcd、Prometheus、demo 及其 Secret/初始化 SQL 模板，同时删除 `values-local-stack.yaml`；这些依赖不再存在可重新启用的 Helm 开关。
-- `externalDependencies` 现在是唯一配置来源；业务 Pod 始终等待并连接外部 PostgreSQL、Kafka、EMQX、TDengine、etcd。本地依赖、监控和 demo 仍由 `monitoring/docker-compose.yml` 管理。
+- `externalDependencies` 现在是唯一配置来源；业务 Pod 始终等待并连接外部 PostgreSQL、Kafka、EMQX、TDengine。本地依赖、监控和 demo 仍由 `monitoring/docker-compose.yml` 管理。
 - 已同步 `README.md`、`CONTEXT.md` 和 ADR 0003。后续生产化 EMQX 应独立于此 Chart，在 `emqx` namespace 由 EMQX Operator 管理。
 
 ## 2026-09-20 本地 Docker 项目统一与 EMQX 升级

@@ -9,13 +9,13 @@
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" />
 </p>
 
-Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物联网平台骨架，面向设备接入、遥测采集、命令下发、状态查询和多租户管理。
+Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平台骨架，面向设备接入、遥测采集、命令下发、状态查询和多租户管理。
 
 这是一套已经把物联网关键闭环打通的开源基础设施，重点能力包括：
 
 - 核心业务微服务 `iot-core`
 - `management-api` 作为 go-zero REST 网关，统一对外提供 API
-- `iot-core` 通过 gRPC + protobuf 暴露核心业务，并用 etcd 做服务发现
+- `iot-core` 通过 gRPC + protobuf 暴露核心业务，`management-api` 通过固定 gRPC endpoint 访问
 - `telemetry-ingestor` 负责 MQTT 接入、标准化和事件解耦
 - `device-worker` 负责时序落库、业务状态更新和命令投递
 - `demo` 负责多租户多设备造流和 ACK 回执，适合联调和压测
@@ -30,20 +30,20 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 
 - 设备接入链路：MQTT -> EMQX -> Go `telemetry-ingestor`
 - 核心服务拆分：`management-api` 负责 REST 网关，`iot-core` 负责核心业务
-- 服务发现：`iot-core` 通过 etcd 注册与发现，支持本地 Docker 部署
+- 服务调用：`management-api` 在 Kubernetes 内通过 `iot-core:9001` Service DNS 访问核心服务
 - 本地改名部署：新的 `iot-device-worker` Kafka 消费组从最新 offset 开始，避免重放迁移前已完成的命令和遥测；后续重启继续使用已提交的 offset。
 - 异步解耦：遥测、命令和事件统一进入 Kafka
 - 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
 - 命令闭环：创建、下发、ACK、状态机更新
 - 多租户隔离：`tenantId` 贯穿 topic、消息、存储和查询
 - 标准契约：提供 OpenAPI、MQTT JSON Schema、gRPC proto 和数据库迁移脚本
-- 本地可运行：默认可以连接本机 Docker 的 PostgreSQL / Kafka / EMQX / TDengine / etcd
+- 本地可运行：默认可以连接本机 Docker 的 PostgreSQL / Kafka / EMQX / TDengine
 
 ## 当前实现
 
 - 5 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`
-- `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf + etcd
-- 本地 Docker 编排包含 etcd，适配 Helm / k8s 本地联调
+- `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
+- 本地 Docker 编排不再包含业务服务发现组件
 - 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
 - 1 份 OpenAPI 定义：`docs/openapi.json`
 - 1 份 MQTT 消息 Schema：`docs/mqtt-envelope.schema.json`
@@ -73,7 +73,6 @@ Go-zero + gRPC + protobuf + etcd + EMQX + Kafka + TDengine + PostgreSQL 的物�
 - Kafka
 - EMQX
 - TDengine
-- etcd
 
 ### 2. 配置环境变量
 
@@ -93,8 +92,7 @@ export POSTGRES_DSN=postgres://iot:iot123@localhost:5432/iot?sslmode=disable
 export KAFKA_BROKERS=localhost:9092
 export EMQX_URL=tcp://127.0.0.1:1883
 export TDENGINE_DSN=root:taosdata@http(127.0.0.1:6041)/iot
-export IOT_CORE_ETCD_HOSTS=localhost:2379
-export IOT_CORE_ETCD_KEY=iot/iot-core
+export IOT_CORE_ENDPOINTS=127.0.0.1:9001
 export IOT_CORE_LISTEN_ON=:9001
 ```
 
@@ -167,7 +165,7 @@ make build
 1. 设备通过 MQTT 进入 EMQX
 2. `telemetry-ingestor` 负责标准化和事件解耦
 3. `management-api` 通过 gRPC 调用 `iot-core`
-4. `iot-core` 使用 etcd 做服务发现
+4. `management-api` 通过 `iot-core:9001` 调用核心服务
 5. `device-worker` 消费 Kafka，完成时序和状态落库
 
 这套拆法的原则是先保留一个清晰的核心边界，再根据业务压力继续扩展，而不是一下拆成很多很难排障的小服务。
@@ -291,14 +289,14 @@ iot/
 
 当前推荐的本地形态是：
 
-- Docker：PostgreSQL / Kafka / EMQX / TDengine / etcd / Prometheus / Grafana / demo
+- Docker：PostgreSQL / Kafka / EMQX / TDengine / Prometheus / Grafana / demo
 - Kubernetes + Helm：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`
 
 Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
 本地 EMQX 由同一 Compose 文件管理，版本固定为 `emqx/emqx-enterprise:6.3.1`，使用命名卷 `iot-emqx-data` 和 `iot-emqx-log` 持久化状态与日志。生产环境不要使用 `latest` 标签；升级前应备份数据卷并验证 MQTT 上报、订阅与命令 ACK。
 
-Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`emqx`、`etcd`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。
+Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`emqx`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。
 
 先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 

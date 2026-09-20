@@ -105,36 +105,6 @@ services:
       - tdengine-log:/var/log/taos
       - tdengine-corefile:/corefile
 
-  etcd:
-    image: quay.io/coreos/etcd:v3.6.14
-    container_name: etcd
-    restart: unless-stopped
-    ports:
-      - "2379:2379"
-      - "2380:2380"
-    command:
-      - /usr/local/bin/etcd
-      - --name
-      - etcd-1
-      - --data-dir
-      - /etcd-data
-      - --listen-client-urls
-      - http://0.0.0.0:2379
-      - --advertise-client-urls
-      - http://192.168.65.254:2379
-      - --listen-peer-urls
-      - http://0.0.0.0:2380
-      - --initial-advertise-peer-urls
-      - http://127.0.0.1:2380
-      - --initial-cluster
-      - etcd-1=http://127.0.0.1:2380
-      - --initial-cluster-token
-      - iot-etcd
-      - --initial-cluster-state
-      - new
-    volumes:
-      - etcd-data:/etcd-data
-
   emqx:
     image: emqx/emqx-enterprise:6.3.1
     container_name: emqx
@@ -194,7 +164,6 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
-      - etcd
       - prometheus
 
   demo:
@@ -236,8 +205,6 @@ volumes:
     name: iot-tdengine-log
   tdengine-corefile:
     name: iot-tdengine-corefile
-  etcd-data:
-    name: iot-etcd-data
   emqx-data:
     name: iot-emqx-data
   emqx-log:

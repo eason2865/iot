@@ -16,8 +16,9 @@ const (
 // PageRequest implements opaque, keyset-based pagination. Offset pagination
 // becomes increasingly expensive as an IoT tenant accumulates records.
 type PageRequest struct {
-	Size   int
-	Cursor string
+	Size     int
+	Cursor   string
+	TenantID string
 }
 
 func NormalizePageRequest(size int, cursor string) (PageRequest, error) {

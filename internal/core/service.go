@@ -152,18 +152,28 @@ func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequ
 }
 
 func (s *Service) ListCommands(_ context.Context, req *corev1.ListCommandsRequest) (*corev1.ListCommandsResponse, error) {
+	if req.GetTenantId() == "" {
+		return nil, fmt.Errorf("tenantId is required")
+	}
+	if !contracts.IsValidTopicPart(req.GetTenantId()) {
+		return nil, fmt.Errorf("tenantId contains invalid MQTT topic characters")
+	}
 	var commands []platform.Command
 	nextCursor := ""
 	if paged, ok := s.repo.(interface {
 		ListCommandsPage(platform.PageRequest) ([]platform.Command, string, error)
 	}); ok {
 		var err error
-		commands, nextCursor, err = paged.ListCommandsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		commands, nextCursor, err = paged.ListCommandsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId()})
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		commands = s.repo.ListCommands()
+		for _, command := range s.repo.ListCommands() {
+			if command.TenantID == req.GetTenantId() {
+				commands = append(commands, command)
+			}
+		}
 	}
 	out := make([]*corev1.Command, 0, len(commands))
 	for _, command := range commands {

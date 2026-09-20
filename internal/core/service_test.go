@@ -2,8 +2,10 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
@@ -33,6 +35,27 @@ func TestServiceRejectsInvalidMQTTTopicIdentifiers(t *testing.T) {
 	}
 }
 
+func TestListCommandsScopesToTenant(t *testing.T) {
+	svc := NewService(pagedFakeRepo{}, nil)
+	resp, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{
+		TenantId: "tenant-a",
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListCommands() error = %v", err)
+	}
+	if len(resp.GetCommands()) != 1 || resp.GetCommands()[0].GetTenantId() != "tenant-a" {
+		t.Fatalf("ListCommands() returned %+v, want tenant-a only", resp.GetCommands())
+	}
+}
+
+func TestListCommandsRequiresTenant(t *testing.T) {
+	svc := NewService(pagedFakeRepo{}, nil)
+	if _, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{}); err == nil || !strings.Contains(err.Error(), "tenantId is required") {
+		t.Fatalf("ListCommands() error = %v, want tenantId required", err)
+	}
+}
+
 type fakeRepo struct{}
 
 func (fakeRepo) CreateTenant(platform.Tenant) (platform.Tenant, error) { return platform.Tenant{}, nil }
@@ -55,3 +78,12 @@ func (fakeRepo) AckCommand(string, string, string) (platform.Command, error) {
 }
 func (fakeRepo) ListCommands() []platform.Command           { return nil }
 func (fakeRepo) GetCommand(string) (platform.Command, bool) { return platform.Command{}, false }
+
+type pagedFakeRepo struct{ fakeRepo }
+
+func (pagedFakeRepo) ListCommandsPage(page platform.PageRequest) ([]platform.Command, string, error) {
+	if page.TenantID != "tenant-a" {
+		return nil, "", fmt.Errorf("unexpected tenant filter %q", page.TenantID)
+	}
+	return []platform.Command{{ID: "cmd-a", TenantID: "tenant-a", DeviceID: "device-a", CreatedAt: time.Unix(1, 0).UTC()}}, "next", nil
+}

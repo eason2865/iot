@@ -1334,6 +1334,7 @@ type ListCommandsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	TenantId      string                 `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1378,6 +1379,13 @@ func (x *ListCommandsRequest) GetPageSize() int32 {
 func (x *ListCommandsRequest) GetCursor() string {
 	if x != nil {
 		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ListCommandsRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
 	}
 	return ""
 }
@@ -1721,10 +1729,11 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x18\n" +
 	"\apayload\x18\x03 \x01(\fR\apayload\"C\n" +
 	"\x15CreateCommandResponse\x12*\n" +
-	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"J\n" +
+	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"g\n" +
 	"\x13ListCommandsRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"e\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x1b\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\"e\n" +
 	"\x14ListCommandsResponse\x12,\n" +
 	"\bcommands\x18\x01 \x03(\v2\x10.core.v1.CommandR\bcommands\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +

@@ -559,17 +559,22 @@ func (s *PostgresStore) ListCommands() []Command {
 }
 
 func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, error) {
+	tenantID := page.TenantID
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
+	page.TenantID = tenantID
 	createdAt, id, err := decodeCommandCursor(page.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
+	if page.TenantID == "" {
+		return nil, "", fmt.Errorf("tenantId is required")
+	}
 	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at
-FROM commands WHERE ($1::timestamptz IS NULL OR created_at < $1 OR (created_at = $1 AND id < $2))
-ORDER BY created_at DESC, id DESC LIMIT $3`, nullTime(createdAt), id, page.Size+1)
+FROM commands WHERE tenant_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id < $3))
+ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt), id, page.Size+1)
 	if err != nil {
 		return nil, "", err
 	}

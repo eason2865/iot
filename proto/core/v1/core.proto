@@ -137,6 +137,7 @@ message CreateCommandResponse {
 message ListCommandsRequest {
   int32 page_size = 1;
   string cursor = 2;
+  string tenant_id = 3;
 }
 
 message ListCommandsResponse {

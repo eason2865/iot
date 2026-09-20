@@ -32,7 +32,11 @@ func OpenAPISpec() map[string]any {
 				"post": map[string]any{"responses": map[string]any{"202": map[string]any{"description": "ingest telemetry"}}},
 			},
 			"/api/v1/commands": map[string]any{
-				"get":  map[string]any{"responses": map[string]any{"200": map[string]any{"description": "list commands"}}},
+				"get": map[string]any{
+					"description": "List commands for one tenant; tenantId is required.",
+					"parameters":  []any{map[string]any{"name": "tenantId", "in": "query", "required": true, "schema": map[string]any{"type": "string"}}},
+					"responses":   map[string]any{"200": map[string]any{"description": "list commands"}},
+				},
 				"post": map[string]any{"responses": map[string]any{"201": map[string]any{"description": "create command"}}},
 			},
 			"/api/v1/commands/{id}": map[string]any{

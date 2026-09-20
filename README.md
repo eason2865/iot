@@ -164,9 +164,11 @@ make build
 - `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
 - `POST /api/v1/telemetry`
 - `POST /api/v1/commands`
-- `GET /api/v1/commands`
+- `GET /api/v1/commands?tenantId=<tenant-id>`
 - `GET /api/v1/commands/{id}`
 - `POST /api/v1/commands/{id}/ack`
+
+命令列表必须指定 `tenantId`，服务端在 gRPC 和 PostgreSQL 查询层都会按租户过滤；`pageSize` 和不透明 `cursor` 仍用于租户内分页。
 
 完整接口定义请查看 [docs/openapi.json](docs/openapi.json)。
 

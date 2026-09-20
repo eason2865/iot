@@ -298,12 +298,21 @@ func (s *Server) createCommandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenantId")
+	if tenantID == "" {
+		writeError(w, http.StatusBadRequest, "tenantId is required")
+		return
+	}
+	if !contracts.IsValidTopicPart(tenantID) {
+		writeError(w, http.StatusBadRequest, "tenantId contains invalid MQTT topic characters")
+		return
+	}
 	pageSize, cursor, err := pageFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{PageSize: int32(pageSize), Cursor: cursor})
+	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{PageSize: int32(pageSize), Cursor: cursor, TenantId: tenantID})
 	if err != nil {
 		writeRPCError(w, err)
 		return

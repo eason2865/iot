@@ -33,7 +33,13 @@
       "post": { "responses": { "202": { "description": "ingest telemetry" } } }
     },
     "/api/v1/commands": {
-      "get": { "responses": { "200": { "description": "list commands" } } },
+      "get": {
+        "description": "List commands for one tenant; tenantId is required.",
+        "parameters": [
+          { "name": "tenantId", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "list commands" } }
+      },
       "post": { "responses": { "201": { "description": "create command" } } }
     },
     "/api/v1/commands/{id}": {

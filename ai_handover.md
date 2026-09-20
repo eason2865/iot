@@ -612,3 +612,8 @@
 - E2E 的遥测查询已切换到生产使用的 `telemetry_v2` 超表，不再查询旧 `telemetry` 表。
 - 已通过真实本地依赖执行：`IOT_E2E=1 go test ./internal/platform -run TestE2ESchemeTelemetryCommandAck -count=1 -v`。
 - 该测试覆盖 MQTT 设备上报、EMQX 鉴权、Kafka 遥测消费、TDengine 入库、管理 API 创建设备命令、MQTT 下发、设备 ACK、PostgreSQL 状态落库。
+
+## 2026-09-20 命令列表租户隔离
+- `GET /api/v1/commands` 现在必须携带 `tenantId`，并继续支持租户内 `pageSize` + opaque `cursor` 分页。
+- `tenantId` 已贯穿 HTTP、gRPC `ListCommandsRequest` 和 PostgreSQL `WHERE tenant_id = $1`；内存回退实现也按租户过滤。
+- 已更新 protobuf、OpenAPI、README 和契约生成文档，并增加缺少租户及租户过滤测试。

@@ -281,6 +281,7 @@ iot/
 ## 文档
 
 - [整体技术方案](docs/物联网平台技术方案.html)
+- [生产部署指南](docs/生产部署指南.md)
 - [OpenAPI 定义](docs/openapi.json)
 - [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)
 - [初始化迁移](migrations/001_init.sql)
@@ -342,7 +343,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-脚本从当前本地 `APP_IMAGE` 读取仓库摘要（RepoDigest），以 `iot-app@sha256:...` 传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像。本地只保留 `iot-app:2.0`，不再生成 `local-<hash>` tag；若镜像尚无仓库摘要，脚本会提示先拉取或发布镜像再部署。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.0`。
 
 Helm Chart 只定义四个业务服务，并通过 Docker Desktop 网关 IP 连接外部依赖。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
 

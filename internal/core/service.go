@@ -114,6 +114,9 @@ func (s *Service) ListTelemetry(_ context.Context, req *corev1.ListTelemetryRequ
 func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
 	record, err := s.repo.RecordTelemetry(envelopeFromPB(req))
 	if err != nil {
+		if platform.IsTelemetryDuplicate(err) {
+			return &corev1.IngestTelemetryResponse{Record: telemetryToPB(record)}, nil
+		}
 		return nil, err
 	}
 	if _, dispatchesAsync := s.repo.(platform.CommandDispatchStore); s.publisher != nil && !dispatchesAsync {
@@ -127,6 +130,9 @@ func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetry
 func (s *Service) RecordTelemetry(_ context.Context, req *corev1.RecordTelemetryRequest) (*corev1.RecordTelemetryResponse, error) {
 	record, err := s.repo.RecordTelemetry(envelopeFromRecordPB(req.GetTelemetry()))
 	if err != nil {
+		if platform.IsTelemetryDuplicate(err) {
+			return &corev1.RecordTelemetryResponse{Record: telemetryToPB(record)}, nil
+		}
 		return nil, err
 	}
 	return &corev1.RecordTelemetryResponse{Record: telemetryToPB(record)}, nil

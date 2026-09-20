@@ -26,8 +26,9 @@
 - MQTT topic：`tenant/{tenantId}/device/{deviceId}/{telemetry|command|ack}`。
 - MQTT 设备用户名：`tenantId:deviceId`；设备密码在 PostgreSQL 中保存为 bcrypt 哈希。
 - MQTT 服务账号：`iot-service`，由 `EMQX_INTERNAL_PASSWORD` 注入。
+- MQTT 认证回调：`iot-core:9090/internal/mqtt/authenticate`，EMQX 需携带 `X-Iot-Auth-Token` 头（由 `IOT_CORE_MQTT_AUTH_TOKEN` 注入）；ACL 同时覆盖共享订阅 `$share/...` 与普通订阅形态。
 - Kafka topics：`iot.telemetry`、`iot.command`、`iot.dlq`。
-- TDengine：超级表 `telemetry_v2`，按设备建立子表；完整 payload 的权威副本为 PostgreSQL JSONB。
+- TDengine：超级表 `telemetry_v2`，按设备建立子表；完整 payload 的权威副本为 PostgreSQL JSONB；`telemetry_records` 的 `UNIQUE (msg_id, tenant_id, device_id)` 保证 DLQ 重放时 PostgreSQL/TDengine 均幂等。
 - 命令列表：`GET /api/v1/commands?tenantId=<tenant-id>` 必须指定租户，分页使用 `pageSize` 和 opaque `cursor`。
 - 生产环境禁止使用 `latest`，使用不可变镜像版本或 digest。
 
@@ -79,6 +80,7 @@ scripts/helm-deploy-local.sh
 - 生产部署不使用 `latest`、明文密码或仓库内 Webhook token。
 - 新增 REST 字段时同步更新 protobuf、`docs/openapi.json`、`internal/contracts/docs.go` 和 README。
 - 修改代码或 SQL 后更新本文件，执行测试、部署验证、提交并推送。
+- 本次加固（2026-09-20）：MQTT 认证回调加共享密钥头、ACL 覆盖共享/普通订阅、DLQ 重放遥测幂等（基于 `telemetry_records` 唯一约束）、`migrations/001_init.sql` 与 `ensureSchema` 对齐、TDengine 默认表名统一为 `telemetry_v2`。已通过 `go build ./...`、`go test -count=1 ./...`、`make fmt-check`、`make build`。
 
 ## 文档入口
 

@@ -252,6 +252,13 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 		}
 		if w.store != nil {
 			if _, err := w.store.RecordTelemetry(env); err != nil {
+				if IsTelemetryDuplicate(err) {
+					// DLQ replay or redelivery: PostgreSQL already has the row, so skip
+					// the non-idempotent TDengine write and commit the offset.
+					log.Printf("telemetry duplicate skipped: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+					_ = w.telemetryReader.CommitMessages(ctx, msg)
+					continue
+				}
 				log.Printf("telemetry store error: %v", err)
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")

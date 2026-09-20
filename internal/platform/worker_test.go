@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -50,5 +51,18 @@ func TestWorkerTenantAllowedRestrictsConfiguredTenants(t *testing.T) {
 	}
 	if worker.tenantAllowed("tenant-c") {
 		t.Fatal("tenantAllowed() accepted tenant-c outside the allowlist")
+	}
+}
+
+func TestIsTelemetryDuplicate(t *testing.T) {
+	if IsTelemetryDuplicate(nil) {
+		t.Fatal("IsTelemetryDuplicate(nil) = true")
+	}
+	if IsTelemetryDuplicate(fmt.Errorf("other error")) {
+		t.Fatal("IsTelemetryDuplicate() matched unrelated error")
+	}
+	wrapped := fmt.Errorf("record telemetry: %w", ErrDuplicateTelemetry)
+	if !IsTelemetryDuplicate(wrapped) {
+		t.Fatal("IsTelemetryDuplicate() missed wrapped ErrDuplicateTelemetry")
 	}
 }

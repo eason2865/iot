@@ -333,13 +333,14 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		Payload:    env.Payload,
 		ReceivedAt: now,
 	}
-	_, err = tx.Exec(`INSERT INTO telemetry_records (msg_id, tenant_id, device_id, ts, type, version, payload, received_at)
+	res, err := tx.Exec(`INSERT INTO telemetry_records (msg_id, tenant_id, device_id, ts, type, version, payload, received_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (msg_id, tenant_id, device_id) DO NOTHING`,
 		rec.MsgID, rec.TenantID, rec.DeviceID, rec.Ts, rec.Type, rec.Version, payloadBytes, rec.ReceivedAt)
 	if err != nil {
 		return TelemetryRecord{}, err
 	}
+	inserted, _ := res.RowsAffected()
 	_, err = tx.Exec(`INSERT INTO device_state (tenant_id, device_id, connected, last_seen_at, last_msg_id, updated_at)
 		VALUES ($1,$2,true,$3,$4,$3)
 		ON CONFLICT (tenant_id, device_id) DO UPDATE SET connected = true, last_seen_at = EXCLUDED.last_seen_at, last_msg_id = EXCLUDED.last_msg_id, updated_at = EXCLUDED.updated_at`,
@@ -349,6 +350,9 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 	}
 	if err := tx.Commit(); err != nil {
 		return TelemetryRecord{}, err
+	}
+	if inserted == 0 {
+		return rec, ErrDuplicateTelemetry
 	}
 	return rec, nil
 }

@@ -40,7 +40,7 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 	}
 	table := cfg.Table
 	if table == "" {
-		table = "telemetry"
+		table = "telemetry_v2"
 	}
 	db, err := sql.Open("taosRestful", cfg.DSN)
 	if err != nil {

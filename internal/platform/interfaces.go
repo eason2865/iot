@@ -2,9 +2,20 @@ package platform
 
 import (
 	"encoding/json"
+	"errors"
 
 	"iot/internal/contracts"
 )
+
+// ErrDuplicateTelemetry marks a telemetry envelope already stored for the
+// same (msg_id, tenant_id, device_id), so downstream sinks stay idempotent
+// when a DLQ replay re-publishes the message.
+var ErrDuplicateTelemetry = errors.New("duplicate telemetry message")
+
+// IsTelemetryDuplicate reports whether err wraps ErrDuplicateTelemetry.
+func IsTelemetryDuplicate(err error) bool {
+	return errors.Is(err, ErrDuplicateTelemetry)
+}
 
 type Repository interface {
 	CreateTenant(Tenant) (Tenant, error)

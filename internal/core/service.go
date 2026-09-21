@@ -137,16 +137,17 @@ func (s *Service) ListTelemetry(_ context.Context, req *corev1.ListTelemetryRequ
 
 func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
 	record, err := s.repo.RecordTelemetry(envelopeFromPB(req))
-	if err != nil {
-		if platform.IsTelemetryDuplicate(err) {
-			return &corev1.IngestTelemetryResponse{Record: telemetryToPB(record)}, nil
-		}
+	if err != nil && !platform.IsTelemetryDuplicate(err) {
 		return nil, err
 	}
 	// Always publish to Kafka so the telemetry reaches device-worker and
 	// TDengine through the same unified event path as MQTT-originated data.
-	// The worker's duplicate handling makes the PostgreSQL re-write idempotent
-	// and compensates the TDengine sink.
+	// This must also run on the duplicate path: a previous attempt may have
+	// written PostgreSQL but failed to publish to Kafka (e.g. broker outage),
+	// in which case the row exists but the event never reached the worker.
+	// Republishing is safe — the worker's duplicate handling makes the
+	// PostgreSQL re-write idempotent and compensates the TDengine sink via
+	// tdengine_written.
 	if s.publisher != nil {
 		if err := s.publisher.PublishTelemetry(record); err != nil {
 			return nil, err

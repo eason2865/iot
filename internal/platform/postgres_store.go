@@ -624,10 +624,14 @@ func (s *PostgresStore) MarkCommandPublished(id string) error {
 	return err
 }
 
-// MarkCommandSent transitions a command from published to sent once the MQTT
-// downlink succeeded, and starts the ACK deadline.
+// MarkCommandSent transitions a command to sent once the MQTT downlink
+// succeeded, and starts the ACK deadline. It accepts both 'created' and
+// 'published' as the prior state: the worker can confirm the MQTT downlink
+// before the dispatcher's MarkCommandPublished commit lands (dispatcher writes
+// Kafka first, then updates the row), so requiring strictly 'published' would
+// race and leave the command stuck in published with no deadline.
 func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
-	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status = 'published'`, id, deadline)
+	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status IN ('created', 'published')`, id, deadline)
 	if err != nil {
 		return err
 	}

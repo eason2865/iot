@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -86,4 +87,40 @@ func (pagedFakeRepo) ListCommandsPage(page platform.PageRequest) ([]platform.Com
 		return nil, "", fmt.Errorf("unexpected tenant filter %q", page.TenantID)
 	}
 	return []platform.Command{{ID: "cmd-a", TenantID: "tenant-a", DeviceID: "device-a", CreatedAt: time.Unix(1, 0).UTC()}}, "next", nil
+}
+
+// dupRepo always reports the telemetry as a duplicate, simulating a retry after
+// a previous attempt wrote PostgreSQL but failed to publish to Kafka.
+type dupRepo struct{ fakeRepo }
+
+func (dupRepo) RecordTelemetry(env contracts.Envelope) (platform.TelemetryRecord, error) {
+	return platform.TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID}, platform.ErrDuplicateTelemetry
+}
+
+// countingPublisher records how many times telemetry was published.
+type countingPublisher struct{ telemetry int }
+
+func (p *countingPublisher) PublishTelemetry(platform.TelemetryRecord) error {
+	p.telemetry++
+	return nil
+}
+func (p *countingPublisher) PublishCommand(platform.Command) error { return nil }
+
+// TestIngestTelemetryRepublishesOnDuplicate pins the fix for the Kafka-loss
+// race: when the first IngestTelemetry wrote PostgreSQL but failed to publish,
+// a retry hits the duplicate branch. The duplicate branch must STILL publish to
+// Kafka so the event reaches the worker/TDengine; otherwise the row exists but
+// is never delivered downstream.
+func TestIngestTelemetryRepublishesOnDuplicate(t *testing.T) {
+	pub := &countingPublisher{}
+	svc := NewService(dupRepo{}, pub)
+	_, err := svc.IngestTelemetry(context.Background(), &corev1.IngestTelemetryRequest{
+		MsgId: "m1", TenantId: "t1", DeviceId: "d1",
+	})
+	if err != nil {
+		t.Fatalf("IngestTelemetry duplicate: %v", err)
+	}
+	if pub.telemetry != 1 {
+		t.Fatalf("expected Kafka publish on duplicate path, got %d publishes", pub.telemetry)
+	}
 }

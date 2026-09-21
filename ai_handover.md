@@ -33,7 +33,7 @@
 - TDengine：超级表 `telemetry_v2`，按设备建立子表；完整 payload 的权威副本为 PostgreSQL JSONB。`telemetry_records.tdengine_written` 记录 TDengine 完成状态，DLQ 重放只补偿未完成的 TDengine 写，PG/TDengine 均幂等。
 - 命令状态机：`created → published（Kafka 写入）→ sent（MQTT 下发成功，启动 ACK deadline）→ acked/timeout/failed`；`published` 状态无 deadline。
 - 命令列表：`GET /api/v1/commands?tenantId=<tenant-id>` 必须指定租户，分页使用 `pageSize` 和 opaque `cursor`。
-- 列表分页：`/api/v1/tenants`、`/api/v1/devices`、`/api/v1/devices/{t}/{d}/telemetry`、`/api/v1/commands` 均为 keyset 分页（`pageSize` 1-100，响应 `{items, nextCursor}`）。
+- 列表分页：`/api/v1/tenants`、`/api/v1/devices`、`/api/v1/devices/{t}/{d}/telemetry`、`/api/v1/commands` 均为 keyset 分页（`pageSize` 1-100，响应 `{items, nextCursor}`）。**注意**：`NormalizePageRequest(size, cursor)` 只返回 Size/Cursor，会丢弃 TenantID/DeviceID——带过滤器的分页方法必须先保存过滤器再恢复（参照 `ListCommandsPage`/`ListTelemetryPage` 的 `page.TenantID = tenantID` 模式），否则查询条件丢失返回空。
 - REST 写接口仅 `management-api` 暴露；`telemetry-ingestor`/`device-worker` 只提供 `/healthz` 和 `/metrics`。
 - 生产环境禁止使用 `latest`，使用不可变镜像版本或 digest。
 
@@ -41,9 +41,13 @@
 
 ```bash
 docker compose -f monitoring/docker-compose.yml up -d
-kubectl apply -f deploy/emqx/cluster.local.yaml
-scripts/helm-deploy-local.sh
+scripts/helm-deploy-local.sh   # 先跑：在 iot 和 emqx 两个 namespace 各建 iot-runtime-secrets
+sh deploy/emqx/render-local.sh # 再跑：envsubst 渲染 token 后 apply EMQX CR
 ```
+
+**EMQX token 渲染（关键）**：EMQX 认证器 headers 里的 `${...}` 是**运行时模板占位符**（只允许 username/clientid/password 等连接变量），**不做环境变量展开**。所以 `x-iot-auth-token` 不能写 `${IOT_CORE_MQTT_AUTH_TOKEN}` 让 EMQX 读 env——必须部署前用 `envsubst` 把字面值渲染进 manifest。`render-local.sh` 从 `emqx/iot-runtime-secrets` 读 token 渲染 `cluster.local.yaml`。生产 `cluster.yaml` 同理需渲染后再 apply。
+
+**EMQX 单节点滚动更新**：本地单节点 license 不允许滚动更新时瞬时双 core（报 `SINGLE_NODE_LICENSE` 崩溃）。改 EMQX CR 后需 `kubectl delete sts -n emqx --all` 让 Operator 重建单节点。
 
 一键脚本默认检查 PostgreSQL、Kafka、EMQX 和 TDengine 的可达性，然后只部署 `iot` namespace 中的业务服务。监控端口转发由 Compose 中的 `iot-k8s-forward-*` 容器维护。
 

@@ -28,15 +28,17 @@ type DeviceStatus struct {
 }
 
 type TelemetryRecord struct {
-	MsgID           string          `json:"msgId"`
-	TenantID        string          `json:"tenantId"`
-	DeviceID        string          `json:"deviceId"`
-	Ts              int64           `json:"ts"`
-	Type            string          `json:"type"`
-	Version         string          `json:"version"`
-	Payload         json.RawMessage `json:"payload"`
-	TDengineWritten bool            `json:"tdengineWritten"`
-	ReceivedAt      time.Time       `json:"receivedAt"`
+	MsgID    string          `json:"msgId"`
+	TenantID string          `json:"tenantId"`
+	DeviceID string          `json:"deviceId"`
+	Ts       int64           `json:"ts"`
+	Type     string          `json:"type"`
+	Version  string          `json:"version"`
+	Payload  json.RawMessage `json:"payload"`
+	// TDengineWritten is an internal sink-completion marker used only for DLQ
+	// replay compensation; it must not be exposed on the management API.
+	TDengineWritten bool      `json:"-"`
+	ReceivedAt      time.Time `json:"receivedAt"`
 }
 
 type Command struct {

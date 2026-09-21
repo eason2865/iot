@@ -19,9 +19,14 @@ kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 
 本地使用同一个 Operator、命名空间、Service DNS、PVC 和 listener Service，但应用 [`cluster.local.yaml`](cluster.local.yaml) 的单 Core 节点。默认社区许可只允许该模式，因此它只用于验证连接、共享订阅、重连和发布流程，不提供生产高可用。
 
+`cluster.local.yaml` 的认证回调头含 `${IOT_CORE_MQTT_AUTH_TOKEN}`，这是 **envsubst 占位符**（不是 EMQX 运行时占位符）。必须先用 [`render-local.sh`](render-local.sh) 把 token 字面值渲染进 manifest 再 apply，EMQX 不会对认证器 headers 做环境变量展开：
+
 ```bash
-kubectl apply -f deploy/emqx/cluster.local.yaml
+scripts/helm-deploy-local.sh   # 先在 emqx namespace 建好 iot-runtime-secrets
+sh deploy/emqx/render-local.sh # 渲染 token 并 apply
 kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 ```
+
+注意：本地单节点 license 在滚动更新时会因瞬时双 core 崩溃（`SINGLE_NODE_LICENSE`）。更新 EMQX CR 后执行 `kubectl delete sts -n emqx --all` 让 Operator 重建单节点。
 
 本地 Compose 不运行 EMQX 容器，而是把 `emqx-listeners:1883` 和 `emqx-dashboard:18083` port-forward 到宿主机，使 Docker 内的 demo 与宿主机 MQTT 客户端都走同一套 Kubernetes EMQX Service。

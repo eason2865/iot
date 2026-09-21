@@ -428,20 +428,35 @@ func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryReco
 }
 
 func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, string, error) {
+	tenantID, deviceID := page.TenantID, page.DeviceID
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
+	// NormalizePageRequest returns only Size/Cursor; restore the filters.
+	page.TenantID, page.DeviceID = tenantID, deviceID
 	afterAt, afterMsgID, err := decodeTelemetryCursor(page.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
-		FROM telemetry_records
-		WHERE tenant_id = $1 AND device_id = $2
-		  AND (received_at > $3 OR (received_at = $3 AND msg_id > $4))
-		ORDER BY received_at ASC, msg_id ASC LIMIT $5`,
-		page.TenantID, page.DeviceID, afterAt, afterMsgID, page.Size+1)
+	// Two explicit branches: an empty cursor lists from the beginning with no
+	// keyset predicate, avoiding any reliance on NULL-parameter short-circuiting
+	// which behaves inconsistently across drivers/deployments.
+	var rows *sql.Rows
+	if page.Cursor == "" {
+		rows, err = s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
+			FROM telemetry_records
+			WHERE tenant_id = $1 AND device_id = $2
+			ORDER BY received_at ASC, msg_id ASC LIMIT $3`,
+			page.TenantID, page.DeviceID, page.Size+1)
+	} else {
+		rows, err = s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
+			FROM telemetry_records
+			WHERE tenant_id = $1 AND device_id = $2
+			  AND (received_at > $3 OR (received_at = $3 AND msg_id > $4))
+			ORDER BY received_at ASC, msg_id ASC LIMIT $5`,
+			page.TenantID, page.DeviceID, afterAt, afterMsgID, page.Size+1)
+	}
 	if err != nil {
 		return nil, "", err
 	}

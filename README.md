@@ -488,7 +488,6 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 
 ## 路线图
 
-- 告警和规则能力增强
 - DLQ 与消息重放
 - 更完整的可观测性和运维面板
 

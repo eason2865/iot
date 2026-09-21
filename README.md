@@ -486,10 +486,6 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 - 保持逻辑多租户隔离，避免过早引入复杂分库分表
 - Demo 模拟器当前作为外部造流服务运行，不进入业务 Helm release
 
-## 路线图
-
-- 更完整的可观测性和运维面板
-
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。

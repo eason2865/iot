@@ -7,12 +7,21 @@ import (
 )
 
 func TestAdvanceCommandStatus(t *testing.T) {
+	// created -> published (Kafka write) -> sent (MQTT downlink) -> acked.
 	got, err := contracts.AdvanceCommandStatus(contracts.CommandStatusCreated, contracts.CommandEventPublished)
 	if err != nil {
 		t.Fatalf("AdvanceCommandStatus(created, published) error = %v", err)
 	}
+	if got != contracts.CommandStatusPublished {
+		t.Fatalf("AdvanceCommandStatus(created, published) = %q, want %q", got, contracts.CommandStatusPublished)
+	}
+
+	got, err = contracts.AdvanceCommandStatus(got, contracts.CommandEventDelivered)
+	if err != nil {
+		t.Fatalf("AdvanceCommandStatus(published, delivered) error = %v", err)
+	}
 	if got != contracts.CommandStatusSent {
-		t.Fatalf("AdvanceCommandStatus(created, published) = %q, want %q", got, contracts.CommandStatusSent)
+		t.Fatalf("AdvanceCommandStatus(published, delivered) = %q, want %q", got, contracts.CommandStatusSent)
 	}
 
 	got, err = contracts.AdvanceCommandStatus(got, contracts.CommandEventAcked)

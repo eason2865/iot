@@ -87,19 +87,26 @@ message ListTenantsResponse {
   string next_cursor = 2;
 }
 
-message ListDevicesRequest {}
+message ListDevicesRequest {
+  int32 page_size = 1;
+  string cursor = 2;
+}
 
 message ListDevicesResponse {
   repeated Device devices = 1;
+  string next_cursor = 2;
 }
 
 message ListTelemetryRequest {
   string tenant_id = 1;
   string device_id = 2;
+  int32 page_size = 3;
+  string cursor = 4;
 }
 
 message ListTelemetryResponse {
   repeated TelemetryRecord records = 1;
+  string next_cursor = 2;
 }
 
 message IngestTelemetryRequest {

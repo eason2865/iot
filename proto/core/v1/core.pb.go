@@ -828,6 +828,8 @@ func (x *ListTenantsResponse) GetNextCursor() string {
 
 type ListDevicesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -862,9 +864,24 @@ func (*ListDevicesRequest) Descriptor() ([]byte, []int) {
 	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{13}
 }
 
+func (x *ListDevicesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListDevicesRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type ListDevicesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Devices       []*Device              `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -906,10 +923,19 @@ func (x *ListDevicesResponse) GetDevices() []*Device {
 	return nil
 }
 
+func (x *ListDevicesResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
 type ListTelemetryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	PageSize      int32                  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -958,9 +984,24 @@ func (x *ListTelemetryRequest) GetDeviceId() string {
 	return ""
 }
 
+func (x *ListTelemetryRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListTelemetryRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type ListTelemetryResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*TelemetryRecord     `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1000,6 +1041,13 @@ func (x *ListTelemetryResponse) GetRecords() []*TelemetryRecord {
 		return x.Records
 	}
 	return nil
+}
+
+func (x *ListTelemetryResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
 }
 
 type IngestTelemetryRequest struct {
@@ -1701,15 +1749,23 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\x13ListTenantsResponse\x12)\n" +
 	"\atenants\x18\x01 \x03(\v2\x0f.core.v1.TenantR\atenants\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\x14\n" +
-	"\x12ListDevicesRequest\"@\n" +
+	"nextCursor\"I\n" +
+	"\x12ListDevicesRequest\x12\x1b\n" +
+	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x16\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"a\n" +
 	"\x13ListDevicesResponse\x12)\n" +
-	"\adevices\x18\x01 \x03(\v2\x0f.core.v1.DeviceR\adevices\"P\n" +
+	"\adevices\x18\x01 \x03(\v2\x0f.core.v1.DeviceR\adevices\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\x85\x01\n" +
 	"\x14ListTelemetryRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1b\n" +
-	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\"K\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1b\n" +
+	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"l\n" +
 	"\x15ListTelemetryResponse\x122\n" +
-	"\arecords\x18\x01 \x03(\v2\x18.core.v1.TelemetryRecordR\arecords\"\xc1\x01\n" +
+	"\arecords\x18\x01 \x03(\v2\x18.core.v1.TelemetryRecordR\arecords\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xc1\x01\n" +
 	"\x16IngestTelemetryRequest\x12\x15\n" +
 	"\x06msg_id\x18\x01 \x01(\tR\x05msgId\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1b\n" +

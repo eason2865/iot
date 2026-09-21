@@ -47,6 +47,10 @@ func Run(serviceName string) error {
 		Store:              resources.store,
 		Publisher:          resources.publisher,
 		Metrics:            resources.metrics,
+		// Only the public-facing management-api serves the business REST
+		// endpoints. Background workers expose health/metrics only, so their
+		// unauthenticated write APIs cannot be reached in-cluster.
+		EnableBusinessAPI: serviceName == "management-api",
 	})
 	srv := &http.Server{
 		Addr:    listenAddr(),
@@ -124,7 +128,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			ClientID:     mqttClientID("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
 			Username:     os.Getenv("EMQX_USERNAME"),
 			Password:     os.Getenv("EMQX_PASSWORD"),
-			TopicFilter:  runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.TelemetryTopicFilter),
+			TopicFilter:  runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.SharedTelemetryTopicFilter),
 			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
 			DLQTopic:     runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
 		}, publisher, res.metrics)
@@ -145,7 +149,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			CommandTopic:     runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 			DLQTopic:         runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
 			MQTTBrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
-			AckTopicFilter:   runtimeconfig.EnvOrDefault("EMQX_ACK_TOPIC_FILTER", contracts.AckTopicFilter),
+			AckTopicFilter:   runtimeconfig.EnvOrDefault("EMQX_ACK_TOPIC_FILTER", contracts.SharedAckTopicFilter),
 			MQTTClientID:     mqttClientID("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
 			MQTTUsername:     os.Getenv("EMQX_USERNAME"),
 			MQTTPassword:     os.Getenv("EMQX_PASSWORD"),

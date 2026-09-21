@@ -27,6 +27,10 @@ type WorkerConfig struct {
 	MQTTClientID     string
 	MQTTUsername     string
 	MQTTPassword     string
+	// AckTimeout is how long a delivered command waits for the device ACK
+	// before it is marked timeout. It starts only after the MQTT downlink
+	// succeeds (MarkCommandSent).
+	AckTimeout time.Duration
 }
 
 type Worker struct {
@@ -38,14 +42,20 @@ type Worker struct {
 	dlqWriter       *kafka.Writer
 	metrics         *Metrics
 	tenantAllowlist map[string]struct{}
+	ackTimeout      time.Duration
 }
 
 func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, metrics *Metrics) *Worker {
+	ackTimeout := cfg.AckTimeout
+	if ackTimeout <= 0 {
+		ackTimeout = 5 * time.Minute
+	}
 	w := &Worker{
 		store:           store,
 		tdengine:        tdengine,
 		metrics:         metrics,
 		tenantAllowlist: tenantAllowlist(cfg.TenantIDs),
+		ackTimeout:      ackTimeout,
 	}
 	if len(cfg.KafkaBrokers) > 0 {
 		telemetryTopic := cfg.TelemetryTopic
@@ -141,6 +151,15 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 	var ack CommandAckMessage
 	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
 		log.Printf("command ack unmarshal error: %v", err)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("ack", "error")
+		}
+		return
+	}
+	// Reject identity spoofing: the ACK tenant/device must match the topic.
+	topicTenant, topicDevice, _, ok := contracts.ParseDeviceTopic(msg.Topic())
+	if !ok || topicTenant != ack.TenantID || topicDevice != ack.DeviceID {
+		log.Printf("command ack identity mismatch: topic=%s ack tenant=%s device=%s", msg.Topic(), ack.TenantID, ack.DeviceID)
 		if w.metrics != nil {
 			w.metrics.IncDeviceWorker("ack", "error")
 		}
@@ -250,27 +269,39 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			Version:  rec.Version,
 			Payload:  rec.Payload,
 		}
+		storedRec := rec
+		needTDengine := true
 		if w.store != nil {
-			if _, err := w.store.RecordTelemetry(env); err != nil {
+			stored, err := w.store.RecordTelemetry(env)
+			if err != nil {
 				if IsTelemetryDuplicate(err) {
-					// DLQ replay or redelivery: PostgreSQL already has the row, so skip
-					// the non-idempotent TDengine write and commit the offset.
-					log.Printf("telemetry duplicate skipped: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-					_ = w.telemetryReader.CommitMessages(ctx, msg)
+					// DLQ replay or redelivery: PostgreSQL already has the row.
+					// Only skip TDengine if it was already written; otherwise
+					// compensate the missing TDengine write below.
+					if stored.TDengineWritten {
+						log.Printf("telemetry replay already complete: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+						_ = w.telemetryReader.CommitMessages(ctx, msg)
+						continue
+					}
+					log.Printf("telemetry replay compensating tdengine: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+					storedRec = stored
+					needTDengine = true
+				} else {
+					log.Printf("telemetry store error: %v", err)
+					if w.metrics != nil {
+						w.metrics.IncDeviceWorker("telemetry", "error")
+					}
+					if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.postgres", err); dlqErr != nil {
+						return dlqErr
+					}
 					continue
 				}
-				log.Printf("telemetry store error: %v", err)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("telemetry", "error")
-				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.postgres", err); dlqErr != nil {
-					return dlqErr
-				}
-				continue
+			} else {
+				storedRec = stored
 			}
 		}
-		if w.tdengine != nil {
-			if err := w.tdengine.WriteTelemetry(rec); err != nil {
+		if w.tdengine != nil && needTDengine {
+			if err := w.tdengine.WriteTelemetry(storedRec); err != nil {
 				log.Printf("tdengine write error: %v", err)
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")
@@ -279,6 +310,14 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 					return dlqErr
 				}
 				continue
+			}
+			// Persist TDengine completion so a later replay does not rewrite it.
+			if marker, ok := w.store.(interface {
+				MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
+			}); ok {
+				if err := marker.MarkTelemetryTDengineWritten(storedRec.MsgID, storedRec.TenantID, storedRec.DeviceID); err != nil {
+					log.Printf("tdengine completion mark error: %v", err)
+				}
 			}
 		}
 		if w.metrics != nil {
@@ -363,6 +402,15 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 					return dlqErr
 				}
 				continue
+			}
+			// MQTT downlink succeeded: transition published -> sent and start the
+			// ACK deadline now, so the command status reflects real delivery.
+			if marker, ok := w.store.(interface {
+				MarkCommandSent(id string, deadline time.Time) error
+			}); ok {
+				if err := marker.MarkCommandSent(cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
+					log.Printf("command mark sent error: id=%s err=%v", cmd.ID, err)
+				}
 			}
 		}
 		if w.metrics != nil {

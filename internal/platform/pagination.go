@@ -19,6 +19,7 @@ type PageRequest struct {
 	Size     int
 	Cursor   string
 	TenantID string
+	DeviceID string
 }
 
 func NormalizePageRequest(size int, cursor string) (PageRequest, error) {
@@ -55,6 +56,36 @@ func encodeCommandCursor(createdAt time.Time, id string) string {
 }
 
 func decodeCommandCursor(cursor string) (time.Time, string, error) {
+	parts, err := decodeCursor(cursor, 2)
+	if err != nil || parts == nil {
+		return time.Time{}, "", err
+	}
+	nanos, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor")
+	}
+	return time.Unix(0, nanos).UTC(), parts[1], nil
+}
+
+// Device pagination uses a (tenant_id, device_id) keyset cursor.
+func encodeDeviceCursor(tenantID, deviceID string) string {
+	return encodeCursor(tenantID, deviceID)
+}
+
+func decodeDeviceCursor(cursor string) (string, string, error) {
+	parts, err := decodeCursor(cursor, 2)
+	if err != nil || parts == nil {
+		return "", "", err
+	}
+	return parts[0], parts[1], nil
+}
+
+// Telemetry pagination uses a (received_at, msg_id) keyset cursor.
+func encodeTelemetryCursor(receivedAt time.Time, msgID string) string {
+	return encodeCursor(strconv.FormatInt(receivedAt.UTC().UnixNano(), 10), msgID)
+}
+
+func decodeTelemetryCursor(cursor string) (time.Time, string, error) {
 	parts, err := decodeCursor(cursor, 2)
 	if err != nil || parts == nil {
 		return time.Time{}, "", err

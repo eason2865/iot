@@ -69,8 +69,8 @@ func TestCommandAckFlow(t *testing.T) {
 		},
 	}, &created)
 
-	if created.Status != platform.CommandStatusSent {
-		t.Fatalf("created status = %q, want %q", created.Status, platform.CommandStatusSent)
+	if created.Status != platform.CommandStatusPublished {
+		t.Fatalf("created status = %q, want %q", created.Status, platform.CommandStatusPublished)
 	}
 
 	postJSON(t, ts.URL+"/api/v1/commands/"+created.ID+"/ack", map[string]any{

@@ -8,7 +8,7 @@ import (
 
 type CommandDispatchStore interface {
 	ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error)
-	MarkCommandSent(id string, deadline time.Time) error
+	MarkCommandPublished(id string) error
 	RescheduleCommand(id string, retryAfter time.Duration) error
 	ExpireCommands(now time.Time) (int64, error)
 }
@@ -65,8 +65,8 @@ func (d *CommandDispatcher) dispatchOnce() {
 			}
 			continue
 		}
-		if err := d.store.MarkCommandSent(command.ID, time.Now().UTC().Add(d.timeout)); err != nil {
-			log.Printf("command mark sent error: id=%s err=%v", command.ID, err)
+		if err := d.store.MarkCommandPublished(command.ID); err != nil {
+			log.Printf("command mark published error: id=%s err=%v", command.ID, err)
 		}
 	}
 }

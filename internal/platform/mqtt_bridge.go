@@ -83,6 +83,18 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, "mqtt.decode", err)
 				return
 			}
+			// Reject identity spoofing: the envelope tenant/device must match the
+			// actual MQTT topic the message arrived on. ACL limits which topic a
+			// device can publish to, but not what identity it claims in the body.
+			topicTenant, topicDevice, _, ok := contracts.ParseDeviceTopic(msg.Topic())
+			if !ok || topicTenant != env.TenantID || topicDevice != env.DeviceID {
+				log.Printf("mqtt bridge identity mismatch: topic=%s envelope tenant=%s device=%s", msg.Topic(), env.TenantID, env.DeviceID)
+				if bridge.metrics != nil {
+					bridge.metrics.IncMQTTBridge("error")
+				}
+				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, "mqtt.identity", errIdentityMismatch)
+				return
+			}
 			rec := TelemetryRecord{
 				MsgID:      env.MsgID,
 				TenantID:   env.TenantID,

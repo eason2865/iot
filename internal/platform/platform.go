@@ -11,6 +11,11 @@ type Config struct {
 	Store              Repository
 	Publisher          MessagePublisher
 	Metrics            *Metrics
+	// EnableBusinessAPI registers the tenant/device/telemetry/command REST
+	// endpoints. It defaults to true for the public-facing "management-api"
+	// service and false for background workers, so callers only need to set it
+	// explicitly to override that default.
+	EnableBusinessAPI bool
 }
 
 type App struct {
@@ -19,6 +24,7 @@ type App struct {
 	publisher   MessagePublisher
 	metrics     *Metrics
 	ttl         time.Duration
+	enableAPI   bool
 	router      http.Handler
 }
 
@@ -32,6 +38,9 @@ func New(cfg Config) *App {
 		store:       cfg.Store,
 		publisher:   cfg.Publisher,
 		ttl:         ttl,
+		// management-api serves business REST by default; workers only when
+		// explicitly enabled.
+		enableAPI: cfg.EnableBusinessAPI || cfg.ServiceName == "management-api",
 	}
 	if app.store == nil {
 		app.store = newMemoryStore(ttl)
@@ -55,14 +64,16 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.healthHandler)
 	mux.Handle("/metrics", a.metrics.Handler())
-	mux.HandleFunc("/openapi.json", a.openapiHandler)
-	mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)
-	mux.HandleFunc("/api/v1/tenants", a.handleTenants)
-	mux.HandleFunc("/api/v1/devices", a.handleDevices)
-	mux.HandleFunc("/api/v1/telemetry", a.handleTelemetry)
-	mux.HandleFunc("/api/v1/commands", a.handleCommands)
-	mux.HandleFunc("/api/v1/commands/", a.handleCommandByID)
-	mux.HandleFunc("/api/v1/devices/", a.handleDeviceByID)
+	if a.enableAPI {
+		mux.HandleFunc("/openapi.json", a.openapiHandler)
+		mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)
+		mux.HandleFunc("/api/v1/tenants", a.handleTenants)
+		mux.HandleFunc("/api/v1/devices", a.handleDevices)
+		mux.HandleFunc("/api/v1/telemetry", a.handleTelemetry)
+		mux.HandleFunc("/api/v1/commands", a.handleCommands)
+		mux.HandleFunc("/api/v1/commands/", a.handleCommandByID)
+		mux.HandleFunc("/api/v1/devices/", a.handleDeviceByID)
+	}
 	return a.observeHTTP(mux)
 }
 

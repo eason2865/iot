@@ -14,6 +14,7 @@ EMQX_HOST="${EMQX_HOST:-emqx-listeners.emqx.svc.cluster.local}"
 EMQX_PORT="${EMQX_PORT:-1883}"
 MANAGEMENT_API_TOKEN="${IOT_MANAGEMENT_API_TOKEN:-local-development-token}"
 EMQX_INTERNAL_PASSWORD="${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}"
+IOT_CORE_MQTT_AUTH_TOKEN="${IOT_CORE_MQTT_AUTH_TOKEN:-local-mqtt-auth-token}"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -100,6 +101,13 @@ kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
   --from-literal=MANAGEMENT_API_TOKEN="$MANAGEMENT_API_TOKEN" \
   --from-literal=EMQX_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=EMQX_INTERNAL_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
+  --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# EMQX runs in its own namespace and cannot read secrets across namespaces, so
+# mirror the auth token there for the authentication callback header.
+kubectl create namespace emqx --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n emqx create secret generic iot-runtime-secrets \
+  --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 prepare_local_app_image

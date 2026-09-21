@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS telemetry_records (
   type TEXT NOT NULL,
   version TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  tdengine_written BOOLEAN NOT NULL DEFAULT FALSE,
   received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (msg_id, tenant_id, device_id)
 );
@@ -141,6 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tena
 		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_status TEXT NOT NULL DEFAULT 'acked'`,
 		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS tdengine_written BOOLEAN NOT NULL DEFAULT FALSE`,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return err
@@ -234,6 +236,41 @@ func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, err
 	next := ""
 	if len(out) > page.Size {
 		next = encodeCursor(out[page.Size-1].ID)
+		out = out[:page.Size]
+	}
+	return out, next, nil
+}
+
+func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, error) {
+	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	afterTenant, afterDevice, err := decodeDeviceCursor(page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, created_at FROM devices
+		WHERE (tenant_id > $1) OR (tenant_id = $1 AND device_id > $2)
+		ORDER BY tenant_id, device_id LIMIT $3`, afterTenant, afterDevice, page.Size+1)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var out []Device
+	for rows.Next() {
+		var item Device
+		if err := rows.Scan(&item.TenantID, &item.DeviceID, &item.ProductID, &item.CreatedAt); err != nil {
+			return nil, "", err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > page.Size {
+		next = encodeDeviceCursor(out[page.Size-1].TenantID, out[page.Size-1].DeviceID)
 		out = out[:page.Size]
 	}
 	return out, next, nil
@@ -352,9 +389,23 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		return TelemetryRecord{}, err
 	}
 	if inserted == 0 {
+		// Duplicate (e.g. DLQ replay). Return the stored row's TDengine completion
+		// state so the caller can compensate the TDengine write if it never landed.
+		var written bool
+		_ = s.db.QueryRow(`SELECT tdengine_written FROM telemetry_records WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
+			rec.MsgID, rec.TenantID, rec.DeviceID).Scan(&written)
+		rec.TDengineWritten = written
 		return rec, ErrDuplicateTelemetry
 	}
 	return rec, nil
+}
+
+// MarkTelemetryTDengineWritten records that the telemetry row was persisted to
+// TDengine, so a later DLQ replay does not write it twice.
+func (s *PostgresStore) MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error {
+	_, err := s.db.Exec(`UPDATE telemetry_records SET tdengine_written = TRUE WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
+		msgID, tenantID, deviceID)
+	return err
 }
 
 func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
@@ -374,6 +425,46 @@ func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryReco
 		}
 	}
 	return out
+}
+
+func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, string, error) {
+	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	afterAt, afterMsgID, err := decodeTelemetryCursor(page.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
+		FROM telemetry_records
+		WHERE tenant_id = $1 AND device_id = $2
+		  AND (received_at > $3 OR (received_at = $3 AND msg_id > $4))
+		ORDER BY received_at ASC, msg_id ASC LIMIT $5`,
+		page.TenantID, page.DeviceID, afterAt, afterMsgID, page.Size+1)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var out []TelemetryRecord
+	for rows.Next() {
+		var rec TelemetryRecord
+		var payload []byte
+		if err := rows.Scan(&rec.MsgID, &rec.TenantID, &rec.DeviceID, &rec.Ts, &rec.Type, &rec.Version, &payload, &rec.ReceivedAt); err != nil {
+			return nil, "", err
+		}
+		rec.Payload = json.RawMessage(payload)
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > page.Size {
+		next = encodeTelemetryCursor(out[page.Size-1].ReceivedAt, out[page.Size-1].MsgID)
+		out = out[:page.Size]
+	}
+	return out, next, nil
 }
 
 func (s *PostgresStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
@@ -504,13 +595,29 @@ RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.u
 	return scanCommands(rows)
 }
 
-func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
-	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status = 'created'`, id, deadline)
+// MarkCommandPublished transitions a command from created to published once the
+// dispatcher wrote it to Kafka. The deadline is NOT started here; it begins
+// only when device-worker confirms the MQTT downlink via MarkCommandSent.
+func (s *PostgresStore) MarkCommandPublished(id string) error {
+	result, err := s.db.Exec(`UPDATE commands SET status = 'published', updated_at = NOW() WHERE id = $1 AND status = 'created'`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := result.RowsAffected(); n == 1 {
 		_, err = s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'published')`, id)
+	}
+	return err
+}
+
+// MarkCommandSent transitions a command from published to sent once the MQTT
+// downlink succeeded, and starts the ACK deadline.
+func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
+	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status = 'published'`, id, deadline)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 1 {
+		_, err = s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'delivered')`, id)
 	}
 	return err
 }

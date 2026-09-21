@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: iot-core-mqtt-auth
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: iot-core
+  policyTypes:
+    - Ingress
+  ingress:
+    # The MQTT authentication callback endpoint (9090) must only be reachable
+    # from the EMQX cluster, which runs in the emqx namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: emqx
+      ports:
+        - protocol: TCP
+          port: 9090
+    # gRPC (9001) and metrics (9101) stay reachable from the iot namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - protocol: TCP
+          port: 9001
+        - protocol: TCP
+          port: 9101

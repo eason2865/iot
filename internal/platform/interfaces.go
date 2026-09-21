@@ -12,6 +12,10 @@ import (
 // when a DLQ replay re-publishes the message.
 var ErrDuplicateTelemetry = errors.New("duplicate telemetry message")
 
+// errIdentityMismatch marks a message whose envelope tenant/device identity
+// does not match the MQTT topic it arrived on (identity spoofing attempt).
+var errIdentityMismatch = errors.New("envelope identity does not match mqtt topic")
+
 // IsTelemetryDuplicate reports whether err wraps ErrDuplicateTelemetry.
 func IsTelemetryDuplicate(err error) bool {
 	return errors.Is(err, ErrDuplicateTelemetry)

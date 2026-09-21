@@ -15,6 +15,12 @@ const (
 
 	TelemetryTopicFilter = "tenant/+/device/+/telemetry"
 	AckTopicFilter       = "tenant/+/device/+/ack"
+
+	// SharedTelemetryTopicFilter is the default multi-replica-safe subscription
+	// for telemetry-ingestor; the share group load-balances across replicas.
+	SharedTelemetryTopicFilter = "$share/iot-telemetry/tenant/+/device/+/telemetry"
+	// SharedAckTopicFilter is the default shared subscription for device-worker ACKs.
+	SharedAckTopicFilter = "$share/iot-device-worker/tenant/+/device/+/ack"
 )
 
 func BuildDeviceTopic(tenantID, deviceID, suffix string) (string, error) {
@@ -52,4 +58,18 @@ func BuildTenantCommandTopicFilter(tenantID string) (string, error) {
 		return "", ErrInvalidTopicPart
 	}
 	return fmt.Sprintf("tenant/%s/device/+/%s", tenantID, TopicSuffixCommand), nil
+}
+
+// ParseDeviceTopic extracts the tenant and device identifiers from a canonical
+// device topic of the form tenant/{tenantId}/device/{deviceId}/{suffix}. It
+// returns ok=false when the topic does not match the expected shape.
+func ParseDeviceTopic(topic string) (tenantID, deviceID, suffix string, ok bool) {
+	parts := strings.Split(strings.Trim(topic, "/"), "/")
+	if len(parts) != 5 || parts[0] != "tenant" || parts[2] != "device" {
+		return "", "", "", false
+	}
+	if !IsValidTopicPart(parts[1]) || !IsValidTopicPart(parts[3]) {
+		return "", "", "", false
+	}
+	return parts[1], parts[3], parts[4], true
 }

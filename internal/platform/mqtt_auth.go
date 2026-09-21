@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
-
-	"iot/internal/contracts"
 )
 
 const internalMQTTUsername = "iot-service"
@@ -40,16 +38,17 @@ type MQTTAuthResponse struct {
 	ACL         []MQTTACLRule     `json:"acl,omitempty"`
 }
 
-// MQTTAuthenticationHandler validates EMQX authentication callbacks. When
-// callbackToken is non-empty, EMQX must present it via AuthCallbackTokenHeader,
-// blocking arbitrary in-cluster callers from probing device credentials.
+// MQTTAuthenticationHandler validates EMQX authentication callbacks. EMQX must
+// present the shared callbackToken via AuthCallbackTokenHeader. The check is
+// fail-closed: an empty configured token rejects every callback, so the
+// endpoint is never left unauthenticated by a missing env var.
 func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPassword, callbackToken string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if callbackToken != "" && !secureEqual(r.Header.Get(AuthCallbackTokenHeader), callbackToken) {
+		if callbackToken == "" || !secureEqual(r.Header.Get(AuthCallbackTokenHeader), callbackToken) {
 			writeError(w, http.StatusUnauthorized, "invalid callback token")
 			return
 		}
@@ -84,16 +83,14 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 func internalMQTTRole(clientID string) (string, []MQTTACLRule) {
 	switch {
 	case strings.HasPrefix(clientID, "iot-telemetry-ingestor-"):
-		// Cover both the shared-subscription form used by multi-replica Helm
-		// deployments and the plain filter used by local/E2E single instances.
+		// Shared subscription only: the default filter is the shared form, and
+		// plain per-replica subscriptions are not granted.
 		return "telemetry-ingestor", []MQTTACLRule{
 			{Permission: "allow", Action: "subscribe", Topic: "eq $share/iot-telemetry/tenant/+/device/+/telemetry"},
-			{Permission: "allow", Action: "subscribe", Topic: contracts.TelemetryTopicFilter},
 		}
 	case strings.HasPrefix(clientID, "iot-device-worker-"):
 		return "device-worker", []MQTTACLRule{
 			{Permission: "allow", Action: "subscribe", Topic: "eq $share/iot-device-worker/tenant/+/device/+/ack"},
-			{Permission: "allow", Action: "subscribe", Topic: contracts.AckTopicFilter},
 			{Permission: "allow", Action: "publish", Topic: "match tenant/+/device/+/command"},
 		}
 	case strings.HasPrefix(clientID, "iot-demo-"):

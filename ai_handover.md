@@ -23,13 +23,18 @@
 ## 关键配置
 
 - Go：`go 1.27.0`，toolchain `go1.27.1`。
-- MQTT topic：`tenant/{tenantId}/device/{deviceId}/{telemetry|command|ack}`。
+- MQTT topic：`tenant/{tenantId}/device/{deviceId}/{telemetry|command|ack}`；消息体里的 tenantId/deviceId 必须与真实 topic 一致，否则进 DLQ（身份伪造防护）。
 - MQTT 设备用户名：`tenantId:deviceId`；设备密码在 PostgreSQL 中保存为 bcrypt 哈希。
 - MQTT 服务账号：`iot-service`，由 `EMQX_INTERNAL_PASSWORD` 注入。
-- MQTT 认证回调：`iot-core:9090/internal/mqtt/authenticate`，EMQX 需携带 `X-Iot-Auth-Token` 头（由 `IOT_CORE_MQTT_AUTH_TOKEN` 注入）；ACL 同时覆盖共享订阅 `$share/...` 与普通订阅形态。
+- MQTT 认证回调：`iot-core:9090/internal/mqtt/authenticate`，fail-closed——必须配置 `IOT_CORE_MQTT_AUTH_TOKEN`，EMQX 通过 `X-Iot-Auth-Token` 头携带；本地脚本在 `iot` 和 `emqx` 两个 namespace 各建一份同名 Secret；ACL 只授予 `$share` 共享订阅。
+- MQTT 订阅默认值：`telemetry-ingestor` 用 `$share/iot-telemetry/...`，`device-worker` 用 `$share/iot-device-worker/...`（多副本负载均衡）。
+- NetworkPolicy：`iot-core-mqtt-auth` 限制 9090 仅 `emqx` namespace 可达，9001/9101 仅本 namespace。
 - Kafka topics：`iot.telemetry`、`iot.command`、`iot.dlq`。
-- TDengine：超级表 `telemetry_v2`，按设备建立子表；完整 payload 的权威副本为 PostgreSQL JSONB；`telemetry_records` 的 `UNIQUE (msg_id, tenant_id, device_id)` 保证 DLQ 重放时 PostgreSQL/TDengine 均幂等。
+- TDengine：超级表 `telemetry_v2`，按设备建立子表；完整 payload 的权威副本为 PostgreSQL JSONB。`telemetry_records.tdengine_written` 记录 TDengine 完成状态，DLQ 重放只补偿未完成的 TDengine 写，PG/TDengine 均幂等。
+- 命令状态机：`created → published（Kafka 写入）→ sent（MQTT 下发成功，启动 ACK deadline）→ acked/timeout/failed`；`published` 状态无 deadline。
 - 命令列表：`GET /api/v1/commands?tenantId=<tenant-id>` 必须指定租户，分页使用 `pageSize` 和 opaque `cursor`。
+- 列表分页：`/api/v1/tenants`、`/api/v1/devices`、`/api/v1/devices/{t}/{d}/telemetry`、`/api/v1/commands` 均为 keyset 分页（`pageSize` 1-100，响应 `{items, nextCursor}`）。
+- REST 写接口仅 `management-api` 暴露；`telemetry-ingestor`/`device-worker` 只提供 `/healthz` 和 `/metrics`。
 - 生产环境禁止使用 `latest`，使用不可变镜像版本或 digest。
 
 ## 本地运行

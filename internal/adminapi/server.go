@@ -187,7 +187,12 @@ func (s *Server) createDeviceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listDevicesHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.rpc.ListDevices(r.Context(), &corev1.ListDevicesRequest{})
+	pageSize, cursor, err := pageFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListDevices(r.Context(), &corev1.ListDevicesRequest{PageSize: int32(pageSize), Cursor: cursor})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -196,7 +201,7 @@ func (s *Server) listDevicesHandler(w http.ResponseWriter, r *http.Request) {
 	for _, device := range resp.GetDevices() {
 		devices = append(devices, deviceFromPB(device))
 	}
-	writeJSON(w, http.StatusOK, devices)
+	writeJSON(w, http.StatusOK, map[string]any{"items": devices, "nextCursor": resp.GetNextCursor()})
 }
 
 func (s *Server) getDeviceHandler(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +238,12 @@ func (s *Server) listTelemetryHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	resp, err := s.rpc.ListTelemetry(r.Context(), &corev1.ListTelemetryRequest{TenantId: tenantID, DeviceId: deviceID})
+	pageSize, cursor, err := pageFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListTelemetry(r.Context(), &corev1.ListTelemetryRequest{TenantId: tenantID, DeviceId: deviceID, PageSize: int32(pageSize), Cursor: cursor})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -242,7 +252,7 @@ func (s *Server) listTelemetryHandler(w http.ResponseWriter, r *http.Request) {
 	for _, record := range resp.GetRecords() {
 		records = append(records, telemetryFromPB(record))
 	}
-	writeJSON(w, http.StatusOK, records)
+	writeJSON(w, http.StatusOK, map[string]any{"items": records, "nextCursor": resp.GetNextCursor()})
 }
 
 func (s *Server) ingestTelemetryHandler(w http.ResponseWriter, r *http.Request) {

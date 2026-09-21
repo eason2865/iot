@@ -77,13 +77,25 @@ func (s *Service) CreateDevice(_ context.Context, req *corev1.CreateDeviceReques
 	return deviceToPB(device), nil
 }
 
-func (s *Service) ListDevices(context.Context, *corev1.ListDevicesRequest) (*corev1.ListDevicesResponse, error) {
-	devices := s.repo.ListDevices()
+func (s *Service) ListDevices(_ context.Context, req *corev1.ListDevicesRequest) (*corev1.ListDevicesResponse, error) {
+	var devices []platform.Device
+	nextCursor := ""
+	if paged, ok := s.repo.(interface {
+		ListDevicesPage(platform.PageRequest) ([]platform.Device, string, error)
+	}); ok {
+		var err error
+		devices, nextCursor, err = paged.ListDevicesPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		devices = s.repo.ListDevices()
+	}
 	out := make([]*corev1.Device, 0, len(devices))
 	for _, device := range devices {
 		out = append(out, deviceToPB(device))
 	}
-	return &corev1.ListDevicesResponse{Devices: out}, nil
+	return &corev1.ListDevicesResponse{Devices: out, NextCursor: nextCursor}, nil
 }
 
 func (s *Service) GetDevice(_ context.Context, req *corev1.GetDeviceRequest) (*corev1.GetDeviceResponse, error) {
@@ -103,12 +115,24 @@ func (s *Service) GetDeviceStatus(_ context.Context, req *corev1.GetDeviceStatus
 }
 
 func (s *Service) ListTelemetry(_ context.Context, req *corev1.ListTelemetryRequest) (*corev1.ListTelemetryResponse, error) {
-	records := s.repo.ListTelemetry(req.GetTenantId(), req.GetDeviceId())
+	var records []platform.TelemetryRecord
+	nextCursor := ""
+	if paged, ok := s.repo.(interface {
+		ListTelemetryPage(platform.PageRequest) ([]platform.TelemetryRecord, string, error)
+	}); ok {
+		var err error
+		records, nextCursor, err = paged.ListTelemetryPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId(), DeviceID: req.GetDeviceId()})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		records = s.repo.ListTelemetry(req.GetTenantId(), req.GetDeviceId())
+	}
 	out := make([]*corev1.TelemetryRecord, 0, len(records))
 	for _, record := range records {
 		out = append(out, telemetryToPB(record))
 	}
-	return &corev1.ListTelemetryResponse{Records: out}, nil
+	return &corev1.ListTelemetryResponse{Records: out, NextCursor: nextCursor}, nil
 }
 
 func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
@@ -119,7 +143,11 @@ func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetry
 		}
 		return nil, err
 	}
-	if _, dispatchesAsync := s.repo.(platform.CommandDispatchStore); s.publisher != nil && !dispatchesAsync {
+	// Always publish to Kafka so the telemetry reaches device-worker and
+	// TDengine through the same unified event path as MQTT-originated data.
+	// The worker's duplicate handling makes the PostgreSQL re-write idempotent
+	// and compensates the TDengine sink.
+	if s.publisher != nil {
 		if err := s.publisher.PublishTelemetry(record); err != nil {
 			return nil, err
 		}
@@ -149,7 +177,10 @@ func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequ
 	if err != nil {
 		return nil, err
 	}
-	if s.publisher != nil {
+	// When the repository supports async dispatch (CommandDispatchStore), the
+	// background CommandDispatcher claims and publishes 'created' commands.
+	// Publishing synchronously here too would deliver the command twice.
+	if _, dispatchesAsync := s.repo.(platform.CommandDispatchStore); s.publisher != nil && !dispatchesAsync {
 		if err := s.publisher.PublishCommand(command); err != nil {
 			return nil, err
 		}

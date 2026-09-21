@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS telemetry_records (
   type TEXT NOT NULL,
   version TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  tdengine_written BOOLEAN NOT NULL DEFAULT FALSE,
   received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (msg_id, tenant_id, device_id)
 );

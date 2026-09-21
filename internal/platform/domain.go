@@ -28,14 +28,15 @@ type DeviceStatus struct {
 }
 
 type TelemetryRecord struct {
-	MsgID      string          `json:"msgId"`
-	TenantID   string          `json:"tenantId"`
-	DeviceID   string          `json:"deviceId"`
-	Ts         int64           `json:"ts"`
-	Type       string          `json:"type"`
-	Version    string          `json:"version"`
-	Payload    json.RawMessage `json:"payload"`
-	ReceivedAt time.Time       `json:"receivedAt"`
+	MsgID           string          `json:"msgId"`
+	TenantID        string          `json:"tenantId"`
+	DeviceID        string          `json:"deviceId"`
+	Ts              int64           `json:"ts"`
+	Type            string          `json:"type"`
+	Version         string          `json:"version"`
+	Payload         json.RawMessage `json:"payload"`
+	TDengineWritten bool            `json:"tdengineWritten"`
+	ReceivedAt      time.Time       `json:"receivedAt"`
 }
 
 type Command struct {
@@ -51,9 +52,10 @@ type Command struct {
 }
 
 const (
-	CommandStatusCreated = contracts.CommandStatusCreated
-	CommandStatusSent    = contracts.CommandStatusSent
-	CommandStatusAcked   = contracts.CommandStatusAcked
-	CommandStatusFailed  = contracts.CommandStatusFailed
-	CommandStatusTimeout = contracts.CommandStatusTimeout
+	CommandStatusCreated   = contracts.CommandStatusCreated
+	CommandStatusPublished = contracts.CommandStatusPublished
+	CommandStatusSent      = contracts.CommandStatusSent
+	CommandStatusAcked     = contracts.CommandStatusAcked
+	CommandStatusFailed    = contracts.CommandStatusFailed
+	CommandStatusTimeout   = contracts.CommandStatusTimeout
 )

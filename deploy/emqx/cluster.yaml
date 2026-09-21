@@ -49,6 +49,11 @@ spec:
             secretKeyRef:
               name: emqx-license
               key: key
+        - name: IOT_CORE_MQTT_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: iot-runtime-secrets
+              key: IOT_CORE_MQTT_AUTH_TOKEN
       resources:
         requests:
           cpu: 250m
@@ -73,6 +78,11 @@ spec:
             secretKeyRef:
               name: emqx-license
               key: key
+        - name: IOT_CORE_MQTT_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: iot-runtime-secrets
+              key: IOT_CORE_MQTT_AUTH_TOKEN
       resources:
         requests:
           cpu: 250m

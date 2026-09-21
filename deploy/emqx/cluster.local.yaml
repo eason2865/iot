@@ -3,6 +3,29 @@ kind: Namespace
 metadata:
   name: emqx
 ---
+# Custom ACL file replacing the EMQX default. The default acl.conf ends with
+# `{allow, {security_profile, legacy}}` which permits everything when the node
+# runs the legacy security profile (the EMQX 6.3 default). All client
+# authorization in this platform is carried by the client ACLs returned from
+# the iot-core HTTP authenticator, so anything reaching this chain is denied.
+# NOTE: the hardened security profile is deliberately NOT enabled: it restricts
+# authn HTTP templates to MQTT-context placeholders. The callback token is
+# instead injected via the EMQX_AUTHENTICATION__1__HEADERS env override below
+# (EMQX 6 does not resolve `${VAR}` placeholders inside authn HTTP templates,
+# and per-key header overrides like ...__HEADERS__x_iot_auth_token are rejected
+# as unknown_env_vars; overriding the whole headers map with a JSON value is
+# the only working env-based injection). The underscore header name matches
+# iot-core AuthCallbackTokenHeader.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: emqx-acl
+  namespace: emqx
+data:
+  acl.conf: |
+    {deny, all, subscribe, ["$SYS/#", {eq, "#"}, {eq, "+/#"}]}.
+    {deny, all}.
+---
 apiVersion: apps.emqx.io/v2
 kind: EMQX
 metadata:
@@ -22,7 +45,10 @@ spec:
           url = "http://iot-core.iot.svc.cluster.local:9090/internal/mqtt/authenticate"
           headers {
             "content-type" = "application/json"
-            "x-iot-auth-token" = "${IOT_CORE_MQTT_AUTH_TOKEN}"
+            # Whole map replaced at boot by the env override below; the
+            # literals here are only fallbacks that iot-core will always
+            # reject.
+            "x_iot_auth_token" = "set-via-EMQX_AUTHENTICATION__1__HEADERS"
           }
           body {
             username = "${username}"
@@ -36,12 +62,20 @@ spec:
     spec:
       replicas: 1
       minAvailable: 1
+      extraVolumes:
+        - name: acl
+          configMap:
+            name: emqx-acl
+      extraVolumeMounts:
+        - name: acl
+          mountPath: /opt/emqx/etc/acl.conf
+          subPath: acl.conf
       env:
-        - name: IOT_CORE_MQTT_AUTH_TOKEN
+        - name: EMQX_AUTHENTICATION__1__HEADERS
           valueFrom:
             secretKeyRef:
               name: iot-runtime-secrets
-              key: IOT_CORE_MQTT_AUTH_TOKEN
+              key: EMQX_AUTHN_HEADERS_JSON
       resources:
         requests:
           cpu: 250m

@@ -19,13 +19,15 @@ kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 
 本地使用同一个 Operator、命名空间、Service DNS、PVC 和 listener Service，但应用 [`cluster.local.yaml`](cluster.local.yaml) 的单 Core 节点。默认社区许可只允许该模式，因此它只用于验证连接、共享订阅、重连和发布流程，不提供生产高可用。
 
-`cluster.local.yaml` 的认证回调头含 `${IOT_CORE_MQTT_AUTH_TOKEN}`，这是 **envsubst 占位符**（不是 EMQX 运行时占位符）。必须先用 [`render-local.sh`](render-local.sh) 把 token 字面值渲染进 manifest 再 apply，EMQX 不会对认证器 headers 做环境变量展开：
+认证回调 token 通过 EMQX 环境变量覆盖注入：EMQX 6 不解析 authn HTTP 模板中的 `${VAR}` 占位符，且 `EMQX_AUTHENTICATION__1__HEADERS__x_iot_auth_token` 这类按 key 的覆盖会被当作 `unknown_env_vars` 拒绝，唯一可行的注入方式是用 `EMQX_AUTHENTICATION__1__HEADERS` 整体覆盖 headers map（JSON 值）。该值存放在 emqx namespace 的 `iot-runtime-secrets` 的 `EMQX_AUTHN_HEADERS_JSON` key 中，由部署脚本生成：
 
 ```bash
-scripts/helm-deploy-local.sh   # 先在 emqx namespace 建好 iot-runtime-secrets
-sh deploy/emqx/render-local.sh # 渲染 token 并 apply
+scripts/helm-deploy-local.sh   # 在 emqx namespace 建好 iot-runtime-secrets（含 EMQX_AUTHN_HEADERS_JSON）
+kubectl apply -f deploy/emqx/cluster.local.yaml
 kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 ```
+
+生产清单 `cluster.yaml` 采用同一机制，创建 `iot-runtime-secrets` 时必须包含 `EMQX_AUTHN_HEADERS_JSON`（内容为完整 JSON，如 `{"content-type":"application/json","x_iot_auth_token":"<token>"}`）。
 
 注意：本地单节点 license 在滚动更新时会因瞬时双 core 崩溃（`SINGLE_NODE_LICENSE`）。更新 EMQX CR 后执行 `kubectl delete sts -n emqx --all` 让 Operator 重建单节点。
 

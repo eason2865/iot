@@ -111,10 +111,14 @@ kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
   --from-literal=TDENGINE_DSN="$TDENGINE_DSN" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 # EMQX runs in its own namespace and cannot read secrets across namespaces, so
-# mirror the auth token there for the authentication callback header.
+# mirror the auth token there for the authentication callback header. EMQX 6
+# env overrides do not accept per-key header overrides (lowercase/hyphenated
+# names are rejected as unknown_env_vars), but do accept overriding the whole
+# headers map with a JSON value, so the secret carries the full JSON document.
 kubectl create namespace emqx --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n emqx create secret generic iot-runtime-secrets \
   --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
+  --from-literal=EMQX_AUTHN_HEADERS_JSON="{\"content-type\":\"application/json\",\"x_iot_auth_token\":\"$IOT_CORE_MQTT_AUTH_TOKEN\"}" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 if [ "$GRPC_TLS_ENABLED" = "1" ]; then

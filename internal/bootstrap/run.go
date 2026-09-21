@@ -142,8 +142,8 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			res.closers = append(res.closers, closer)
 		}
 		res.worker = platform.NewWorker(platform.WorkerConfig{
-			KafkaBrokers:     runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
-			KafkaGroupID:     "iot-device-worker",
+			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
+			KafkaGroupID: "iot-device-worker",
 			// FirstOffset: on a fresh consumer group (first deploy, recreated
 			// group) the worker must process the backlog published while it was
 			// down. LastOffset would silently drop those telemetry/command

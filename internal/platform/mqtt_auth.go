@@ -14,7 +14,11 @@ const internalMQTTUsername = "iot-service"
 // AuthCallbackTokenHeader carries the shared secret EMQX must present when
 // invoking the internal authentication callback, so arbitrary in-cluster
 // callers cannot probe device credentials.
-const AuthCallbackTokenHeader = "X-Iot-Auth-Token"
+// NOTE: the name intentionally uses underscores instead of hyphens. EMQX 6
+// does not resolve `${VAR}` placeholders inside authn HTTP templates, so the
+// token is injected via an EMQX_AUTHENTICATION__1__HEADERS__* env override,
+// and EMQX only accepts [A-Z0-9_] segments in such override names.
+const AuthCallbackTokenHeader = "X_Iot_Auth_Token"
 
 type DeviceAuthenticator interface {
 	AuthenticateDevice(tenantID, deviceID, secret string) bool
@@ -36,6 +40,16 @@ type MQTTAuthResponse struct {
 	Result      string            `json:"result"`
 	ClientAttrs map[string]string `json:"client_attrs,omitempty"`
 	ACL         []MQTTACLRule     `json:"acl,omitempty"`
+}
+
+// aclDenyAll terminates every client ACL. EMQX falls through to the
+// broker-wide authorization chain when no client ACL rule matches, so without
+// a terminal deny a misconfigured chain rule (e.g. the legacy security-profile
+// allow-all in the default acl.conf) would silently grant full access.
+var aclDenyAll = MQTTACLRule{Permission: "deny", Action: "all", Topic: "#"}
+
+func withACLGuard(rules ...MQTTACLRule) []MQTTACLRule {
+	return append(rules, aclDenyAll)
 }
 
 // MQTTAuthenticationHandler validates EMQX authentication callbacks. EMQX must
@@ -71,11 +85,11 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 		writeJSON(w, http.StatusOK, MQTTAuthResponse{
 			Result:      "allow",
 			ClientAttrs: map[string]string{"role": "device", "tenant_id": tenantID, "device_id": deviceID},
-			ACL: []MQTTACLRule{
-				{Permission: "allow", Action: "publish", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/telemetry"},
-				{Permission: "allow", Action: "publish", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/ack"},
-				{Permission: "allow", Action: "subscribe", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/command"},
-			},
+			ACL: withACLGuard(
+				MQTTACLRule{Permission: "allow", Action: "publish", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/telemetry"},
+				MQTTACLRule{Permission: "allow", Action: "publish", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/ack"},
+				MQTTACLRule{Permission: "allow", Action: "subscribe", Topic: "eq tenant/" + tenantID + "/device/" + deviceID + "/command"},
+			),
 		})
 	}
 }
@@ -83,16 +97,19 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 func internalMQTTRole(clientID string) (string, []MQTTACLRule) {
 	switch {
 	case strings.HasPrefix(clientID, "iot-telemetry-ingestor-"):
-		// Shared subscription only: the default filter is the shared form, and
-		// plain per-replica subscriptions are not granted.
-		return "telemetry-ingestor", []MQTTACLRule{
-			{Permission: "allow", Action: "subscribe", Topic: "eq $share/iot-telemetry/tenant/+/device/+/telemetry"},
-		}
+		// EMQX unwraps shared subscriptions before authorization, so the rule
+		// must match the bare filter; shared vs plain cannot be distinguished
+		// at the authz layer. Note: EMQX 6.3 ACL topics only support the "eq "
+		// prefix — a legacy "match " prefix would be treated as a literal
+		// topic level and never match.
+		return "telemetry-ingestor", withACLGuard(
+			MQTTACLRule{Permission: "allow", Action: "subscribe", Topic: "tenant/+/device/+/telemetry"},
+		)
 	case strings.HasPrefix(clientID, "iot-device-worker-"):
-		return "device-worker", []MQTTACLRule{
-			{Permission: "allow", Action: "subscribe", Topic: "eq $share/iot-device-worker/tenant/+/device/+/ack"},
-			{Permission: "allow", Action: "publish", Topic: "match tenant/+/device/+/command"},
-		}
+		return "device-worker", withACLGuard(
+			MQTTACLRule{Permission: "allow", Action: "subscribe", Topic: "tenant/+/device/+/ack"},
+			MQTTACLRule{Permission: "allow", Action: "publish", Topic: "tenant/+/device/+/command"},
+		)
 	case strings.HasPrefix(clientID, "iot-demo-"):
 		// The simulator is a trusted local-only test workload, but a leaked
 		// service credential must not grant broker-wide access: scope its ACL
@@ -101,11 +118,11 @@ func internalMQTTRole(clientID string) (string, []MQTTACLRule) {
 		if tenantID == "" {
 			return "", nil
 		}
-		return "demo", []MQTTACLRule{
-			{Permission: "allow", Action: "publish", Topic: "match tenant/" + tenantID + "/device/+/telemetry"},
-			{Permission: "allow", Action: "publish", Topic: "match tenant/" + tenantID + "/device/+/ack"},
-			{Permission: "allow", Action: "subscribe", Topic: "match tenant/" + tenantID + "/device/+/command"},
-		}
+		return "demo", withACLGuard(
+			MQTTACLRule{Permission: "allow", Action: "publish", Topic: "tenant/" + tenantID + "/device/+/telemetry"},
+			MQTTACLRule{Permission: "allow", Action: "publish", Topic: "tenant/" + tenantID + "/device/+/ack"},
+			MQTTACLRule{Permission: "allow", Action: "subscribe", Topic: "tenant/" + tenantID + "/device/+/command"},
+		)
 	default:
 		return "", nil
 	}

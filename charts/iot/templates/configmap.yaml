@@ -5,10 +5,10 @@ metadata:
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 data:
-  POSTGRES_DSN: {{ .Values.externalDependencies.postgresDsn | quote }}
+  # DSNs contain credentials and live in the Secret (security.existingSecret),
+  # not in this ConfigMap: POSTGRES_DSN, TDENGINE_DSN.
   KAFKA_BROKERS: {{ .Values.externalDependencies.kafkaBrokers | quote }}
   EMQX_URL: {{ .Values.externalDependencies.emqxUrl | quote }}
-  TDENGINE_DSN: {{ .Values.externalDependencies.tdengineDsn | quote }}
   IOT_CORE_ENDPOINTS: iot-core:9001
   KAFKA_TELEMETRY_TOPIC: iot.telemetry
   KAFKA_COMMAND_TOPIC: iot.command

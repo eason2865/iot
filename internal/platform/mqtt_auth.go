@@ -94,16 +94,44 @@ func internalMQTTRole(clientID string) (string, []MQTTACLRule) {
 			{Permission: "allow", Action: "publish", Topic: "match tenant/+/device/+/command"},
 		}
 	case strings.HasPrefix(clientID, "iot-demo-"):
-		// The simulator is a trusted local-only test workload. Production does
-		// not deploy it or issue this shared service credential.
+		// The simulator is a trusted local-only test workload, but a leaked
+		// service credential must not grant broker-wide access: scope its ACL
+		// to the single tenant encoded in the client ID.
+		tenantID := demoTenantFromClientID(clientID)
+		if tenantID == "" {
+			return "", nil
+		}
 		return "demo", []MQTTACLRule{
-			{Permission: "allow", Action: "publish", Topic: "match tenant/+/device/+/telemetry"},
-			{Permission: "allow", Action: "publish", Topic: "match tenant/+/device/+/ack"},
-			{Permission: "allow", Action: "subscribe", Topic: "match tenant/+/device/+/command"},
+			{Permission: "allow", Action: "publish", Topic: "match tenant/" + tenantID + "/device/+/telemetry"},
+			{Permission: "allow", Action: "publish", Topic: "match tenant/" + tenantID + "/device/+/ack"},
+			{Permission: "allow", Action: "subscribe", Topic: "match tenant/" + tenantID + "/device/+/command"},
 		}
 	default:
 		return "", nil
 	}
+}
+
+// demoTenantFromClientID extracts the tenant embedded in a demo simulator
+// client ID of the form "iot-demo-<tenant>-<unix-nano>" (see demo runtime).
+func demoTenantFromClientID(clientID string) string {
+	rest, ok := strings.CutPrefix(clientID, "iot-demo-")
+	if !ok {
+		return ""
+	}
+	idx := strings.LastIndex(rest, "-")
+	if idx <= 0 {
+		return ""
+	}
+	suffix := rest[idx+1:]
+	if suffix == "" {
+		return ""
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return rest[:idx]
 }
 
 func secureEqual(left, right string) bool {

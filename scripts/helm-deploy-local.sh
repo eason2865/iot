@@ -15,6 +15,8 @@ EMQX_PORT="${EMQX_PORT:-1883}"
 MANAGEMENT_API_TOKEN="${IOT_MANAGEMENT_API_TOKEN:-local-development-token}"
 EMQX_INTERNAL_PASSWORD="${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}"
 IOT_CORE_MQTT_AUTH_TOKEN="${IOT_CORE_MQTT_AUTH_TOKEN:-local-mqtt-auth-token}"
+POSTGRES_DSN="${IOT_POSTGRES_DSN:-postgres://iot:iot123@${DOCKER_GATEWAY_HOST}:5432/iot?sslmode=disable}"
+TDENGINE_DSN="${IOT_TDENGINE_DSN:-root:taosdata@http(${DOCKER_GATEWAY_HOST}:6041)/iot}"
 GRPC_TLS_ENABLED="${GRPC_TLS_ENABLED:-1}"
 GRPC_TLS_SECRET="${GRPC_TLS_SECRET:-iot-grpc-tls}"
 GRPC_TLS_DIR="${GRPC_TLS_DIR:-deploy/grpc-certs}"
@@ -105,6 +107,8 @@ kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
   --from-literal=EMQX_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=EMQX_INTERNAL_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
+  --from-literal=POSTGRES_DSN="$POSTGRES_DSN" \
+  --from-literal=TDENGINE_DSN="$TDENGINE_DSN" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 # EMQX runs in its own namespace and cannot read secrets across namespaces, so
 # mirror the auth token there for the authentication callback header.

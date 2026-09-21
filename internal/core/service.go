@@ -136,7 +136,13 @@ func (s *Service) ListTelemetry(_ context.Context, req *corev1.ListTelemetryRequ
 }
 
 func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
-	record, err := s.repo.RecordTelemetry(envelopeFromPB(req))
+	envelope := envelopeFromPB(req)
+	// The REST ingest path must enforce the same envelope contract as the MQTT
+	// path; otherwise malformed records reach Kafka and poison the worker/DLQ.
+	if err := contracts.ValidateEnvelope(envelope); err != nil {
+		return nil, fmt.Errorf("invalid telemetry envelope: %w", err)
+	}
+	record, err := s.repo.RecordTelemetry(envelope)
 	if err != nil && !platform.IsTelemetryDuplicate(err) {
 		return nil, err
 	}
@@ -157,7 +163,11 @@ func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetry
 }
 
 func (s *Service) RecordTelemetry(_ context.Context, req *corev1.RecordTelemetryRequest) (*corev1.RecordTelemetryResponse, error) {
-	record, err := s.repo.RecordTelemetry(envelopeFromRecordPB(req.GetTelemetry()))
+	envelope := envelopeFromRecordPB(req.GetTelemetry())
+	if err := contracts.ValidateEnvelope(envelope); err != nil {
+		return nil, fmt.Errorf("invalid telemetry envelope: %w", err)
+	}
+	record, err := s.repo.RecordTelemetry(envelope)
 	if err != nil {
 		if platform.IsTelemetryDuplicate(err) {
 			return &corev1.RecordTelemetryResponse{Record: telemetryToPB(record)}, nil

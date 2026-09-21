@@ -10,6 +10,8 @@ replicas:
 security:
   # Supply real values from an external secret manager in production. The local
   # deployment script creates this Kubernetes Secret for integration tests.
+  # Required keys: MANAGEMENT_API_TOKEN, EMQX_PASSWORD, EMQX_INTERNAL_PASSWORD,
+  # IOT_CORE_MQTT_AUTH_TOKEN, POSTGRES_DSN, TDENGINE_DSN.
   existingSecret: iot-runtime-secrets
 
 # Mutual TLS for the iot-core gRPC channel (port 9001). When enabled, iot-core
@@ -23,12 +25,12 @@ grpcTLS:
 
 # The chart deploys application services only. Dependencies are managed outside
 # this release, locally by Docker Compose and in production by their own stack.
+# DSNs (postgres/tdengine) are intentionally absent here: they carry
+# credentials and must come from the Secret referenced by security.existingSecret.
 externalDependencies:
   hostGatewayIP: 192.168.65.254
-  postgresDsn: postgres://iot:iot123@192.168.65.254:5432/iot?sslmode=disable
   kafkaBrokers: 192.168.65.254:29092
   emqxUrl: tcp://emqx-listeners.emqx.svc.cluster.local:1883
-  tdengineDsn: root:taosdata@http(192.168.65.254:6041)/iot
   wait:
     postgresHost: 192.168.65.254
     postgresPort: 5432

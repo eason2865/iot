@@ -666,6 +666,54 @@ func (s *PostgresStore) ExpireCommands(now time.Time) (int64, error) {
 	return count, rows.Err()
 }
 
+// RecoverStaleCommands repairs commands stranded by dispatcher/worker outages:
+//   - 'published' commands whose Kafka event was never confirmed via
+//     MarkCommandSent (worker downtime, skipped offsets) are requeued to
+//     'created' for redelivery while attempts remain, or marked 'failed' once
+//     dispatch attempts are exhausted.
+//   - 'created' commands that exhausted dispatch attempts (persistent Kafka
+//     publish failures) are marked 'failed'.
+//
+// Redelivery is safe: MarkCommandSent and AckCommand state guards keep
+// duplicate MQTT downlinks and ACKs idempotent.
+func (s *PostgresStore) RecoverStaleCommands(staleBefore time.Time, maxAttempts int) (int64, int64, error) {
+	requeued, err := s.updateCommandsWithEvent(
+		`UPDATE commands SET status = 'created', next_dispatch_at = NOW(), updated_at = NOW()
+		 WHERE status = 'published' AND updated_at <= $1 AND dispatch_attempts < $2 RETURNING id`,
+		"requeued", staleBefore, maxAttempts)
+	if err != nil {
+		return 0, 0, err
+	}
+	failed, err := s.updateCommandsWithEvent(
+		`UPDATE commands SET status = 'failed', updated_at = NOW()
+		 WHERE dispatch_attempts >= $2 AND (status = 'created' OR (status = 'published' AND updated_at <= $1)) RETURNING id`,
+		"failed", staleBefore, maxAttempts)
+	if err != nil {
+		return 0, 0, err
+	}
+	return requeued, failed, nil
+}
+
+func (s *PostgresStore) updateCommandsWithEvent(query, event string, args ...any) (int64, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int64
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, $2)`, id, event); err != nil {
+			return 0, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
 func (s *PostgresStore) ListCommands() []Command {
 	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands ORDER BY created_at DESC, id DESC`)
 	if err != nil {

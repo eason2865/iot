@@ -19,6 +19,8 @@ func main() {
 	brokers := flag.String("brokers", "localhost:9092", "comma-separated Kafka brokers")
 	dlqTopic := flag.String("topic", "iot.dlq", "dead-letter topic")
 	limit := flag.Int("limit", 100, "maximum records to replay")
+	stage := flag.String("stage", "", "only replay records from this stage (e.g. tdengine, kafka-publish); empty replays all stages")
+	dryRun := flag.Bool("dry-run", false, "inspect matching records without republishing or committing")
 	flag.Parse()
 	reader := kafka.NewReader(kafka.ReaderConfig{Brokers: splitCSV(*brokers), Topic: *dlqTopic, GroupID: "iot-dlq-replay", StartOffset: kafka.FirstOffset, MaxBytes: 10e6})
 	defer reader.Close()
@@ -34,6 +36,19 @@ func main() {
 		if err := json.Unmarshal(msg.Value, &item); err != nil {
 			log.Printf("skip malformed DLQ record: %v", err)
 			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+		// Stage filtering avoids blind replays: records dead-lettered at a
+		// stage that was not fixed would just bounce back into the DLQ.
+		if *stage != "" && item.Stage != *stage {
+			continue
+		}
+		if *dryRun {
+			log.Printf("dry-run stage=%s topic=%s offset=%d key=%s err=%s", item.Stage, item.SourceTopic, item.SourceOffset, item.Key, item.Error)
+			count++
+			if count >= *limit {
+				break
+			}
 			continue
 		}
 		value, err := base64.StdEncoding.DecodeString(item.ValueBase64)

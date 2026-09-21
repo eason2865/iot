@@ -144,7 +144,11 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 		res.worker = platform.NewWorker(platform.WorkerConfig{
 			KafkaBrokers:     runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
 			KafkaGroupID:     "iot-device-worker",
-			KafkaStartOffset: kafka.LastOffset,
+			// FirstOffset: on a fresh consumer group (first deploy, recreated
+			// group) the worker must process the backlog published while it was
+			// down. LastOffset would silently drop those telemetry/command
+			// events. Replay is safe because consumers are idempotent.
+			KafkaStartOffset: kafka.FirstOffset,
 			TelemetryTopic:   runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 			CommandTopic:     runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 			DLQTopic:         runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),

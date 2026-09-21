@@ -124,7 +124,11 @@ func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
 	return w.writeBatch([]TelemetryRecord{rec})
 }
 
+// escapeTD escapes a value for a TDengine string literal. Backslashes must be
+// escaped first: TDengine treats '\' as an escape character, so a raw
+// backslash would corrupt the statement (or break out of it).
 func escapeTD(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, `'`, `''`)
 }
 

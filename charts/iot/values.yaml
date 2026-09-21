@@ -12,6 +12,15 @@ security:
   # deployment script creates this Kubernetes Secret for integration tests.
   existingSecret: iot-runtime-secrets
 
+# Mutual TLS for the iot-core gRPC channel (port 9001). When enabled, iot-core
+# requires and verifies client certificates and management-api presents the
+# client certificate from the same Secret. The Secret must contain:
+# ca.crt, server.crt, server.key, client.crt, client.key.
+grpcTLS:
+  enabled: false
+  secretName: iot-grpc-tls
+  mountPath: /etc/iot/grpc-tls
+
 # The chart deploys application services only. Dependencies are managed outside
 # this release, locally by Docker Compose and in production by their own stack.
 externalDependencies:

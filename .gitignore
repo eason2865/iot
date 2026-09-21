@@ -8,6 +8,7 @@ ai_handover.md
 *.pem
 *.key
 *.crt
+deploy/grpc-certs/
 
 # Build outputs
 bin/

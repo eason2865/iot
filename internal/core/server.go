@@ -55,6 +55,14 @@ func Run() error {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
 	})
 	server.AddUnaryInterceptors(platform.UnaryServerRequestIDInterceptor(), metrics.UnaryServerInterceptor())
+	tlsCreds, err := platform.GRPCServerTLSCredentials()
+	if err != nil {
+		return err
+	}
+	if tlsCreds != nil {
+		log.Printf("iot-core gRPC mTLS enabled")
+		server.AddOptions(grpc.Creds(tlsCreds))
+	}
 
 	go serveIotCoreMetrics(metrics.Handler(), iotCorePrometheusHost(), iotCorePrometheusPort(), runtimeconfig.EnvOrDefault("IOT_CORE_PROMETHEUS_PATH", "/metrics"))
 

@@ -15,6 +15,9 @@ EMQX_PORT="${EMQX_PORT:-1883}"
 MANAGEMENT_API_TOKEN="${IOT_MANAGEMENT_API_TOKEN:-local-development-token}"
 EMQX_INTERNAL_PASSWORD="${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}"
 IOT_CORE_MQTT_AUTH_TOKEN="${IOT_CORE_MQTT_AUTH_TOKEN:-local-mqtt-auth-token}"
+GRPC_TLS_ENABLED="${GRPC_TLS_ENABLED:-1}"
+GRPC_TLS_SECRET="${GRPC_TLS_SECRET:-iot-grpc-tls}"
+GRPC_TLS_DIR="${GRPC_TLS_DIR:-deploy/grpc-certs}"
 
 wait_for_docker_deps() {
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -110,6 +113,17 @@ kubectl -n emqx create secret generic iot-runtime-secrets \
   --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
+if [ "$GRPC_TLS_ENABLED" = "1" ]; then
+  sh scripts/gen-grpc-certs.sh "$GRPC_TLS_DIR"
+  kubectl -n "$NAMESPACE" create secret generic "$GRPC_TLS_SECRET" \
+    --from-file=ca.crt="$GRPC_TLS_DIR/ca.crt" \
+    --from-file=server.crt="$GRPC_TLS_DIR/server.crt" \
+    --from-file=server.key="$GRPC_TLS_DIR/server.key" \
+    --from-file=client.crt="$GRPC_TLS_DIR/client.crt" \
+    --from-file=client.key="$GRPC_TLS_DIR/client.key" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+fi
+
 prepare_local_app_image
 load_local_image
 
@@ -122,6 +136,13 @@ COMMON_HELM_ARGS="
   --set externalDependencies.wait.emqxHost=${EMQX_HOST}
   --set externalDependencies.wait.emqxPort=${EMQX_PORT}
 "
+
+if [ "$GRPC_TLS_ENABLED" = "1" ]; then
+  COMMON_HELM_ARGS="$COMMON_HELM_ARGS
+    --set grpcTLS.enabled=true
+    --set grpcTLS.secretName=${GRPC_TLS_SECRET}
+  "
+fi
 
 helm upgrade --install "$RELEASE" "$CHART" \
   -n "$NAMESPACE" \

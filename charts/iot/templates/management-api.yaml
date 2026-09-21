@@ -56,9 +56,26 @@ spec:
                 name: iot-common-config
             - secretRef:
                 name: {{ .Values.security.existingSecret }}
+          {{- if .Values.grpcTLS.enabled }}
+          env:
+            - name: IOT_CORE_TLS_CERT
+              value: {{ .Values.grpcTLS.mountPath }}/client.crt
+            - name: IOT_CORE_TLS_KEY
+              value: {{ .Values.grpcTLS.mountPath }}/client.key
+            - name: IOT_CORE_TLS_CA
+              value: {{ .Values.grpcTLS.mountPath }}/ca.crt
+            - name: IOT_CORE_TLS_SERVER_NAME
+              value: iot-core
+          {{- end }}
           ports:
             - containerPort: 8080
             - containerPort: 9100
+          {{- if .Values.grpcTLS.enabled }}
+          volumeMounts:
+            - name: grpc-tls
+              mountPath: {{ .Values.grpcTLS.mountPath }}
+              readOnly: true
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
@@ -71,3 +88,9 @@ spec:
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
+      {{- if .Values.grpcTLS.enabled }}
+      volumes:
+        - name: grpc-tls
+          secret:
+            secretName: {{ .Values.grpcTLS.secretName }}
+      {{- end }}

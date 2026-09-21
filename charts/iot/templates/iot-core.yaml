@@ -60,10 +60,25 @@ spec:
                 name: iot-common-config
             - secretRef:
                 name: {{ .Values.security.existingSecret }}
+          {{- if .Values.grpcTLS.enabled }}
+          env:
+            - name: IOT_CORE_TLS_CERT
+              value: {{ .Values.grpcTLS.mountPath }}/server.crt
+            - name: IOT_CORE_TLS_KEY
+              value: {{ .Values.grpcTLS.mountPath }}/server.key
+            - name: IOT_CORE_TLS_CA
+              value: {{ .Values.grpcTLS.mountPath }}/ca.crt
+          {{- end }}
           ports:
             - containerPort: 9001
             - containerPort: 9101
             - containerPort: 9090
+          {{- if .Values.grpcTLS.enabled }}
+          volumeMounts:
+            - name: grpc-tls
+              mountPath: {{ .Values.grpcTLS.mountPath }}
+              readOnly: true
+          {{- end }}
           readinessProbe:
             tcpSocket:
               port: 9001
@@ -74,3 +89,9 @@ spec:
               port: 9001
             initialDelaySeconds: 15
             periodSeconds: 10
+      {{- if .Values.grpcTLS.enabled }}
+      volumes:
+        - name: grpc-tls
+          secret:
+            secretName: {{ .Values.grpcTLS.secretName }}
+      {{- end }}

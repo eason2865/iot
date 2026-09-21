@@ -477,6 +477,15 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 
 当前 Helm 部署固定只包含应用本身和共享配置。PostgreSQL、Kafka、TDengine、Prometheus、Grafana、demo 都由独立平台或本地 Docker Compose 管理；EMQX 由独立的 Operator Release 管理，均不进入业务 Helm release，也没有可重新启用的内置依赖模板。
 
+### iot-core gRPC mTLS
+
+`iot-core` 的 gRPC 端口（9001）支持双向 TLS：启用后服务端强制校验客户端证书，只有持 `management-api` 客户端证书的调用方才能建立连接，不再仅依赖 NetworkPolicy 做命名空间隔离。
+
+- 由环境变量驱动：`IOT_CORE_TLS_CERT` / `IOT_CORE_TLS_KEY` / `IOT_CORE_TLS_CA`（服务端与客户端相同），客户端另可用 `IOT_CORE_TLS_SERVER_NAME` 覆盖校验名。三个变量全部未设置时保持明文（本地裸跑兼容），只设置部分时进程启动直接报错。
+- Helm 通过 `grpcTLS.enabled=true` 开启，Secret（默认 `iot-grpc-tls`）需包含 `ca.crt`、`server.crt`、`server.key`、`client.crt`、`client.key`，挂载到两个 Deployment 的 `/etc/iot/grpc-tls`。
+- 本地脚本 `scripts/helm-deploy-local.sh` 默认启用 mTLS：自动调用 `scripts/gen-grpc-certs.sh` 生成本地自签 CA 与服务端/客户端证书（输出到 `deploy/grpc-certs/`，已 gitignore）并创建 Secret。可用 `GRPC_TLS_ENABLED=0` 关闭。
+- 生产环境应使用真实 CA 或 cert-manager 签发证书，并注意轮换证书后需要重启 Pod 生效。
+
 ## 开发建议
 
 - `tenantId` 必须贯穿所有写入和查询路径

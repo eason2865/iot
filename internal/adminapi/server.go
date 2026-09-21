@@ -71,10 +71,17 @@ func Run() error {
 func newRPCClient() (zrpc.Client, error) {
 	conf := rpcClientConf()
 	conf.Timeout = 5000
+	tlsCreds, err := platform.GRPCClientTLSCredentials()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts := []zrpc.ClientOption{zrpc.WithUnaryClientInterceptor(platform.UnaryClientRequestIDInterceptor())}
+	if tlsCreds != nil {
+		clientOpts = append(clientOpts, zrpc.WithTransportCredentials(tlsCreds))
+	}
 	var lastErr error
 	for attempt := 0; attempt < 30; attempt++ {
-		client, err := zrpc.NewClient(conf,
-			zrpc.WithUnaryClientInterceptor(platform.UnaryClientRequestIDInterceptor()))
+		client, err := zrpc.NewClient(conf, clientOpts...)
 		if err == nil {
 			return client, nil
 		}

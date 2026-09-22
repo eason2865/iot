@@ -1,5 +1,7 @@
 # IoT Platform
 
+English | [简体中文](README.zh-CN.md)
+
 <p align="center">
   <img src="docs/images/architecture.svg" alt="IoT platform architecture" />
 </p>
@@ -9,78 +11,78 @@
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" />
 </p>
 
-Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平台骨架，面向设备接入、遥测采集、命令下发、状态查询和多租户管理。
+An IoT platform skeleton built with go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL, covering device connectivity, telemetry ingestion, command delivery, status queries, and multi-tenant management.
 
-这是一套已经把物联网关键闭环打通的开源基础设施，重点能力包括：
+This is open-source infrastructure with the key IoT loops already wired end to end. Highlights:
 
-- 核心业务微服务 `iot-core`
-- `management-api` 作为 go-zero REST 网关，统一对外提供 API
-- `iot-core` 通过 gRPC + protobuf 暴露核心业务，`management-api` 通过固定 gRPC endpoint 访问
-- `telemetry-ingestor` 负责 MQTT 接入、标准化和事件解耦
-- `device-worker` 负责时序落库、业务状态更新和命令投递
-- `demo` 负责多租户多设备造流和 ACK 回执，适合联调和压测
+- `iot-core`: the core business microservice
+- `management-api`: a go-zero REST gateway exposing the unified external API
+- `iot-core` exposes core business over gRPC + protobuf; `management-api` reaches it through a fixed gRPC endpoint
+- `telemetry-ingestor`: MQTT ingestion, normalization, and event decoupling
+- `device-worker`: time-series persistence, business state updates, and command delivery
+- `demo`: multi-tenant, multi-device traffic generation with ACK receipts, ideal for integration testing and load testing
 
-## 一图看懂
+## At a Glance
 
 <p align="center">
   <img src="docs/images/command-cycle.svg" alt="IoT platform command lifecycle" />
 </p>
 
-## 核心特性
+## Features
 
-- 设备接入链路：MQTT -> EMQX -> Go `telemetry-ingestor`
-- 核心服务拆分：`management-api` 负责 REST 网关，`iot-core` 负责核心业务
-- 服务调用：`management-api` 在 Kubernetes 内通过 `iot-core:9001` Service DNS 访问核心服务
-- 异步解耦：遥测、命令和事件统一进入 Kafka
-- 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
-- 命令闭环：创建、下发、ACK、状态机更新
-- 命令可靠投递：数据库领取租约、发布确认、超时扫描、UUIDv7 命令 ID、ACK 事件审计
-- 失败消息进入 `iot.dlq`，可通过 `dlq-replay` 按批次审核后重放
-- EMQX 通过 `iot-core` HTTP 回调认证设备 bcrypt 密钥并下发租户级 MQTT ACL
-- 管理 API 除健康检查和契约端点外均要求 Bearer Token
-- TDengine 使用设备子表 + 租户/设备 Tags；完整长载荷保存在 PostgreSQL JSONB，时序库仅存哈希和索引字段
-- 多租户隔离：`tenantId` 贯穿 topic、消息、存储和查询
-- 标准契约：提供 OpenAPI、MQTT JSON Schema、gRPC proto 和数据库迁移脚本
-- 本地可运行：默认可以连接本机 Docker 的 PostgreSQL / Kafka / EMQX / TDengine
+- Device connectivity path: MQTT -> EMQX -> Go `telemetry-ingestor`
+- Service split: `management-api` as the REST gateway, `iot-core` for core business
+- Service calls: `management-api` reaches the core via the `iot-core:9001` Service DNS inside Kubernetes
+- Async decoupling: telemetry, commands, and events all flow through Kafka
+- Dual storage: TDengine for time-series data, PostgreSQL for business metadata and current state
+- Command loop: create, dispatch, ACK, state-machine updates
+- Reliable command delivery: database lease claiming, publish confirmation, timeout sweeping, UUIDv7 command IDs, ACK event auditing
+- Failed messages land in `iot.dlq` and can be reviewed and replayed in batches via `dlq-replay`
+- EMQX authenticates device bcrypt secrets via an `iot-core` HTTP callback and issues tenant-scoped MQTT ACLs
+- The management API requires a Bearer Token on all endpoints except health checks and contract endpoints
+- TDengine uses per-device subtables with tenant/device tags; full long payloads live in PostgreSQL JSONB, while the time-series store keeps only hashes and index fields
+- Multi-tenant isolation: `tenantId` flows through topics, messages, storage, and queries
+- Standard contracts: OpenAPI, MQTT JSON Schema, gRPC proto, and database migration scripts
+- Locally runnable: connects to local Docker PostgreSQL / Kafka / EMQX / TDengine by default
 
-## 当前实现
+## Current Implementation
 
-- 6 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`
-- `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
-- 本地 Docker 编排不再包含业务服务发现组件
-- 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
-- 1 份 OpenAPI 定义：`docs/openapi.json`
-- 1 份 MQTT 消息 Schema：`docs/mqtt-envelope.schema.json`
-- 已包含基础测试，`go test ./...` 可直接运行
+- 6 runnable entrypoints: `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`
+- `management-api` uses go-zero REST; `iot-core` uses gRPC + protobuf
+- Local Docker orchestration no longer includes a business service-discovery component
+- 1 PostgreSQL initialization migration: `migrations/001_init.sql`
+- 1 OpenAPI definition: `docs/openapi.json`
+- 1 MQTT message schema: `docs/mqtt-envelope.schema.json`
+- Basic tests included; `go test ./...` runs directly
 
-## 观测
+## Observability
 
-- 每个服务都暴露 `/metrics`
-- `management-api` 和 `iot-core` 已启用 go-zero 的 trace / log middleware
-- 服务启动时会开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`
-- HTTP 请求会自动补 `X-Request-Id`，并透传到 `management-api -> iot-core` 的 gRPC 调用
-- `demo` 发往 `management-api` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
-- 标准输出日志已切换为结构化 JSON，便于在容器和本地直接检索
-- 可通过以下环境变量调整 tracing：
+- Every service exposes `/metrics`
+- `management-api` and `iot-core` enable go-zero trace / log middleware
+- Each service starts an OpenTelemetry trace agent, writing to `/tmp/<service>-traces.log` by default
+- HTTP requests automatically get an `X-Request-Id`, propagated through the `management-api -> iot-core` gRPC call
+- `demo` requests to `management-api` carry a request id and trace context, making load-test/integration chains easy to follow
+- stdout logs are structured JSON, easy to search in containers and locally
+- Tracing can be tuned via environment variables:
   - `OTEL_DISABLED=true`
   - `OTEL_BATCHER=file|jaeger|zipkin|otlpgrpc|otlphttp`
   - `OTEL_ENDPOINT=/tmp/iot-traces.log`
   - `OTEL_SAMPLER=1.0`
 
-## 快速开始
+## Quick Start
 
-### 1. 启动依赖
+### 1. Start dependencies
 
-本项目默认面向本机 Docker 环境。你需要先准备：
+This project targets a local Docker environment by default. You need:
 
 - PostgreSQL
 - Kafka
 - EMQX
 - TDengine
 
-### 2. 配置环境变量
+### 2. Configure environment variables
 
-可以从示例文件开始：
+Start from the example file:
 
 ```bash
 cp .env.example .env
@@ -89,7 +91,7 @@ set -a
 set +a
 ```
 
-默认连接配置如下：
+Default connection settings:
 
 ```bash
 export POSTGRES_DSN=postgres://iot:iot123@localhost:5432/iot?sslmode=disable
@@ -100,7 +102,7 @@ export IOT_CORE_ENDPOINTS=127.0.0.1:9001
 export IOT_CORE_LISTEN_ON=:9001
 ```
 
-可选的 topic 和客户端标识配置：
+Optional topic and client-identity settings:
 
 ```bash
 export KAFKA_TELEMETRY_TOPIC=iot.telemetry
@@ -114,15 +116,15 @@ export MANAGEMENT_API_TOKEN=change-me
 export EMQX_INTERNAL_PASSWORD=change-me
 ```
 
-监听地址默认是 `:8080`，也可以通过以下变量覆盖：
+The listen address defaults to `:8080` and can be overridden:
 
 ```bash
 export PORT=8081
-# 或者
+# or
 export LISTEN_ADDR=:8081
 ```
 
-### 3. 启动服务
+### 3. Start the services
 
 ```bash
 go run ./cmd/iot-core
@@ -132,7 +134,7 @@ go run ./cmd/telemetry-ingestor
 go run ./cmd/device-worker
 ```
 
-常用开发命令：
+Common development commands:
 
 ```bash
 make fmt-check
@@ -142,15 +144,15 @@ make build
 
 ## API
 
-健康检查与契约文件：
+Health check and contract files:
 
 - `GET /healthz`
 - `GET /openapi.json`
 - `GET /schemas/mqtt-envelope.json`
 
-除上述健康检查和契约端点外，管理 API 请求必须携带 `Authorization: Bearer <MANAGEMENT_API_TOKEN>`。
+All management API requests except the health-check and contract endpoints above must carry `Authorization: Bearer <MANAGEMENT_API_TOKEN>`.
 
-核心业务接口：
+Core business endpoints:
 
 - `POST /api/v1/tenants`
 - `GET /api/v1/tenants`
@@ -158,7 +160,7 @@ make build
 - `GET /api/v1/devices`
 - `GET /api/v1/devices/{tenantId}/{deviceId}`
 
-列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
+List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page.
 - `GET /api/v1/devices/{tenantId}/{deviceId}/status`
 - `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
 - `POST /api/v1/telemetry`
@@ -167,32 +169,32 @@ make build
 - `GET /api/v1/commands/{id}`
 - `POST /api/v1/commands/{id}/ack`
 
-命令列表必须指定 `tenantId`，服务端在 gRPC 和 PostgreSQL 查询层都会按租户过滤；`pageSize` 和不透明 `cursor` 仍用于租户内分页。
+The command list requires `tenantId`; the server filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
 
-完整接口定义请查看 [docs/openapi.json](docs/openapi.json)。
+See [docs/openapi.json](docs/openapi.json) for the full API definition.
 
-## 架构速览
+## Architecture at a Glance
 
-如果你只想快速理解当前版本，按这个顺序看：
+To quickly understand the current version, read in this order:
 
-1. 设备通过 MQTT 进入 EMQX
-2. `telemetry-ingestor` 负责标准化和事件解耦
-3. `management-api` 通过 gRPC 调用 `iot-core`
-4. `management-api` 通过 `iot-core:9001` 调用核心服务
-5. `device-worker` 消费 Kafka，完成时序和状态落库
+1. Devices connect to EMQX over MQTT
+2. `telemetry-ingestor` normalizes messages and decouples events
+3. `management-api` calls `iot-core` over gRPC
+4. `management-api` reaches the core via `iot-core:9001`
+5. `device-worker` consumes Kafka and persists time-series data and state
 
-这套拆法的原则是先保留一个清晰的核心边界，再根据业务压力继续扩展，而不是一下拆成很多很难排障的小服务。
+The design principle is to keep one clear core boundary first, then split further as business pressure demands — rather than fragmenting upfront into many small services that are hard to troubleshoot.
 
-## Demo 模拟器
+## Demo Simulator
 
-`cmd/demo` 是一个独立的模拟服务，启动后会自动：
+`cmd/demo` is a standalone simulator that automatically:
 
-- 按配置创建多租户和多设备拓扑
-- 随机发布 telemetry 到 MQTT
-- 随机向 `management-api` 创建 command 请求
-- 订阅各租户 command topic，并自动回 ACK
+- Creates a multi-tenant, multi-device topology from configuration
+- Publishes random telemetry to MQTT
+- Creates random command requests against `management-api`
+- Subscribes to each tenant's command topic and replies with ACKs
 
-常用环境变量：
+Common environment variables:
 
 ```bash
 export DEMO_MANAGEMENT_API_URL=http://127.0.0.1:8080
@@ -208,27 +210,27 @@ export DEMO_COMMAND_BURST_MIN=1
 export DEMO_COMMAND_BURST_MAX=3
 ```
 
-启动后会额外暴露 `GET /healthz`，方便 K8s readiness/liveness 探针使用。
+It also exposes `GET /healthz` for K8s readiness/liveness probes.
 
-## Topic 约定
+## Topic Conventions
 
-建议统一使用以下前缀：
+Use the following prefix consistently:
 
 ```text
 tenant/{tenantId}/device/{deviceId}/...
 ```
 
-常用 Topic：
+Common topics:
 
-- 上行遥测：`tenant/{tenantId}/device/{deviceId}/telemetry`
-- 下行命令：`tenant/{tenantId}/device/{deviceId}/command`
-- ACK 回执：`tenant/{tenantId}/device/{deviceId}/ack`
+- Uplink telemetry: `tenant/{tenantId}/device/{deviceId}/telemetry`
+- Downlink command: `tenant/{tenantId}/device/{deviceId}/command`
+- ACK receipt: `tenant/{tenantId}/device/{deviceId}/ack`
 
-## 消息模型
+## Message Model
 
-平台默认使用 JSON Envelope，便于设备联调、日志排查和协议演进。
+The platform uses a JSON envelope by default, which simplifies device integration, log troubleshooting, and protocol evolution.
 
-必备字段：
+Required fields:
 
 - `msgId`
 - `tenantId`
@@ -238,7 +240,7 @@ tenant/{tenantId}/device/{deviceId}/...
 - `version`
 - `payload`
 
-建议字段：
+Recommended fields:
 
 - `traceId`
 - `productId`
@@ -246,7 +248,7 @@ tenant/{tenantId}/device/{deviceId}/...
 - `seq`
 - `schemaVersion`
 
-示例：
+Example:
 
 ```json
 {
@@ -264,58 +266,58 @@ tenant/{tenantId}/device/{deviceId}/...
 }
 ```
 
-完整 Schema 请查看 [docs/mqtt-envelope.schema.json](docs/mqtt-envelope.schema.json)。
+See [docs/mqtt-envelope.schema.json](docs/mqtt-envelope.schema.json) for the full schema.
 
-## 项目结构
+## Project Structure
 
 ```text
 iot/
 ├── cmd/
-│   ├── management-api/      # 查询与管理 API
-│   ├── iot-core/            # 核心业务 gRPC 服务
-│   ├── demo/       # 随机造流与 ACK 的模拟器
-│   ├── telemetry-ingestor/  # MQTT 接入与事件解耦
-│   └── device-worker/       # Kafka 消费、落库和下行处理
+│   ├── management-api/      # Query and management API
+│   ├── iot-core/            # Core business gRPC service
+│   ├── demo/                # Simulator generating random traffic and ACKs
+│   ├── telemetry-ingestor/  # MQTT ingestion and event decoupling
+│   └── device-worker/       # Kafka consumption, persistence, and downlink handling
 ├── internal/
-│   ├── adminapi/   # REST 网关，负责 HTTP 到 iot-core 的转换
-│   ├── bootstrap/  # 启动装配
-│   ├── contracts/  # topic、envelope、状态机、OpenAPI 和 Schema 契约
-│   ├── core/       # 核心业务 gRPC 服务实现
-│   ├── demo/       # 造流模拟器运行时
-│   ├── platform/   # 仓储、消息、指标、device-worker、MQTT/TDengine 适配
-│   └── server/     # HTTP 基础能力
-├── charts/iot/     # Helm 部署清单
-├── migrations/     # 数据库迁移
-├── proto/          # iot-core protobuf 契约
-├── monitoring/     # 本地 Prometheus / Grafana 配置
-└── docs/           # OpenAPI、Schema、生产部署指南和 ADR
+│   ├── adminapi/   # REST gateway translating HTTP to iot-core calls
+│   ├── bootstrap/  # Startup assembly
+│   ├── contracts/  # Topic, envelope, state machine, OpenAPI, and schema contracts
+│   ├── core/       # Core business gRPC service implementation
+│   ├── demo/       # Traffic simulator runtime
+│   ├── platform/   # Repositories, messaging, metrics, device-worker, MQTT/TDengine adapters
+│   └── server/     # HTTP infrastructure
+├── charts/iot/     # Helm deployment manifests
+├── migrations/     # Database migrations
+├── proto/          # iot-core protobuf contracts
+├── monitoring/     # Local Prometheus / Grafana configuration
+└── docs/           # OpenAPI, schemas, production deployment guide, and ADRs
 ```
 
-## 文档
+## Documentation
 
-文档按用途分层，避免维护多份重复架构说明：
+Docs are layered by purpose to avoid maintaining duplicate architecture descriptions:
 
-- [生产部署指南](docs/生产部署指南.md)：生产拓扑、部署边界、长连接、扩容和灾备基线
-- [EMQX 长连接集群清单](deploy/emqx/README.md)：EMQX Operator、本地单节点和生产多节点配置
-- [OpenAPI 定义](docs/openapi.json)：管理 API 机器契约
-- [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)：MQTT 消息机器契约
-- [架构决策记录](docs/adr/)：关键架构决策，不重复编写完整方案
-- [初始化迁移](migrations/001_init.sql)：PostgreSQL 初始化结构
+- [Production Deployment Guide](docs/production-deployment.md): production topology, deployment boundaries, long connections, scaling, and disaster-recovery baseline
+- [EMQX long-connection cluster manifests](deploy/emqx/README.md): EMQX Operator, local single-node and production multi-node configurations
+- [OpenAPI definition](docs/openapi.json): machine contract for the management API
+- [MQTT Envelope Schema](docs/mqtt-envelope.schema.json): machine contract for MQTT messages
+- [Architecture Decision Records](docs/adr/): key architecture decisions, without duplicating full design docs
+- [Initial migration](migrations/001_init.sql): PostgreSQL initial schema
 
-## 本地 Helm + Docker 部署
+## Local Helm + Docker Deployment
 
-当前推荐的本地形态是：
+The recommended local setup is:
 
-- Docker：PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo，以及访问 Kubernetes 服务的转发器
-- Kubernetes：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`，以及独立 `emqx` 命名空间中的 EMQX 集群
+- Docker: PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo, plus forwarders that reach Kubernetes services
+- Kubernetes: `management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`, plus an EMQX cluster in a separate `emqx` namespace
 
-Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
+Prometheus and Grafana are the observability layer for the whole IoT pipeline, but locally they deliberately run as standalone Docker Compose services rather than as part of the business Helm release. They scrape the four business services in Kubernetes through `k8s-forward-*` containers, so monitoring configuration and history survive business redeployments.
 
-本地与生产都通过 EMQX Operator 在独立 `emqx` 命名空间管理 EMQX 集群。生产使用持证多节点清单 [`deploy/emqx/cluster.yaml`](deploy/emqx/cluster.yaml)，本地使用社区许可可运行的单节点清单 [`deploy/emqx/cluster.local.yaml`](deploy/emqx/cluster.local.yaml)。本地 Compose 仅转发 MQTT `1883` 和 Dashboard `18083` 到该集群；生产环境应通过 L4 负载均衡和 TLS 暴露 MQTT，Dashboard 保持私网访问。
+Both local and production manage the EMQX cluster via the EMQX Operator in a dedicated `emqx` namespace. Production uses the licensed multi-node manifest [`deploy/emqx/cluster.yaml`](deploy/emqx/cluster.yaml); local uses the single-node manifest [`deploy/emqx/cluster.local.yaml`](deploy/emqx/cluster.local.yaml), which runs under the community license. Local Compose only port-forwards MQTT `1883` and Dashboard `18083` to that cluster; in production, MQTT should be exposed via an L4 load balancer with TLS, and the Dashboard should stay on the private network.
 
-Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。EMQX 运行在 Kubernetes 的 `emqx` 命名空间。
+All local IoT dependencies in Docker Desktop are grouped under the Compose project `iot`. Native services keep their original names: `postgres`, `kafka`, `tdengine`, `prometheus`, `grafana`; project-custom containers use the `iot-` prefix, e.g. `iot-demo` and `iot-k8s-forward-*`. EMQX runs in the Kubernetes `emqx` namespace.
 
-先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
+First make sure the local Docker dependencies are running, and that Kafka advertises listeners reachable from both host-side tests and k8s Pods:
 
 ```bash
 docker rm -f kafka 2>/dev/null || true
@@ -336,12 +338,12 @@ docker run -d --name kafka \
   bitnamilegacy/kafka:latest
 
 docker inspect kafka --format '{{range .Config.Env}}{{println .}}{{end}}' | grep KAFKA_CFG_ADVERTISED_LISTENERS
-# 期望：KAFKA_CFG_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://192.168.65.254:29092
+# Expected: KAFKA_CFG_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://192.168.65.254:29092
 ```
 
-宿主机运行 Go E2E 时使用 `localhost:9092`，k8s Pod 访问 Docker Kafka 时使用 `192.168.65.254:29092`。如果 Kafka 只配置单个 advertised listener，客户端会在拿到 broker metadata 后被引导到另一侧不可达的地址，表现为 `iot-core` / `telemetry-ingestor` / `device-worker` Kafka 写入或消费超时。本地 Docker Desktop 默认使用 `192.168.65.254` 作为 k8s 访问 Docker 依赖的网关地址。
+Host-side Go E2E tests use `localhost:9092`; k8s Pods reach Docker Kafka via `192.168.65.254:29092`. If Kafka advertises only a single listener, clients receive broker metadata pointing to an address unreachable from the other side, surfacing as Kafka produce/consume timeouts in `iot-core` / `telemetry-ingestor` / `device-worker`. Docker Desktop uses `192.168.65.254` by default as the gateway for k8s Pods to reach Docker dependencies.
 
-先启动本地 EMQX，再安装业务服务：
+Start local EMQX first, then install the business services:
 
 ```bash
 kubectl apply -f deploy/emqx/cluster.local.yaml
@@ -353,31 +355,31 @@ kubectl rollout status deploy/telemetry-ingestor -n iot
 kubectl rollout status deploy/device-worker -n iot
 ```
 
-也可以使用仓库脚本一键完成外部依赖连通性检查、Helm 安装和 rollout 验证：
+Or use the repo script to run dependency connectivity checks, the Helm install, and rollout verification in one shot:
 
 ```bash
 scripts/helm-deploy-local.sh
 ```
 
-该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
-其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.0`。
+The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
+`iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.0`.
 
-Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
+The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus scraping metrics behind k8s port-forwards.
 
-给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
+Create the channels for local Prometheus and demo to reach the k8s business services:
 
 ```bash
 scripts/port-forward-local-monitoring.sh
 ```
 
-启动全部本地 Docker 依赖、监控和 demo：
+Start all local Docker dependencies, monitoring, and demo:
 
 ```bash
 docker compose -f monitoring/docker-compose.yml up -d
 ```
 
-验证：
+Verify:
 
 ```bash
 curl http://127.0.0.1:18080/healthz
@@ -387,10 +389,10 @@ curl 'http://127.0.0.1:9090/api/v1/targets?state=active'
 docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
 ```
 
-## 本地监控
+## Local Monitoring
 
-Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 通过 Docker 网络内的 `iot-k8s-forward-*` 容器抓取 k8s 业务服务的 `/metrics`，Grafana 数据源已经预置为 Compose 内部地址 `http://prometheus:9090`。
-现在本地监控会同时覆盖 `management-api / iot-core / telemetry-ingestor / device-worker / demo`，其中 `iot-core` 走独立的 gRPC 指标端口 `9101`。
+Both Prometheus and Grafana run locally in Docker. Prometheus scrapes the k8s business services' `/metrics` through the `iot-k8s-forward-*` containers on the Docker network; the Grafana data source is preconfigured to the Compose-internal address `http://prometheus:9090`.
+Local monitoring now covers `management-api / iot-core / telemetry-ingestor / device-worker / demo`, with `iot-core` on its dedicated gRPC metrics port `9101`.
 
 ```bash
 helm upgrade --install iot charts/iot -n iot --create-namespace
@@ -398,30 +400,30 @@ scripts/port-forward-local-monitoring.sh
 docker compose -f monitoring/docker-compose.yml up -d
 ```
 
-Grafana 默认账号：
+Grafana default account:
 
 - URL: http://localhost:3000
-- IoT 目录固定地址：http://localhost:3000/dashboards/f/efobmswzeefi8d/
-- Grafana 数据保存在 Docker 命名卷 `iot-grafana-data`，容器使用 `unless-stopped` 自动重启策略；重建容器保留登录配置和数据库，勿删除该数据卷。
+- Fixed IoT folder URL: http://localhost:3000/dashboards/f/efobmswzeefi8d/
+- Grafana data lives in the named Docker volume `iot-grafana-data`; the container uses the `unless-stopped` restart policy. Recreating the container preserves login settings and the database — do not delete this volume.
 - User: `admin`
 - Password: `admin`
-- 可用 dashboard：`IoT Overview`、`IoT Management API`、`IoT Pipeline`、`IoT Core`
+- Available dashboards: `IoT Overview`, `IoT Management API`, `IoT Pipeline`, `IoT Core`
 
-已预置的面板：
+Pre-provisioned dashboards:
 
 - [IoT Overview](http://localhost:3000/d/iot-overview/iot-overview)
 - [IoT Management API](http://localhost:3000/d/iot-management-api/iot-management-api)
 - [IoT Pipeline](http://localhost:3000/d/iot-pipeline/iot-pipeline)
 
-### Management API 告警可视化
+### Management API Alerting Visualization
 
-`IoT Management API` 顶部显示关联告警及实例标签；HTTP 请求图表将 5xx 曲线标红，并展示关联规则的触发、恢复时间标记。标记对应告警评估状态变化，不是单次请求的精确时间。
+The top of `IoT Management API` shows related alerts with instance labels; the HTTP request panel highlights the 5xx series in red and marks the firing/resolution times of the linked rule. The marks correspond to alert evaluation state changes, not the exact time of any single request.
 
-看板顶部提供固定 UID 的规则入口；Alert list 的内置数据源名称为 `-- Grafana --`，与 API 中的规则源标识 `grafana` 不同。
+The dashboard top provides a rule entrypoint with a fixed UID; the Alert list's built-in data source is named `-- Grafana --`, which differs from the rule-source identifier `grafana` used in the API.
 
-规则模板为 `monitoring/grafana/alerts/management-api-http-5xx.json`：按 `route/status` 计算最近 5 分钟的 HTTP 5xx 平均 QPS，`> 0` 持续 1 分钟触发。没有 5xx 序列时回退到 0；此规则不负责检测服务离线。5 分钟窗口也意味着最后一次错误后不会立刻恢复。
+The rule template is `monitoring/grafana/alerts/management-api-http-5xx.json`: it computes the 5-minute average HTTP 5xx QPS by `route/status` and fires when `> 0` for 1 minute. It falls back to 0 when no 5xx series exists; the rule does not detect service outages. The 5-minute window also means the alert does not resolve immediately after the last error.
 
-该模板通过 Grafana API 导入，不做只读文件 provisioning，导入后仍可在页面调整阈值、暂停和通知渠道。新环境先创建名为“钉钉”的联系人（或修改模板中的 receiver）；Webhook 凭证只保存在 Grafana，不进入仓库。首次导入示例：
+The template is imported via the Grafana API rather than read-only file provisioning, so thresholds, pause state, and notification channels remain editable in the UI after import. On a fresh environment, first create a contact point named "钉钉" (DingTalk) (or modify the receiver in the template); webhook credentials live only in Grafana and never enter the repo. First-time import example:
 
 ```bash
 curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
@@ -430,83 +432,83 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
   http://localhost:3000/api/v1/provisioning/alert-rules
 ```
 
-已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
+To update an existing rule, use `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx` instead. The template never overwrites edits made in the Grafana UI. A paused rule produces no new firing marks; historical marks are recorded only from the moment the panel association is created — earlier events are not backfilled.
 
-另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
+There is also `monitoring/grafana/alerts/management-api-healthz-qps.json`: it only watches the `/healthz`, `2xx` series, using the same 5-minute average QPS, and fires on the next evaluation when strictly `> 0.3 req/s` (`for: 0s`, notification `group_wait: 0s`). The local `Management API HTTP` group evaluates every 60 seconds; notifications use the existing "钉钉" (DingTalk) contact point. The panel shows an orange dashed threshold, the rule links to the same HTTP panel, and it does not change the 5xx rule. For first-time import reuse the POST command above with the new filename; for updates use UID `iot-management-api-healthz-qps`. The health-check rate itself hovers near 0.3, so sampling jitter may cause repeated firing/resolution.
 
-### 钉钉通知模板
+### DingTalk Notification Template
 
-`monitoring/grafana/notifications/dingtalk.tmpl` 定义 `iot.dingtalk.title`、`iot.dingtalk.message` 和 `iot.dingtalk.payload`，本地保存于 Grafana 的 `iot.dingtalk` 模板组。联系人引用见 `dingtalk-contact.json`；这是不含 URL 的配置片段，不可直接覆盖完整联系人。
+`monitoring/grafana/notifications/dingtalk.tmpl` defines `iot.dingtalk.title`, `iot.dingtalk.message`, and `iot.dingtalk.payload`, stored locally in Grafana's `iot.dingtalk` template group. Contact-point references live in `dingtalk-contact.json`; that snippet excludes the URL and must not be applied over a complete contact point.
 
-- 标题包含固定 `grafana` 关键词、触发/恢复状态、规则名称和数量。
-- 联系人名称仍为“钉钉”，集成类型使用 Webhook，通过 Custom Payload 直接向原机器人 URL POST 钉钉 Markdown JSON；不使用原生 DingDing 的整体跳转 ActionCard（其 singleURL 固定跳到告警列表）。无需转发服务。
-- 正文按实例展示级别、服务、路由、HTTP 状态、摘要、详情，以及 UTC+8 开始/恢复时间；无值的可选字段不展示。JSON 由 `data.ToJSON` 编码，不手动拼接文案，以正确处理引号和换行。
-- 按规则提供的 URL 展示图表、看板、规则、处理手册和临时静默链接，单条消息最多展示 10 个实例。链接继承 Grafana 对外地址，目前为 localhost，其他设备访问需另行配置可达地址。
-- `disableResolveMessage: false` 开启恢复通知；此次模板规范化不改变规则阈值、评估周期、分组或重复通知频率。
-- 部署顺序：先通过 `PUT /api/v1/provisioning/templates/iot.dingtalk` 保存模板（`X-Disable-Provenance: true` 保留 UI 编辑能力），再应用联系人片段。Webhook URL 是受保护配置，需限制联系人读取权限；不要打印、导出到仓库或提交机器人 token。
-- 修改模板优先在通知模板组中进行。已打开的联系人编辑页必须刷新后再保存，避免旧表单覆盖模板引用。
+- The title contains the fixed keyword `grafana`, the firing/resolved state, the rule name, and the alert count.
+- The contact point is still named "钉钉" (DingTalk), uses the Webhook integration type, and POSTs DingTalk Markdown JSON directly to the original bot URL via a Custom Payload — the native DingDing whole-card-jump ActionCard (whose singleURL always jumps to the alert list) is not used. No forwarding service is needed.
+- The body shows, per instance, severity, service, route, HTTP status, summary, details, and firing/resolved times in UTC+8; optional fields without values are omitted. The JSON is encoded via `data.ToJSON` rather than manual string concatenation, so quotes and newlines are handled correctly.
+- Links to the chart, dashboard, rule, runbook, and a temporary silence are rendered per rule, with at most 10 instances per message. Links inherit Grafana's external URL — currently localhost; other devices need a reachable address configured separately.
+- `disableResolveMessage: false` enables resolved notifications; this template normalization does not change rule thresholds, evaluation intervals, grouping, or repeat frequency.
+- Deployment order: save the template first via `PUT /api/v1/provisioning/templates/iot.dingtalk` (`X-Disable-Provenance: true` preserves UI editability), then apply the contact-point snippet. The webhook URL is a protected configuration: restrict contact-point read permissions; do not print it, export it into the repo, or commit bot tokens.
+- Prefer editing the template in the notification template group. An already-open contact-point edit page must be refreshed before saving, to avoid the stale form overwriting the template reference.
 
-设置 `GRAFANA_ADMIN_PASSWORD` 后运行 `python3 scripts/test-grafana-notification-template.py -v`，通过本地 Grafana 模板预览 API 验证触发、恢复、缺失字段、多实例截断、Markdown JSON 和四个独立链接；不会向钉钉发消息。可用 `GRAFANA_URL`、`GRAFANA_USER` 指定其他测试实例。钉钉历史卡片不会随模板更新，应在新消息上验证；联系人测试通知可能缺少规则 GeneratorURL，因此不展示“查看规则”，真实规则通知才包含该链接。
+After setting `GRAFANA_ADMIN_PASSWORD`, run `python3 scripts/test-grafana-notification-template.py -v` to verify firing, resolution, missing fields, multi-instance truncation, Markdown JSON, and the four standalone links via the local Grafana template-preview API — no DingTalk messages are sent. Use `GRAFANA_URL` and `GRAFANA_USER` to target another instance. Historical DingTalk cards do not update with the template, so verify on new messages; a contact-point test notification may lack the rule's GeneratorURL and therefore omit "View rule" — only real rule notifications include that link.
 
-## Helm 部署
+## Helm Deployment
 
-仓库里已经提供 Helm Chart：[`charts/iot`](charts/iot)
+The repo ships a Helm chart: [`charts/iot`](charts/iot)
 
 ```bash
 helm upgrade --install iot charts/iot -n iot --create-namespace --wait --timeout 180s
 ```
 
-本地一键脚本：
+One-shot local script:
 
 ```bash
 scripts/helm-deploy-local.sh
 ```
 
-脚本默认只部署应用本身：
+By default the script deploys only the applications:
 
 - `management-api`
 - `iot-core`
 - `telemetry-ingestor`
 - `device-worker`
 
-脚本默认会先从 k8s Pod 内检查外部 PostgreSQL、Kafka、EMQX、TDengine 端口是否可达。若目标环境使用云服务或 CI 不需要这个检查，可以关闭：
+By default the script first checks from inside a k8s Pod that the external PostgreSQL, Kafka, EMQX, and TDengine ports are reachable. If the target environment uses cloud services or CI where this check is unnecessary, disable it:
 
 ```bash
 CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 ```
 
-当前 Helm 部署固定只包含应用本身和共享配置。PostgreSQL、Kafka、TDengine、Prometheus、Grafana、demo 都由独立平台或本地 Docker Compose 管理；EMQX 由独立的 Operator Release 管理，均不进入业务 Helm release，也没有可重新启用的内置依赖模板。
+The current Helm deployment contains only the applications and their shared configuration. PostgreSQL, Kafka, TDengine, Prometheus, Grafana, and demo are managed by independent platforms or local Docker Compose; EMQX is managed by a separate Operator release. None of them ship in the business Helm release, and there are no built-in dependency templates that can be re-enabled.
 
 ### iot-core gRPC mTLS
 
-`iot-core` 的 gRPC 端口（9001）支持双向 TLS：启用后服务端强制校验客户端证书，只有持 `management-api` 客户端证书的调用方才能建立连接，不再仅依赖 NetworkPolicy 做命名空间隔离。
+The `iot-core` gRPC port (9001) supports mutual TLS: when enabled, the server requires client certificates, and only callers holding the `management-api` client certificate can connect — no longer relying solely on NetworkPolicy for namespace isolation.
 
-- 由环境变量驱动：`IOT_CORE_TLS_CERT` / `IOT_CORE_TLS_KEY` / `IOT_CORE_TLS_CA`（服务端与客户端相同），客户端另可用 `IOT_CORE_TLS_SERVER_NAME` 覆盖校验名。三个变量全部未设置时保持明文（本地裸跑兼容），只设置部分时进程启动直接报错。
-- Helm 通过 `grpcTLS.enabled=true` 开启，Secret（默认 `iot-grpc-tls`）需包含 `ca.crt`、`server.crt`、`server.key`、`client.crt`、`client.key`，挂载到两个 Deployment 的 `/etc/iot/grpc-tls`。
-- 本地脚本 `scripts/helm-deploy-local.sh` 默认启用 mTLS：自动调用 `scripts/gen-grpc-certs.sh` 生成本地自签 CA 与服务端/客户端证书（输出到 `deploy/grpc-certs/`，已 gitignore）并创建 Secret。可用 `GRPC_TLS_ENABLED=0` 关闭。
-- 生产环境应使用真实 CA 或 cert-manager 签发证书，并注意轮换证书后需要重启 Pod 生效。
+- Driven by environment variables: `IOT_CORE_TLS_CERT` / `IOT_CORE_TLS_KEY` / `IOT_CORE_TLS_CA` (same on server and client); the client can additionally override the verification name with `IOT_CORE_TLS_SERVER_NAME`. When all three are unset the connection stays plaintext (compatible with bare local runs); setting only some of them makes the process fail at startup.
+- Enable in Helm via `grpcTLS.enabled=true`; the Secret (default `iot-grpc-tls`) must contain `ca.crt`, `server.crt`, `server.key`, `client.crt`, `client.key`, mounted at `/etc/iot/grpc-tls` in both Deployments.
+- The local script `scripts/helm-deploy-local.sh` enables mTLS by default: it automatically calls `scripts/gen-grpc-certs.sh` to generate a local self-signed CA plus server/client certificates (output to `deploy/grpc-certs/`, gitignored) and creates the Secret. Disable with `GRPC_TLS_ENABLED=0`.
+- In production, use certificates issued by a real CA or cert-manager, and note that Pods must be restarted for rotated certificates to take effect.
 
-## 开发建议
+## Development Guidelines
 
-- `tenantId` 必须贯穿所有写入和查询路径
-- Kafka 消费端必须按幂等设计
-- TDengine 负责时序数据，PostgreSQL 负责业务元数据和状态
-- 命令状态机建议保持 `pending -> dispatched -> sent -> acked / timeout / failed`
-- 保持逻辑多租户隔离，避免过早引入复杂分库分表
-- Demo 模拟器当前作为外部造流服务运行，不进入业务 Helm release
+- `tenantId` must flow through every write and query path
+- Kafka consumers must be designed idempotently
+- TDengine holds time-series data; PostgreSQL holds business metadata and state
+- Keep the command state machine as `pending -> dispatched -> sent -> acked / timeout / failed`
+- Keep logical multi-tenant isolation; avoid premature sharding
+- The demo simulator currently runs as an external traffic generator and is not part of the business Helm release
 
-## 贡献
+## Contributing
 
-欢迎提交 Issue 和 Pull Request。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+Issues and Pull Requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before getting started.
 
-建议在提交前先运行：
+We recommend running before submitting:
 
 ```bash
 go test ./...
 ```
 
-安全问题请参考 [SECURITY.md](SECURITY.md)，不要在公开 Issue 中披露漏洞细节。
+For security issues, see [SECURITY.md](SECURITY.md); do not disclose vulnerability details in public Issues.
 
-## 许可证
+## License
 
-本项目使用 [Apache License 2.0](LICENSE)。
+This project is licensed under the [Apache License 2.0](LICENSE).

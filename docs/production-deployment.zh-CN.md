@@ -1,5 +1,7 @@
 # IoT 平台生产部署指南
 
+[English](production-deployment.md) | 简体中文
+
 ## 目标架构
 
 生产环境按职责拆分部署，不将所有组件放进同一个业务 Helm Release：

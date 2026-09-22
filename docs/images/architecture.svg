@@ -77,7 +77,7 @@
   <path class="edge-dotted" d="M130,600 L130,520 L500,520" marker-end="url(#arr)"/>
   <text class="edge-label" x="315" y="510" text-anchor="middle">scrape /metrics ×4 + demo</text>
 
-  <path class="edge" d="M290,615 L250,615" marker-end="url(#arr)"/>
+  <path class="edge" d="M285,615 L245,615" marker-end="url(#arr)"/>
 
   <!-- nodes -->
   <g>
@@ -135,12 +135,12 @@
   </g>
 
   <g>
-    <rect class="obs" x="90" y="600" width="160" height="60" rx="10"/>
-    <text class="node-title obst" x="170" y="636" text-anchor="middle">Prometheus</text>
+    <rect class="obs" x="85" y="600" width="160" height="60" rx="10"/>
+    <text class="node-title obst" x="165" y="636" text-anchor="middle">Prometheus</text>
   </g>
   <g>
-    <rect class="obs" x="290" y="600" width="160" height="60" rx="10"/>
-    <text class="node-title obst" x="370" y="636" text-anchor="middle">Grafana</text>
+    <rect class="obs" x="285" y="600" width="160" height="60" rx="10"/>
+    <text class="node-title obst" x="365" y="636" text-anchor="middle">Grafana</text>
   </g>
 
   <!-- legend -->

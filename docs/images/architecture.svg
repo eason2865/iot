@@ -77,7 +77,7 @@
   <path class="edge-dotted" d="M130,600 L130,520 L500,520" marker-end="url(#arr)"/>
   <text class="edge-label" x="315" y="510" text-anchor="middle">scrape /metrics ×4 + demo</text>
 
-  <path class="edge" d="M285,615 L245,615" marker-end="url(#arr)"/>
+  <path class="edge" d="M285,630 L245,630" marker-end="url(#arr)"/>
 
   <!-- nodes -->
   <g>

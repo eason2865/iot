@@ -34,8 +34,8 @@
   <text class="cluster-label" x="650" y="66" text-anchor="middle">Kubernetes · namespace iot · Helm</text>
   <rect class="cluster" x="860" y="40" width="320" height="460" rx="12"/>
   <text class="cluster-label" x="1020" y="66" text-anchor="middle">数据与消息基础设施（独立平台 / Docker）</text>
-  <rect class="cluster" x="60" y="560" width="380" height="120" rx="12"/>
-  <text class="cluster-label" x="250" y="586" text-anchor="middle">可观测性（Docker Compose）</text>
+  <rect class="cluster" x="60" y="560" width="410" height="120" rx="12"/>
+  <text class="cluster-label" x="265" y="586" text-anchor="middle">可观测性（Docker Compose）</text>
 
   <!-- edges -->
   <path class="edge" d="M210,352 L270,352" marker-end="url(#arr)"/>

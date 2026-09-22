@@ -39,7 +39,7 @@
 
   <!-- edges -->
   <path class="edge" d="M210,352 L270,352" marker-end="url(#arr)"/>
-  <text class="edge-label" x="240" y="342" text-anchor="middle">MQTT :1883</text>
+  <text class="edge-label" x="240" y="310" text-anchor="middle">MQTT :1883</text>
 
   <path class="edge" d="M440,352 L530,352" marker-end="url(#arr)"/>
   <text class="edge-label" x="485" y="342" text-anchor="middle">telemetry 订阅</text>
@@ -74,8 +74,8 @@
   <path class="edge" d="M280,92 L470,92 L470,112 L530,112" marker-end="url(#arr)"/>
   <text class="edge-label" x="375" y="82" text-anchor="middle">REST 创建命令</text>
 
-  <path class="edge-dotted" d="M250,645 L470,645 L470,500 L500,500" marker-end="url(#arr)"/>
-  <text class="edge-label" x="360" y="637" text-anchor="middle">scrape /metrics ×4 + demo</text>
+  <path class="edge-dotted" d="M130,600 L130,520 L500,520" marker-end="url(#arr)"/>
+  <text class="edge-label" x="315" y="510" text-anchor="middle">scrape /metrics ×4 + demo</text>
 
   <path class="edge" d="M290,615 L250,615" marker-end="url(#arr)"/>
 

@@ -8,10 +8,13 @@ import (
 
 // BearerTokenMiddleware keeps operational endpoints public for Kubernetes and
 // Prometheus while requiring a service token for every management API route.
+// The MQTT envelope schema stays public because device vendors integrate
+// against it; the previous /openapi.json exemption was removed along with the
+// endpoint, so the full REST route map is no longer readable without a token.
 func BearerTokenMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/healthz" || r.URL.Path == "/openapi.json" || r.URL.Path == "/schemas/mqtt-envelope.json" {
+			if r.URL.Path == "/healthz" || r.URL.Path == "/schemas/mqtt-envelope.json" {
 				next.ServeHTTP(w, r)
 				return
 			}

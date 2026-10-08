@@ -21,7 +21,7 @@
 
 ## Module Ownership
 
-- `internal/contracts`: 外部契约和领域约束，包括 topic、Envelope、命令状态机、OpenAPI 和 MQTT Schema。
+- `internal/contracts`: 外部契约和领域约束，包括 topic、Envelope、命令状态机、REST 响应形状（`CommandResponse`）和 MQTT Schema。
 - `internal/core`: IoT Core 服务实现，承载核心业务用例。
 - `internal/adminapi`: Management API 的 REST 网关，负责 HTTP 到 IoT Core 的协议转换。
 - `internal/platform`: 运行时适配和平台能力，包含仓储、消息、指标、device-worker、MQTT bridge、TDengine writer 等实现。

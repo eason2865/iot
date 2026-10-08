@@ -42,7 +42,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - 管理 API 除健康检查和契约端点外均要求 Bearer Token
 - TDengine 使用设备子表 + 租户/设备 Tags；完整长载荷保存在 PostgreSQL JSONB，时序库仅存哈希和索引字段
 - 多租户隔离：`tenantId` 贯穿 topic、消息、存储和查询
-- 标准契约：提供 OpenAPI、MQTT JSON Schema、gRPC proto 和数据库迁移脚本
+- 标准契约：提供 MQTT JSON Schema、gRPC proto 和数据库迁移脚本
 - 本地可运行：默认可以连接本机 Docker 的 PostgreSQL / Kafka / EMQX / TDengine
 
 ## 当前实现
@@ -51,7 +51,6 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
 - 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
-- 1 份 OpenAPI 定义：`docs/openapi.json`
 - 1 份 MQTT 消息 Schema：`docs/mqtt-envelope.schema.json`
 - 已包含基础测试，`go test ./...` 可直接运行
 
@@ -147,7 +146,6 @@ make build
 健康检查与契约文件：
 
 - `GET /healthz`
-- `GET /openapi.json`
 - `GET /schemas/mqtt-envelope.json`
 
 除上述健康检查和契约端点外，管理 API 请求必须携带 `Authorization: Bearer <MANAGEMENT_API_TOKEN>`。
@@ -159,8 +157,6 @@ make build
 - `POST /api/v1/devices`
 - `GET /api/v1/devices`
 - `GET /api/v1/devices/{tenantId}/{deviceId}`
-
-列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
 - `GET /api/v1/devices/{tenantId}/{deviceId}/status`
 - `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
 - `POST /api/v1/telemetry`
@@ -169,9 +165,11 @@ make build
 - `GET /api/v1/commands/{id}`
 - `POST /api/v1/commands/{id}/ack`
 
+列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
+
 命令列表必须指定 `tenantId`，服务端在 gRPC 和 PostgreSQL 查询层都会按租户过滤；`pageSize` 和不透明 `cursor` 仍用于租户内分页。
 
-完整接口定义请查看 [docs/openapi.json](docs/openapi.json)。
+REST 接口以上方路由表与 `internal/adminapi` 为准，不再单独维护 OpenAPI 文档。
 
 ## 架构速览
 
@@ -283,7 +281,7 @@ iot/
 ├── internal/
 │   ├── adminapi/   # REST 网关，负责 HTTP 到 iot-core 的转换
 │   ├── bootstrap/  # 启动装配
-│   ├── contracts/  # topic、envelope、状态机、OpenAPI 和 Schema 契约
+│   ├── contracts/  # topic、envelope、状态机、REST 响应和 Schema 契约
 │   ├── core/       # 核心业务 gRPC 服务实现
 │   ├── demo/       # 造流模拟器运行时
 │   └── platform/   # 仓储、消息、指标、device-worker、MQTT/TDengine 适配，以及测试用 REST harness
@@ -291,7 +289,7 @@ iot/
 ├── migrations/     # 数据库迁移
 ├── proto/          # iot-core protobuf 契约
 ├── monitoring/     # 本地 Prometheus / Grafana 配置
-└── docs/           # OpenAPI 与 MQTT Schema（唯一源，经 docs/contracts.go embed）、生产部署指南和 ADR
+└── docs/           # MQTT Schema（唯一源，经 docs/contracts.go embed）、生产部署指南和 ADR
 ```
 
 ## 文档
@@ -300,7 +298,6 @@ iot/
 
 - [生产部署指南](docs/production-deployment.zh-CN.md)：生产拓扑、部署边界、长连接、扩容和灾备基线
 - [EMQX 长连接集群清单](deploy/emqx/README.zh-CN.md)：EMQX Operator、本地单节点和生产多节点配置
-- [OpenAPI 定义](docs/openapi.json)：管理 API 机器契约
 - [MQTT Envelope Schema](docs/mqtt-envelope.schema.json)：MQTT 消息机器契约
 - [架构决策记录](docs/adr/)：关键架构决策，不重复编写完整方案
 - [初始化迁移](migrations/001_init.sql)：PostgreSQL 初始化结构

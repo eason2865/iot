@@ -42,7 +42,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - The management API requires a Bearer Token on all endpoints except health checks and contract endpoints
 - TDengine uses per-device subtables with tenant/device tags; full long payloads live in PostgreSQL JSONB, while the time-series store keeps only hashes and index fields
 - Multi-tenant isolation: `tenantId` flows through topics, messages, storage, and queries
-- Standard contracts: OpenAPI, MQTT JSON Schema, gRPC proto, and database migration scripts
+- Standard contracts: MQTT JSON Schema, gRPC proto, and database migration scripts
 - Locally runnable: connects to local Docker PostgreSQL / Kafka / EMQX / TDengine by default
 
 ## Current Implementation
@@ -51,7 +51,6 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - `management-api` uses go-zero REST; `iot-core` uses gRPC + protobuf
 - Local Docker orchestration no longer includes a business service-discovery component
 - 1 PostgreSQL initialization migration: `migrations/001_init.sql`
-- 1 OpenAPI definition: `docs/openapi.json`
 - 1 MQTT message schema: `docs/mqtt-envelope.schema.json`
 - Basic tests included; `go test ./...` runs directly
 
@@ -147,7 +146,6 @@ make build
 Health check and contract files:
 
 - `GET /healthz`
-- `GET /openapi.json`
 - `GET /schemas/mqtt-envelope.json`
 
 All management API requests except the health-check and contract endpoints above must carry `Authorization: Bearer <MANAGEMENT_API_TOKEN>`.
@@ -159,8 +157,6 @@ Core business endpoints:
 - `POST /api/v1/devices`
 - `GET /api/v1/devices`
 - `GET /api/v1/devices/{tenantId}/{deviceId}`
-
-List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page.
 - `GET /api/v1/devices/{tenantId}/{deviceId}/status`
 - `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
 - `POST /api/v1/telemetry`
@@ -169,9 +165,11 @@ List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [
 - `GET /api/v1/commands/{id}`
 - `POST /api/v1/commands/{id}/ack`
 
+List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page.
+
 The command list requires `tenantId`; the server filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
 
-See [docs/openapi.json](docs/openapi.json) for the full API definition.
+The REST API is documented by the route table above and by `internal/adminapi`; it no longer ships a separate OpenAPI document.
 
 ## Architecture at a Glance
 
@@ -283,7 +281,7 @@ iot/
 ├── internal/
 │   ├── adminapi/   # REST gateway translating HTTP to iot-core calls
 │   ├── bootstrap/  # Startup assembly
-│   ├── contracts/  # Topic, envelope, state machine, OpenAPI, and schema contracts
+│   ├── contracts/  # Topic, envelope, state machine, REST response, and schema contracts
 │   ├── core/       # Core business gRPC service implementation
 │   ├── demo/       # Traffic simulator runtime
 │   └── platform/   # Repositories, messaging, metrics, device-worker, MQTT/TDengine adapters, test REST harness
@@ -291,7 +289,7 @@ iot/
 ├── migrations/     # Database migrations
 ├── proto/          # iot-core protobuf contracts
 ├── monitoring/     # Local Prometheus / Grafana configuration
-└── docs/           # OpenAPI and MQTT schema (single source, embedded via docs/contracts.go), deployment guide, and ADRs
+└── docs/           # MQTT schema (single source, embedded via docs/contracts.go), deployment guide, and ADRs
 ```
 
 ## Documentation
@@ -300,7 +298,6 @@ Docs are layered by purpose to avoid maintaining duplicate architecture descript
 
 - [Production Deployment Guide](docs/production-deployment.md): production topology, deployment boundaries, long connections, scaling, and disaster-recovery baseline
 - [EMQX long-connection cluster manifests](deploy/emqx/README.md): EMQX Operator, local single-node and production multi-node configurations
-- [OpenAPI definition](docs/openapi.json): machine contract for the management API
 - [MQTT Envelope Schema](docs/mqtt-envelope.schema.json): machine contract for MQTT messages
 - [Architecture Decision Records](docs/adr/): key architecture decisions, without duplicating full design docs
 - [Initial migration](migrations/001_init.sql): PostgreSQL initial schema

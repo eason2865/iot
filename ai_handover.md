@@ -98,21 +98,20 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 业务 Kubernetes 变更只修改 `charts/iot`。
 - 生产部署不使用 `latest`、明文密码或仓库内 Webhook token。
-- 新增 REST 字段时同步更新 protobuf、`docs/openapi.json` 和 README。**`docs/openapi.json` 与 `docs/mqtt-envelope.schema.json` 是唯一人工维护源**：Go 侧通过 `docs/contracts.go` 的 `//go:embed` 引入，`internal/contracts` 只做解码，**不要在 Go 里再写第二份 spec**（`internal/contracts/docs_test.go` 会比对服务端返回与磁盘文件，重新引入手写副本会立刻失败）。
+- 新增 REST 字段时同步更新 protobuf、README 和 `contracts.CommandResponse`（命令的 REST 形状）。**REST 接口没有 OpenAPI 文档**（2026-10-08 已删除，见下），路由表以 `internal/adminapi` 为唯一事实来源。`docs/mqtt-envelope.schema.json` 是 MQTT 契约的唯一人工维护源：Go 侧通过 `docs/contracts.go` 的 `//go:embed` 引入，`internal/contracts` 只做解码，**不要在 Go 里再写第二份 schema**（`internal/contracts/docs_test.go` 会比对服务端返回与磁盘文件）。
 - 修改代码或 SQL 后更新本文件，执行测试、部署验证、提交并推送。
 - 本次加固（2026-09-20）：MQTT 认证回调加共享密钥头、ACL 覆盖共享/普通订阅、DLQ 重放遥测幂等（基于 `telemetry_records` 唯一约束）、`migrations/001_init.sql` 与 `ensureSchema` 对齐、TDengine 默认表名统一为 `telemetry_v2`。已通过 `go build ./...`、`go test -count=1 ./...`、`make fmt-check`、`make build`。
 - 本次加固（2026-09-21）：iot-core gRPC 接入 mTLS（凭证加载器 + 服务端 `grpc.Creds` + 客户端 `zrpc.WithTransportCredentials` + 证书脚本 + Helm 开关）。已通过 `go build ./...`、`go vet`、`go test ./...`（含 net.Pipe 真实 mTLS 握手与无证书拒绝用例）、`helm template` 开关两种模式渲染校验、证书脚本 openssl 生成/校验。
 - 本次加固（2026-09-21，二轮审查修复）：H1 命令 `published` 断链恢复（`RecoverStaleCommands` 超时重排队 + 次数上限置 failed）、消费者组 `FirstOffset`、dlq-replay `-stage`/`-dry-run`；H3 `escapeTD` 反斜杠转义、REST 摄入 `ValidateEnvelope`；H5 DSN 移出 ConfigMap/values 入 Secret、`.env.example` 补密钥项、demo ACL 收敛到单租户。已通过 `go build ./...`、`go vet ./...`、`go test ./...`、`helm template`（ConfigMap 无 DSN、envFrom 引用 Secret 渲染正常）。
 - 本次清理（2026-10-08，死代码）：删除 `internal/server` 包（仅被自身测试引用）、`errMQTTBridgeDLQ` 死变量、TDengine writer 从未启动的批处理路径（`pendingCh`/`closedCh`/`run()`/`flushInterval`/`batchSize`/`wg`，`WriteTelemetry` 改为 `writeRecord` 逐条写）。**TDengine 不引入内存攒批**：worker 是"写入成功才提交 Kafka offset"，接批处理会把语义变成"入队即提交"，凭空新增丢数据窗口；吞吐靠 TDengine 侧连接能力而非攒批。`internal/platform/handlers.go` 与 `memory_store.go` 在生产路径无调用方，但是单元测试和 `e2e_test.go`/`e2e_load_test.go` 两个真实 E2E 的 HTTP harness，故保留并加注释标注，未删除。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test ./...`。
 - 本次加固（2026-10-08，二轮：业务 REST 改为显式 opt-in）：`platform.App` 的业务路由（`/api/v1/*`）**没有任何鉴权中间件**（Bearer 校验只在 `internal/adminapi`），而 `platform.New` 原来用 `cfg.EnableBusinessAPI || cfg.ServiceName == "management-api"` 隐式开启——任何名字叫 `management-api` 的服务走 bootstrap 就会无鉴权暴露租户/设备/遥测/命令写接口。现改为：① `platform.New` 只认 `EnableBusinessAPI`，不再从服务名推断；② `bootstrap.Run` 不再设置该开关（注释说明原因），worker 只暴露 `/healthz` 与 `/metrics`；③ 8 处测试调用（`platform_test.go` ×5、`docs_test.go`、`e2e_test.go`、`e2e_load_test.go`）改为显式传 `EnableBusinessAPI: true`，单测统一走新增 helper `newBusinessAPIApp`；④ 新增回归用例 `TestBusinessAPIIsOptIn`：名字为 management-api/device-worker/telemetry-ingestor/iot-core 时业务路由必须 404、`/healthz` 仍 200，且显式开启后仍 200。已用"临时恢复隐式分支 → 用例变红 → 恢复"验证该用例真的拦得住。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`。
-
-- 本次重构（2026-10-08，三轮：契约单一来源）：`internal/contracts/docs.go` 原来用 ~270 行 Go map 字面量重写了 `docs/openapi.json` 的内容（另有 `MQTTEnvelopeSchema()` 重写 `docs/mqtt-envelope.schema.json`），两份副本当时**语义一致、尚未漂移**，但没有任何测试拦截漂移。现改为：① 新增 `docs/contracts.go`（`package docs`，`//go:embed` 两个 JSON，返回 `bytes.Clone` 防篡改）——`go:embed` 不能跨目录，所以 embed 宿主包必须和 JSON 同目录，故放在 `docs/`；② `internal/contracts/docs.go` 从 295 行缩到 32 行，只把 embed 的字节解码成 `map[string]any`，公开 API `OpenAPISpec()`/`MQTTEnvelopeSchema()` 签名不变（handler 无需改动），每次返回新 map 避免共享可变状态；③ 新增 `internal/contracts/docs_test.go`：比对 `OpenAPISpec()` 与磁盘 `docs/openapi.json`（重新引入 Go 侧副本即失败）、校验必需顶层键、校验 paths 仍声明全部 10 个管理接口路径、校验两次调用不共享 map；④ `internal/platform/docs_test.go` 从"只断言键存在"升级为断言 HTTP 响应语义等于磁盘文件。已双向验证：只改 JSON 不改 Go → 服务端返回值随之变化（`x-embed-probe` 探针）；故意在 Go 侧注入漂移 → 用例变红。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`。
+- 本次重构（2026-10-08，三轮：契约单一来源）：`internal/contracts/docs.go` 原来用 ~270 行 Go map 字面量重写了 `docs/mqtt-envelope.schema.json`（OpenAPI 部分见四轮，已删除）。现改为 `docs/contracts.go`（`package docs`，`//go:embed`，返回 `bytes.Clone` 防篡改）承载 embed——`go:embed` 不能跨目录，所以 embed 宿主包必须和 JSON 同目录，故放在 `docs/`；`internal/contracts/docs.go` 缩到 32 行，只把 embed 字节解码成 `map[string]any`。已双向验证：只改 JSON 不改 Go → 服务端返回值随之变化；故意在 Go 侧注入漂移 → 用例变红。
+- 本次变更（2026-10-08，四轮：删掉 OpenAPI + 修 Command 字段泄漏）：① **删除 OpenAPI**——`docs/openapi.json`、`/openapi.json` 路由（adminapi + platform harness）、`contracts.OpenAPISpec()`、`docs/contracts.go` 的对应 embed、`BearerTokenMiddleware` 的免鉴权白名单条目、`routeLabel` 分支，以及 README（中英各 6 处）、`production-deployment*.md`、本文件的引用。理由：仓库内**零消费方**（无 codegen、demo 用自写 HTTP 客户端、prototype 不读它），且它是免鉴权公开的完整 API 地图，而 management-api 定位是运营方内部接口。同时发现 spec 当时**已漏字段**（Command 的 `dispatchAttempts`/`deadlineAt`），留着会误导。MQTT Schema 保留。② **修 Command 字段泄漏**：`platform.Command` 带 `json:"dispatchAttempts"`（无 omitempty）和 `json:"deadlineAt,omitempty"`（Go 的 omitempty 对 `time.Time` 无效），但 `adminapi` 的 `commandFromPB` 只填 protobuf 里有的 7 个字段，导致每个命令响应都带 `"dispatchAttempts":0` 和 `"deadlineAt":"0001-01-01T00:00:00Z"` 两个永远无意义的内部字段。新增 `contracts.CommandResponse`（只有 7 个公开字段），`adminapi` 与 `platform` harness 共用同一形状（避免两套 REST 各写一份 DTO）；Kafka 事件仍用 `platform.Command`，worker 不受影响。新增 `TestCommandResponseHidesInternalDispatchFields` 锁定该形状。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`make build`。
 
 ## 待办（2026-10-08 评审已确认，尚未开工）
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。
 - Kafka 生产者语义：`kafka_publisher.go` 遥测/命令 writer 为 `RequireOne`，DLQ writer 为 `RequireAll`，与"DLQ 兜底不丢数据"的目标不一致，需对齐或写入 ADR。
-- ~~OpenAPI 双份维护~~ **已完成（2026-10-08 三轮）**：见上方重构条目。
 - `GetCommand` 无租户维度（`internal/core/service.go`），而 `ListCommands` 强制 `tenantId`，契约不自洽：需明确 management-api 是"运营方跨租户接口"还是"租户隔离接口"，再统一两者。
 - `iot.dlq` 无消费侧：只有离线 `cmd/dlq-replay`，无指标、无告警、无保留策略。
 - `ValidateEnvelope` 只校验 `ts > 0`，无合理区间；设备时钟异常会污染 TDengine 时序。
@@ -124,6 +123,5 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 - [README](README.md)
 - [生产部署指南（英文）](docs/production-deployment.md) / [中文](docs/production-deployment.zh-CN.md)
 - [EMQX 部署清单](deploy/emqx/README.md)
-- [OpenAPI](docs/openapi.json)
 - [MQTT Schema](docs/mqtt-envelope.schema.json)
 - [架构 ADR](docs/adr/)

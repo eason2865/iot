@@ -69,7 +69,7 @@ Local is not a production substitute, but it mirrors production deployment bound
 ## Security, Reliability, and Data-Model Baselines
 
 - MQTT authentication uniformly calls back into `iot-core`'s internal auth endpoint; the device username is `tenantId:deviceId`, passwords appear only at registration time, and the database stores bcrypt hashes. EMQX runs with `authorization.no_match=deny`, and precise tenant/device ACLs are issued by the auth response. In production, additionally protect the callback endpoint with NetworkPolicy, service-identity authentication, and TLS.
-- `management-api` exposes only `/healthz`, `/openapi.json`, and the MQTT schema by default; all business REST requests require a Bearer Token injected via a Secret Manager — never baked into images or Git.
+- `management-api` exposes only `/healthz` and the MQTT schema without a token; all business REST requests require a Bearer Token injected via a Secret Manager — never baked into images or Git.
 - Command creation first writes the `created` state to PostgreSQL; `iot-core` replicas claim leases via `FOR UPDATE SKIP LOCKED`, transition to `sent` after a successful publish, to `timeout` at the deadline, and ACKs write `command_ack` and `command_events`. Command IDs use UUIDv7 for sortability and cross-replica uniqueness.
 - Kafka messages that fail JSON decoding, PostgreSQL, TDengine, or MQTT delivery are first written to `iot.dlq`; the original consumer offset is committed only after success. After manually inspecting `stage/error`, replay with `dlq-replay --limit N`; never auto-retry indefinitely and create poison-message loops.
 - Tenant and command lists use keyset cursor pagination with a page-size cap of 100; never pull entire tables through the REST layer.

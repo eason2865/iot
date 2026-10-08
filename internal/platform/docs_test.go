@@ -14,10 +14,10 @@ func TestDocsEndpoints(t *testing.T) {
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
-	// The served contract must be the published document on disk: docs/*.json is
-	// the single hand-maintained source and is embedded at build time, so this
-	// catches a handler that returns anything other than that file.
-	checkJSONEndpoint(t, ts.URL+"/openapi.json", "openapi", "../../docs/openapi.json")
+	// The served contract must be the published document on disk:
+	// docs/mqtt-envelope.schema.json is the single hand-maintained source and is
+	// embedded at build time, so this catches a handler that returns anything
+	// other than that file.
 	checkJSONEndpoint(t, ts.URL+"/schemas/mqtt-envelope.json", "title", "../../docs/mqtt-envelope.schema.json")
 }
 

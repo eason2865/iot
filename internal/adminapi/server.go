@@ -102,7 +102,6 @@ func rpcClientConf() zrpc.RpcClientConf {
 func (s *Server) routes() []rest.Route {
 	return []rest.Route{
 		{Method: http.MethodGet, Path: "/healthz", Handler: s.healthHandler},
-		{Method: http.MethodGet, Path: "/openapi.json", Handler: s.openapiHandler},
 		{Method: http.MethodGet, Path: "/schemas/mqtt-envelope.json", Handler: s.mqttEnvelopeSchemaHandler},
 		{Method: http.MethodPost, Path: "/api/v1/tenants", Handler: s.createTenantHandler},
 		{Method: http.MethodGet, Path: "/api/v1/tenants", Handler: s.listTenantsHandler},
@@ -124,10 +123,6 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"status":      "ok",
 		"serviceName": "management-api",
 	})
-}
-
-func (s *Server) openapiHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, contracts.OpenAPISpec())
 }
 
 func (s *Server) mqttEnvelopeSchemaHandler(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +329,7 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, err)
 		return
 	}
-	commands := make([]platform.Command, 0, len(resp.GetCommands()))
+	commands := make([]contracts.CommandResponse, 0, len(resp.GetCommands()))
 	for _, command := range resp.GetCommands() {
 		commands = append(commands, commandFromPB(command))
 	}
@@ -468,11 +463,16 @@ func telemetryFromPB(record *corev1.TelemetryRecord) platform.TelemetryRecord {
 	}
 }
 
-func commandFromPB(command *corev1.Command) platform.Command {
+// commandFromPB maps the gRPC command to the REST representation. It must return
+// contracts.CommandResponse rather than platform.Command: the latter also
+// carries dispatcher bookkeeping (dispatchAttempts, deadlineAt) which is not
+// part of the management API contract and only ever reached clients as
+// always-zero values.
+func commandFromPB(command *corev1.Command) contracts.CommandResponse {
 	if command == nil {
-		return platform.Command{}
+		return contracts.CommandResponse{}
 	}
-	return platform.Command{
+	return contracts.CommandResponse{
 		ID:        command.GetId(),
 		TenantID:  command.GetTenantId(),
 		DeviceID:  command.GetDeviceId(),

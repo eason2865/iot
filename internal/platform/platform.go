@@ -68,7 +68,6 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/healthz", a.healthHandler)
 	mux.Handle("/metrics", a.metrics.Handler())
 	if a.enableAPI {
-		mux.HandleFunc("/openapi.json", a.openapiHandler)
 		mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)
 		mux.HandleFunc("/api/v1/tenants", a.handleTenants)
 		mux.HandleFunc("/api/v1/devices", a.handleDevices)

@@ -69,7 +69,7 @@
 ## 安全、可靠性与数据模型基线
 
 - MQTT 认证统一回调 `iot-core` 内部认证端点，设备用户名为 `tenantId:deviceId`，密码只在注册时出现，数据库保存 bcrypt 哈希；EMQX `authorization.no_match=deny`，由认证响应下发精确租户/设备 ACL。生产环境应再通过 NetworkPolicy、服务身份认证和 TLS 保护回调端点。
-- `management-api` 默认只开放 `/healthz`、`/openapi.json` 和 MQTT Schema；所有业务 REST 请求要求 Bearer Token，令牌通过 Secret Manager 注入，不写入镜像和 Git。
+- `management-api` 免鉴权只开放 `/healthz` 和 MQTT Schema；所有业务 REST 请求要求 Bearer Token，令牌通过 Secret Manager 注入，不写入镜像和 Git。
 - 命令创建先写 PostgreSQL `created` 状态；`iot-core` 多副本通过 `FOR UPDATE SKIP LOCKED` 领取租约，发布成功后变为 `sent`，达到 deadline 变为 `timeout`，ACK 写入 `command_ack` 和 `command_events`。命令 ID 使用 UUIDv7，便于排序和跨副本唯一。
 - JSON 解码、PostgreSQL、TDengine、MQTT 投递失败的 Kafka 消息先写入 `iot.dlq`，成功后才提交原消费位点。人工检查 `stage/error` 后使用 `dlq-replay --limit N` 重放，禁止自动无限重试造成毒丸消息循环。
 - 租户和命令列表使用 keyset cursor 分页，单页上限 100；禁止在 REST 层一次性拉取全表。

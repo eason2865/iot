@@ -303,8 +303,6 @@ func routeLabel(path string) string {
 		return "/healthz"
 	case path == "/metrics":
 		return "/metrics"
-	case path == "/openapi.json":
-		return "/openapi.json"
 	case path == "/schemas/mqtt-envelope.json":
 		return "/schemas/mqtt-envelope.json"
 	case path == "/api/v1/tenants":

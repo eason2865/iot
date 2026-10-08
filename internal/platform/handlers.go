@@ -33,14 +33,6 @@ func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *App) openapiHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	writeJSON(w, http.StatusOK, contracts.OpenAPISpec())
-}
-
 func (a *App) mqttEnvelopeSchemaHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -219,9 +211,9 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 		if a.metrics != nil {
 			a.metrics.IncCommand("created", "ok")
 		}
-		writeJSON(w, http.StatusCreated, cmd)
+		writeJSON(w, http.StatusCreated, commandResponse(cmd))
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, a.store.ListCommands())
+		writeJSON(w, http.StatusOK, commandResponses(a.store.ListCommands()))
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -241,7 +233,7 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "command not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, cmd)
+		writeJSON(w, http.StatusOK, commandResponse(cmd))
 		return
 	}
 	if len(parts) == 2 && parts[1] == "ack" && r.Method == http.MethodPost {
@@ -264,10 +256,35 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 		if a.metrics != nil {
 			a.metrics.IncCommand("acked", "ok")
 		}
-		writeJSON(w, http.StatusOK, cmd)
+		writeJSON(w, http.StatusOK, commandResponse(cmd))
 		return
 	}
 	writeError(w, http.StatusNotFound, "not found")
+}
+
+// commandResponse projects a stored command onto the management API shape. The
+// store's Command also carries dispatcher bookkeeping (DispatchAttempts,
+// DeadlineAt) for the Kafka event and the dispatch loop; those are not part of
+// the REST contract, so marshalling the domain type here would make this
+// harness disagree with internal/adminapi. See contracts.CommandResponse.
+func commandResponse(cmd Command) contracts.CommandResponse {
+	return contracts.CommandResponse{
+		ID:        cmd.ID,
+		TenantID:  cmd.TenantID,
+		DeviceID:  cmd.DeviceID,
+		Status:    cmd.Status,
+		Payload:   cmd.Payload,
+		CreatedAt: cmd.CreatedAt,
+		UpdatedAt: cmd.UpdatedAt,
+	}
+}
+
+func commandResponses(commands []Command) []contracts.CommandResponse {
+	out := make([]contracts.CommandResponse, 0, len(commands))
+	for _, cmd := range commands {
+		out = append(out, commandResponse(cmd))
+	}
+	return out
 }
 
 func (a *App) handleDeviceByID(w http.ResponseWriter, r *http.Request) {

@@ -291,7 +291,7 @@ iot/
 ├── migrations/     # Database migrations
 ├── proto/          # iot-core protobuf contracts
 ├── monitoring/     # Local Prometheus / Grafana configuration
-└── docs/           # OpenAPI, schemas, production deployment guide, and ADRs
+└── docs/           # OpenAPI and MQTT schema (single source, embedded via docs/contracts.go), deployment guide, and ADRs
 ```
 
 ## Documentation

@@ -291,7 +291,7 @@ iot/
 ├── migrations/     # 数据库迁移
 ├── proto/          # iot-core protobuf 契约
 ├── monitoring/     # 本地 Prometheus / Grafana 配置
-└── docs/           # OpenAPI、Schema、生产部署指南和 ADR
+└── docs/           # OpenAPI 与 MQTT Schema（唯一源，经 docs/contracts.go embed）、生产部署指南和 ADR
 ```
 
 ## 文档

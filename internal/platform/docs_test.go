@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"testing"
 )
 
@@ -12,11 +14,14 @@ func TestDocsEndpoints(t *testing.T) {
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
-	checkJSONEndpoint(t, ts.URL+"/openapi.json", "openapi")
-	checkJSONEndpoint(t, ts.URL+"/schemas/mqtt-envelope.json", "title")
+	// The served contract must be the published document on disk: docs/*.json is
+	// the single hand-maintained source and is embedded at build time, so this
+	// catches a handler that returns anything other than that file.
+	checkJSONEndpoint(t, ts.URL+"/openapi.json", "openapi", "../../docs/openapi.json")
+	checkJSONEndpoint(t, ts.URL+"/schemas/mqtt-envelope.json", "title", "../../docs/mqtt-envelope.schema.json")
 }
 
-func checkJSONEndpoint(t *testing.T, url, requiredKey string) {
+func checkJSONEndpoint(t *testing.T, url, requiredKey, publishedPath string) {
 	t.Helper()
 	resp, err := http.Get(url)
 	if err != nil {
@@ -32,5 +37,17 @@ func checkJSONEndpoint(t *testing.T, url, requiredKey string) {
 	}
 	if _, ok := got[requiredKey]; !ok {
 		t.Fatalf("response missing key %q", requiredKey)
+	}
+
+	raw, err := os.ReadFile(publishedPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", publishedPath, err)
+	}
+	var published map[string]any
+	if err := json.Unmarshal(raw, &published); err != nil {
+		t.Fatalf("%s is not valid JSON: %v", publishedPath, err)
+	}
+	if !reflect.DeepEqual(got, published) {
+		t.Fatalf("GET %s does not match %s", url, publishedPath)
 	}
 }

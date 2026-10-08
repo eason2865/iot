@@ -16,7 +16,7 @@ import (
 )
 
 func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "management-api"})
+	app := newBusinessAPIApp(t, nil)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -53,7 +53,7 @@ func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
 }
 
 func TestCommandAckFlow(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "management-api"})
+	app := newBusinessAPIApp(t, nil)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -86,7 +86,7 @@ func TestCommandAckFlow(t *testing.T) {
 }
 
 func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "management-api"})
+	app := newBusinessAPIApp(t, nil)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -122,7 +122,7 @@ func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
 
 func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
 	metrics := platform.NewMetrics()
-	app := platform.New(platform.Config{ServiceName: "management-api", Metrics: metrics})
+	app := newBusinessAPIApp(t, metrics)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -148,7 +148,7 @@ func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
 
 func TestMetricsEndpointExposesTraffic(t *testing.T) {
 	metrics := platform.NewMetrics()
-	app := platform.New(platform.Config{ServiceName: "management-api", Metrics: metrics})
+	app := newBusinessAPIApp(t, metrics)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 
@@ -263,5 +263,68 @@ func getJSON(t *testing.T, url string, out any) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("Decode() error = %v", err)
+	}
+}
+
+// newBusinessAPIApp builds the in-process REST surface used by these tests and
+// by the live E2E harness. The business endpoints are strictly opt-in via
+// EnableBusinessAPI: they carry no auth middleware, so they are never inferred
+// from the service name.
+func newBusinessAPIApp(t *testing.T, metrics *platform.Metrics) *platform.App {
+	t.Helper()
+	return platform.New(platform.Config{
+		ServiceName:       "management-api",
+		Metrics:           metrics,
+		EnableBusinessAPI: true,
+	})
+}
+
+// TestBusinessAPIIsOptIn locks in the hardening that dropped the implicit
+// `|| ServiceName == "management-api"` default. These routes have no bearer
+// token check, so a service must opt in explicitly; being *named*
+// management-api must never be enough, otherwise any service wired through
+// bootstrap under that name would expose unauthenticated tenant/device/
+// telemetry/command writes.
+func TestBusinessAPIIsOptIn(t *testing.T) {
+	for _, serviceName := range []string{"management-api", "device-worker", "telemetry-ingestor", "iot-core"} {
+		app := platform.New(platform.Config{ServiceName: serviceName})
+		ts := httptest.NewServer(app.Router())
+
+		resp, err := http.Get(ts.URL + "/api/v1/tenants")
+		if err != nil {
+			ts.Close()
+			t.Fatalf("http.Get() error = %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			ts.Close()
+			t.Fatalf("service %q: GET /api/v1/tenants status = %d, want %d (business API must be opt-in)", serviceName, resp.StatusCode, http.StatusNotFound)
+		}
+
+		// Operational endpoints stay available regardless of the flag.
+		health, err := http.Get(ts.URL + "/healthz")
+		if err != nil {
+			ts.Close()
+			t.Fatalf("http.Get() error = %v", err)
+		}
+		_ = health.Body.Close()
+		ts.Close()
+		if health.StatusCode != http.StatusOK {
+			t.Fatalf("service %q: GET /healthz status = %d, want %d", serviceName, health.StatusCode, http.StatusOK)
+		}
+	}
+
+	// Opting in is still the supported path, including for a service that is not
+	// called management-api.
+	app := platform.New(platform.Config{ServiceName: "not-management-api", EnableBusinessAPI: true})
+	ts := httptest.NewServer(app.Router())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/api/v1/tenants")
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("EnableBusinessAPI=true: status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }

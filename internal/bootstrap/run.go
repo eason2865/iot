@@ -47,10 +47,12 @@ func Run(serviceName string) error {
 		Store:              resources.store,
 		Publisher:          resources.publisher,
 		Metrics:            resources.metrics,
-		// Only the public-facing management-api serves the business REST
-		// endpoints. Background workers expose health/metrics only, so their
-		// unauthenticated write APIs cannot be reached in-cluster.
-		EnableBusinessAPI: serviceName == "management-api",
+		// EnableBusinessAPI is intentionally left false. bootstrap only launches
+		// telemetry-ingestor and device-worker, which must expose health/metrics
+		// only; their business REST routes have no auth middleware, so enabling
+		// them here would create an unauthenticated write API in-cluster.
+		// Public REST is served by management-api via internal/adminapi, which
+		// requires a bearer token.
 	})
 	srv := &http.Server{
 		Addr:    listenAddr(),

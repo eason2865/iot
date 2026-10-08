@@ -9,14 +9,18 @@ import (
 )
 
 // NOTE: this file implements the business REST endpoints of platform.App
-// (/api/v1/*). Production does NOT serve them: management-api runs its own
-// go-zero REST gateway in internal/adminapi and talks to iot-core over gRPC
-// (see docs/adr/0001-iot-core-management-api-split.md), while bootstrap only
-// instantiates platform.App for telemetry-ingestor and device-worker with
-// EnableBusinessAPI=false. These handlers are retained because they are the
-// HTTP harness for the platform unit tests and for the live E2E tests in
-// e2e_test.go / e2e_load_test.go. Do not add new production behaviour here —
-// new REST surface belongs in internal/adminapi.
+// (/api/v1/*). Production does NOT serve them, and they carry no auth
+// middleware, so App only registers them when Config.EnableBusinessAPI is set
+// explicitly — never inferred from the service name.
+//
+// management-api runs its own go-zero REST gateway behind a bearer token in
+// internal/adminapi and talks to iot-core over gRPC (see
+// docs/adr/0001-iot-core-management-api-split.md); bootstrap instantiates
+// platform.App only for telemetry-ingestor and device-worker, and leaves
+// EnableBusinessAPI false. That makes these handlers reachable only from the
+// platform unit tests and the live E2E tests in e2e_test.go /
+// e2e_load_test.go. Do not add new production behaviour here — new REST
+// surface belongs in internal/adminapi.
 
 func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

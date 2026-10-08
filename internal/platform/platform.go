@@ -12,9 +12,12 @@ type Config struct {
 	Publisher          MessagePublisher
 	Metrics            *Metrics
 	// EnableBusinessAPI registers the tenant/device/telemetry/command REST
-	// endpoints. It defaults to true for the public-facing "management-api"
-	// service and false for background workers, so callers only need to set it
-	// explicitly to override that default.
+	// endpoints. It is opt-in and defaults to false for every service: those
+	// endpoints carry no authentication (see handlers.go), so enabling them by
+	// service name would expose unauthenticated writes to any process that
+	// happens to be called "management-api". Production REST is served by
+	// internal/adminapi behind a bearer token; this flag exists for the test
+	// harness and for a deliberately gated in-process HTTP surface.
 	EnableBusinessAPI bool
 }
 
@@ -38,9 +41,9 @@ func New(cfg Config) *App {
 		store:       cfg.Store,
 		publisher:   cfg.Publisher,
 		ttl:         ttl,
-		// management-api serves business REST by default; workers only when
-		// explicitly enabled.
-		enableAPI: cfg.EnableBusinessAPI || cfg.ServiceName == "management-api",
+		// Business REST is strictly opt-in: never inferred from ServiceName,
+		// because these routes have no auth middleware.
+		enableAPI: cfg.EnableBusinessAPI,
 	}
 	if app.store == nil {
 		app.store = newMemoryStore(ttl)

@@ -5,12 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"iot/internal/platform"
 )
 
 func TestDocsEndpoints(t *testing.T) {
-	app := platform.New(platform.Config{ServiceName: "management-api"})
+	app := newBusinessAPIApp(t, nil)
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()
 

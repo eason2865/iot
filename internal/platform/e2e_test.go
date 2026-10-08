@@ -69,6 +69,8 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		Store:       store,
 		Publisher:   publisher,
 		Metrics:     metrics,
+		// Business REST is opt-in; these routes have no auth middleware.
+		EnableBusinessAPI: true,
 	})
 	ts := httptest.NewServer(app.Router())
 	defer ts.Close()

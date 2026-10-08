@@ -47,7 +47,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 
 ## 当前实现
 
-- 6 个可启动入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`
+- 6 个服务入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
 - 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
@@ -277,15 +277,16 @@ iot/
 │   ├── iot-core/            # 核心业务 gRPC 服务
 │   ├── demo/       # 随机造流与 ACK 的模拟器
 │   ├── telemetry-ingestor/  # MQTT 接入与事件解耦
-│   └── device-worker/       # Kafka 消费、落库和下行处理
+│   ├── device-worker/       # Kafka 消费、落库和下行处理
+│   ├── dlq-replay/          # DLQ 检查与重放工具
+│   └── e2eclient/ e2espoof/ # 端到端测试客户端（不部署）
 ├── internal/
 │   ├── adminapi/   # REST 网关，负责 HTTP 到 iot-core 的转换
 │   ├── bootstrap/  # 启动装配
 │   ├── contracts/  # topic、envelope、状态机、OpenAPI 和 Schema 契约
 │   ├── core/       # 核心业务 gRPC 服务实现
 │   ├── demo/       # 造流模拟器运行时
-│   ├── platform/   # 仓储、消息、指标、device-worker、MQTT/TDengine 适配
-│   └── server/     # HTTP 基础能力
+│   └── platform/   # 仓储、消息、指标、device-worker、MQTT/TDengine 适配，以及测试用 REST harness
 ├── charts/iot/     # Helm 部署清单
 ├── migrations/     # 数据库迁移
 ├── proto/          # iot-core protobuf 契约

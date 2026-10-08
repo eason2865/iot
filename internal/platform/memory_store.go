@@ -9,6 +9,11 @@ import (
 	"iot/internal/contracts"
 )
 
+// memoryStore is the in-memory Repository used only when New is given no Store.
+// Production always injects the PostgreSQL store (see internal/bootstrap and
+// internal/core); this type exists so the platform unit tests and the E2E
+// harness can run without a database. Keep it behaviourally aligned with
+// PostgresStore, but do not rely on it for durability or concurrency semantics.
 type memoryStore struct {
 	mu sync.RWMutex
 

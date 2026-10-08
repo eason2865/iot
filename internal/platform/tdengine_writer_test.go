@@ -11,11 +11,7 @@ func TestTDengineWriterWriteAfterCloseDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db handle: %v", err)
 	}
-	writer := &TDengineWriter{
-		db:        db,
-		pendingCh: make(chan TelemetryRecord),
-		closedCh:  make(chan struct{}),
-	}
+	writer := &TDengineWriter{db: db}
 
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)

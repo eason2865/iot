@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"errors"
 	"log"
 	"time"
 
@@ -175,5 +174,3 @@ func (b *MQTTBridge) Run(ctx context.Context) error {
 	}
 	return nil
 }
-
-var errMQTTBridgeDLQ = errors.New("mqtt bridge dead-letter unavailable")

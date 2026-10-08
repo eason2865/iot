@@ -47,7 +47,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 
 ## Current Implementation
 
-- 6 runnable entrypoints: `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`
+- 6 service entrypoints: `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`, plus 2 E2E test tools (`cmd/e2eclient`, `cmd/e2espoof`)
 - `management-api` uses go-zero REST; `iot-core` uses gRPC + protobuf
 - Local Docker orchestration no longer includes a business service-discovery component
 - 1 PostgreSQL initialization migration: `migrations/001_init.sql`
@@ -277,15 +277,16 @@ iot/
 │   ├── iot-core/            # Core business gRPC service
 │   ├── demo/                # Simulator generating random traffic and ACKs
 │   ├── telemetry-ingestor/  # MQTT ingestion and event decoupling
-│   └── device-worker/       # Kafka consumption, persistence, and downlink handling
+│   ├── device-worker/       # Kafka consumption, persistence, and downlink handling
+│   ├── dlq-replay/          # DLQ inspection and replay tool
+│   └── e2eclient/ e2espoof/ # End-to-end test clients (not deployed)
 ├── internal/
 │   ├── adminapi/   # REST gateway translating HTTP to iot-core calls
 │   ├── bootstrap/  # Startup assembly
 │   ├── contracts/  # Topic, envelope, state machine, OpenAPI, and schema contracts
 │   ├── core/       # Core business gRPC service implementation
 │   ├── demo/       # Traffic simulator runtime
-│   ├── platform/   # Repositories, messaging, metrics, device-worker, MQTT/TDengine adapters
-│   └── server/     # HTTP infrastructure
+│   └── platform/   # Repositories, messaging, metrics, device-worker, MQTT/TDengine adapters, test REST harness
 ├── charts/iot/     # Helm deployment manifests
 ├── migrations/     # Database migrations
 ├── proto/          # iot-core protobuf contracts

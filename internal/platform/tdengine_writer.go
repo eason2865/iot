@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -13,18 +12,18 @@ import (
 	_ "github.com/taosdata/driver-go/v3/taosRestful"
 )
 
+// TDengineWriter writes one telemetry record per statement. It deliberately does
+// not buffer records in memory: device-worker commits a Kafka offset only after
+// the write returns, so a background batch would turn "write succeeded" into
+// "enqueued" and open a new data-loss window. Throughput is scaled on the
+// TDengine side (connection pool / server capacity), not by batching here.
 type TDengineWriter struct {
-	db            *sql.DB
-	table         string
-	pendingCh     chan TelemetryRecord
-	closedCh      chan struct{}
-	mu            sync.Mutex
-	closed        bool
-	closeOnce     sync.Once
-	wg            sync.WaitGroup
-	flushInterval time.Duration
-	batchSize     int
-	metrics       *Metrics
+	db        *sql.DB
+	table     string
+	mu        sync.Mutex
+	closed    bool
+	closeOnce sync.Once
+	metrics   *Metrics
 }
 
 type TDengineConfig struct {
@@ -53,13 +52,9 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 		return nil, err
 	}
 	w := &TDengineWriter{
-		db:            db,
-		table:         table,
-		pendingCh:     make(chan TelemetryRecord, 1024),
-		closedCh:      make(chan struct{}),
-		flushInterval: 100 * time.Millisecond,
-		batchSize:     50,
-		metrics:       metrics,
+		db:      db,
+		table:   table,
+		metrics: metrics,
 	}
 	if err := w.ensureSchema(); err != nil {
 		_ = db.Close()
@@ -74,15 +69,9 @@ func (w *TDengineWriter) Close() error {
 	}
 	w.closeOnce.Do(func() {
 		w.mu.Lock()
-		if w.closedCh == nil {
-			w.closedCh = make(chan struct{})
-		}
 		w.closed = true
-		close(w.closedCh)
-		close(w.pendingCh)
 		w.mu.Unlock()
 	})
-	w.wg.Wait()
 	return w.db.Close()
 }
 
@@ -121,7 +110,7 @@ func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
 	w.mu.Unlock()
 	// A Kafka offset is committed only after this call returns successfully, so
 	// TDengine failures are routed to the DLQ instead of being logged and lost.
-	return w.writeBatch([]TelemetryRecord{rec})
+	return w.writeRecord(rec)
 }
 
 // escapeTD escapes a value for a TDengine string literal. Backslashes must be
@@ -132,63 +121,23 @@ func escapeTD(s string) string {
 	return strings.ReplaceAll(s, `'`, `''`)
 }
 
-func (w *TDengineWriter) run() {
-	defer w.wg.Done()
-
-	ticker := time.NewTicker(w.flushInterval)
-	defer ticker.Stop()
-
-	batch := make([]TelemetryRecord, 0, w.batchSize)
-	flush := func() {
-		if len(batch) == 0 {
-			return
+func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
+	hash := fmt.Sprintf("%x", sha256.Sum256(rec.Payload))
+	// One subtable per device makes tenant/device dimensions TDengine tags.
+	// Raw JSON remains in PostgreSQL JSONB, eliminating a second bounded copy.
+	tableHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rec.TenantID+"\x00"+rec.DeviceID)))[:24]
+	childTable := w.table + "_" + tableHash
+	statement := fmt.Sprintf(
+		"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES ('%s', '%s', '%s', '%s', '%s', %d)",
+		childTable, w.table, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
+		time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
+		escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
+	)
+	if _, err := w.db.Exec(statement); err != nil {
+		if w.metrics != nil {
+			w.metrics.IncTDengineWrite("error")
 		}
-		if err := w.writeBatch(batch); err != nil {
-			log.Printf("tdengine batch write error: %v", err)
-		}
-		batch = batch[:0]
-	}
-
-	for {
-		select {
-		case rec, ok := <-w.pendingCh:
-			if !ok {
-				flush()
-				return
-			}
-			batch = append(batch, rec)
-			if len(batch) >= w.batchSize {
-				flush()
-			}
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-func (w *TDengineWriter) writeBatch(records []TelemetryRecord) error {
-	if len(records) == 0 {
-		return nil
-	}
-
-	for _, rec := range records {
-		hash := fmt.Sprintf("%x", sha256.Sum256(rec.Payload))
-		// One subtable per device makes tenant/device dimensions TDengine tags.
-		// Raw JSON remains in PostgreSQL JSONB, eliminating a second bounded copy.
-		tableHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rec.TenantID+"\x00"+rec.DeviceID)))[:24]
-		childTable := w.table + "_" + tableHash
-		statement := fmt.Sprintf(
-			"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES ('%s', '%s', '%s', '%s', '%s', %d)",
-			childTable, w.table, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
-			time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
-			escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
-		)
-		if _, err := w.db.Exec(statement); err != nil {
-			if w.metrics != nil {
-				w.metrics.IncTDengineWrite("error")
-			}
-			return err
-		}
+		return err
 	}
 	if w.metrics != nil {
 		w.metrics.IncTDengineWrite("ok")

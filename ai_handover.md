@@ -103,6 +103,18 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 - 本次加固（2026-09-20）：MQTT 认证回调加共享密钥头、ACL 覆盖共享/普通订阅、DLQ 重放遥测幂等（基于 `telemetry_records` 唯一约束）、`migrations/001_init.sql` 与 `ensureSchema` 对齐、TDengine 默认表名统一为 `telemetry_v2`。已通过 `go build ./...`、`go test -count=1 ./...`、`make fmt-check`、`make build`。
 - 本次加固（2026-09-21）：iot-core gRPC 接入 mTLS（凭证加载器 + 服务端 `grpc.Creds` + 客户端 `zrpc.WithTransportCredentials` + 证书脚本 + Helm 开关）。已通过 `go build ./...`、`go vet`、`go test ./...`（含 net.Pipe 真实 mTLS 握手与无证书拒绝用例）、`helm template` 开关两种模式渲染校验、证书脚本 openssl 生成/校验。
 - 本次加固（2026-09-21，二轮审查修复）：H1 命令 `published` 断链恢复（`RecoverStaleCommands` 超时重排队 + 次数上限置 failed）、消费者组 `FirstOffset`、dlq-replay `-stage`/`-dry-run`；H3 `escapeTD` 反斜杠转义、REST 摄入 `ValidateEnvelope`；H5 DSN 移出 ConfigMap/values 入 Secret、`.env.example` 补密钥项、demo ACL 收敛到单租户。已通过 `go build ./...`、`go vet ./...`、`go test ./...`、`helm template`（ConfigMap 无 DSN、envFrom 引用 Secret 渲染正常）。
+- 本次清理（2026-10-08，死代码）：删除 `internal/server` 包（仅被自身测试引用）、`errMQTTBridgeDLQ` 死变量、TDengine writer 从未启动的批处理路径（`pendingCh`/`closedCh`/`run()`/`flushInterval`/`batchSize`/`wg`，`WriteTelemetry` 改为 `writeRecord` 逐条写）。**TDengine 不引入内存攒批**：worker 是"写入成功才提交 Kafka offset"，接批处理会把语义变成"入队即提交"，凭空新增丢数据窗口；吞吐靠 TDengine 侧连接能力而非攒批。`internal/platform/handlers.go` 与 `memory_store.go` 在生产路径无调用方，但是单元测试和 `e2e_test.go`/`e2e_load_test.go` 两个真实 E2E 的 HTTP harness，故保留并加注释标注，未删除。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test ./...`。
+
+## 待办（2026-10-08 评审已确认，尚未开工）
+
+- `internal/platform/handlers.go` + `memory_store.go`：生产死代码但承载 8 处测试调用（含两个真实 E2E 的 HTTP 入口）。要删必须先决定 E2E 夹具改走 adminapi+iot-core，还是放弃这部分 REST 断言。**清理前不要直接删，会打掉 E2E 覆盖。**
+- Kafka 生产者语义：`kafka_publisher.go` 遥测/命令 writer 为 `RequireOne`，DLQ writer 为 `RequireAll`，与"DLQ 兜底不丢数据"的目标不一致，需对齐或写入 ADR。
+- OpenAPI 双份维护：`docs/openapi.json` 与 `internal/contracts/docs.go` 是两份手写副本，`internal/platform/docs_test.go` 只断言端点能返回 JSON，不比对磁盘文件。建议改 `go:embed` + CI 一致性断言。
+- `GetCommand` 无租户维度（`internal/core/service.go`），而 `ListCommands` 强制 `tenantId`，契约不自洽：需明确 management-api 是"运营方跨租户接口"还是"租户隔离接口"，再统一两者。
+- `iot.dlq` 无消费侧：只有离线 `cmd/dlq-replay`，无指标、无告警、无保留策略。
+- `ValidateEnvelope` 只校验 `ts > 0`，无合理区间；设备时钟异常会污染 TDengine 时序。
+- dispatcher 以 `context.Background()` 启动（`internal/core/server.go`），未纳入优雅停机。
+- `TenantIDs` allowlist（`internal/platform/worker.go`）已实现但 bootstrap 未接线，worker 默认处理全部租户。
 
 ## 文档入口
 

@@ -7,6 +7,12 @@ replicas:
   telemetryIngestor: 2
   deviceWorker: 1
 
+deviceWorker:
+  # Optional tenant isolation. Empty (the default) means the worker processes
+  # every tenant, which matches the behaviour before the allowlist existed.
+  # Set a comma-separated tenant list to make this worker ignore the rest.
+  tenantIDs: ""
+
 security:
   # Supply real values from an external secret manager in production. The local
   # deployment script creates this Kubernetes Secret for integration tests.

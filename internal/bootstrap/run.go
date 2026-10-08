@@ -159,6 +159,12 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			MQTTClientID:     mqttClientID("EMQX_DEVICE_WORKER_CLIENT_ID", "iot-device-worker"),
 			MQTTUsername:     os.Getenv("EMQX_USERNAME"),
 			MQTTPassword:     os.Getenv("EMQX_PASSWORD"),
+			// Optional tenant allowlist. Empty means every tenant is processed,
+			// which is the previous behaviour; setting it makes this worker drop
+			// telemetry and commands for tenants it is not responsible for. The
+			// subscription stays a wildcard, so enforcement happens here, not in
+			// the broker ACL.
+			TenantIDs: runtimeconfig.SplitCSV(os.Getenv("DEVICE_WORKER_TENANT_IDS")),
 		}, store, tdWriter, res.metrics)
 	}
 

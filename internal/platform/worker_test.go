@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"iot/internal/contracts"
+	"iot/internal/runtimeconfig"
 )
 
 func TestNormalizeAckTopicFiltersDefaultsToCanonicalFilter(t *testing.T) {
@@ -51,6 +52,26 @@ func TestWorkerTenantAllowedRestrictsConfiguredTenants(t *testing.T) {
 	}
 	if worker.tenantAllowed("tenant-c") {
 		t.Fatal("tenantAllowed() accepted tenant-c outside the allowlist")
+	}
+}
+
+// TestWorkerTenantAllowlistFromEnv pins the DEVICE_WORKER_TENANT_IDS wiring: an
+// unset or blank value must not restrict anything, so deployments that predate
+// the allowlist keep processing every tenant.
+func TestWorkerTenantAllowlistFromEnv(t *testing.T) {
+	for _, raw := range []string{"", " ", ",", " , "} {
+		worker := NewWorker(WorkerConfig{TenantIDs: runtimeconfig.SplitCSV(raw)}, nil, nil, nil)
+		if !worker.tenantAllowed("any-tenant") {
+			t.Fatalf("SplitCSV(%q) restricted tenants; an empty allowlist must mean all tenants", raw)
+		}
+	}
+
+	worker := NewWorker(WorkerConfig{TenantIDs: runtimeconfig.SplitCSV("tenant-a, tenant-b")}, nil, nil, nil)
+	if !worker.tenantAllowed("tenant-b") {
+		t.Fatal("tenantAllowed() rejected tenant-b from the parsed CSV allowlist")
+	}
+	if worker.tenantAllowed("tenant-c") {
+		t.Fatal("tenantAllowed() accepted tenant-c outside the parsed CSV allowlist")
 	}
 }
 

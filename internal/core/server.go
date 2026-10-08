@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/service"
@@ -22,6 +24,14 @@ import (
 func Run() error {
 	platform.ConfigureStdLogger("iot-core")
 	metrics := platform.NewMetrics()
+
+	// The dispatch loop is a background worker, not a request handler: without a
+	// cancellable context it kept claiming and publishing commands while the
+	// process was already shutting down. Tie it to SIGINT/SIGTERM so it stops
+	// between iterations instead of mid-cycle.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	store, closer, err := buildStore(5 * time.Minute)
 	if err != nil {
 		return err
@@ -41,7 +51,7 @@ func Run() error {
 		}
 	}()
 	if dispatchStore, ok := store.(platform.CommandDispatchStore); ok && publisher != nil {
-		go platform.NewCommandDispatcher(dispatchStore, publisher, runtimeconfig.Duration("COMMAND_ACK_TIMEOUT", 5*time.Minute)).Run(context.Background())
+		go platform.NewCommandDispatcher(dispatchStore, publisher, runtimeconfig.Duration("COMMAND_ACK_TIMEOUT", 5*time.Minute)).Run(ctx)
 	}
 	if authenticator, ok := store.(platform.DeviceAuthenticator); ok {
 		go serveMQTTAuthentication(

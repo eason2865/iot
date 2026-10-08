@@ -187,7 +187,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return nil
 	}
-	log.Printf("device-worker starting: telemetryReader=%t commandReader=%t mqtt=%t", w.telemetryReader != nil, w.commandReader != nil, w.mqtt != nil)
+	log.Printf("device-worker starting: telemetryReader=%t commandReader=%t mqtt=%t tenantAllowlist=%d", w.telemetryReader != nil, w.commandReader != nil, w.mqtt != nil, len(w.tenantAllowlist))
 	if w.mqtt != nil {
 		token := w.mqtt.Connect()
 		token.Wait()
@@ -256,6 +256,13 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			continue
 		}
 		if !w.tenantAllowed(rec.TenantID) {
+			// The subscription is a wildcard, so an allowlisted worker still
+			// receives other tenants' traffic. Drop it explicitly and make the
+			// drop visible: a silently skipped tenant looks like data loss.
+			log.Printf("telemetry skipped: tenant not in allowlist: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("telemetry", "filtered")
+			}
 			_ = w.telemetryReader.CommitMessages(ctx, msg)
 			continue
 		}
@@ -356,6 +363,12 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			continue
 		}
 		if !w.tenantAllowed(cmd.TenantID) {
+			// See the telemetry path: an allowlisted worker still receives other
+			// tenants' commands on a wildcard subscription.
+			log.Printf("command skipped: tenant not in allowlist: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("command", "filtered")
+			}
 			_ = w.commandReader.CommitMessages(ctx, msg)
 			continue
 		}

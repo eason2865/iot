@@ -109,6 +109,7 @@ export KAFKA_COMMAND_TOPIC=iot.command
 export EMQX_TOPIC_FILTER=tenant/+/device/+/telemetry
 export EMQX_TELEMETRY_INGESTOR_CLIENT_ID=iot-telemetry-ingestor
 export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
+export DEVICE_WORKER_TENANT_IDS=   # optional CSV allowlist; empty = all tenants
 export TDENGINE_TABLE=telemetry_v2
 export KAFKA_DLQ_TOPIC=iot.dlq
 export MANAGEMENT_API_TOKEN=change-me

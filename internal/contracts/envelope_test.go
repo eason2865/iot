@@ -1,7 +1,9 @@
 package contracts_test
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"iot/internal/contracts"
 )
@@ -59,5 +61,63 @@ func TestParseEnvelopeRejectsInvalidTopicIdentifiers(t *testing.T) {
 
 	if _, err := contracts.ParseEnvelope(raw); err == nil {
 		t.Fatal("ParseEnvelope() error = nil, want error")
+	}
+}
+
+// TestValidateEnvelopeTimestampBounds covers the timestamp range check. Without
+// it a broken or hostile device clock writes timestamps that sort incorrectly
+// forever: a far-future ts stays the "latest" point, and a seconds-as-
+// milliseconds mix-up silently lands in 1970.
+func TestValidateEnvelopeTimestampBounds(t *testing.T) {
+	now := time.Now()
+	valid := func(ts int64) contracts.Envelope {
+		return contracts.Envelope{
+			MsgID:    "msg-1",
+			TenantID: "tenant-a",
+			DeviceID: "device-1",
+			Type:     "telemetry",
+			Version:  "v1",
+			Ts:       ts,
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		ts      int64
+		wantErr bool
+	}{
+		{"current time", now.UnixMilli(), false},
+		{"slightly behind", now.Add(-24 * time.Hour).UnixMilli(), false},
+		{"inside the clock skew", now.Add(4 * time.Minute).UnixMilli(), false},
+		{"exactly the 2000-01-01 floor", 946684800000, false},
+		{"just below the floor", 946684799999, true},
+		{"seconds sent as milliseconds (1970)", 1717670000, true},
+		{"well beyond the clock skew", now.Add(time.Hour).UnixMilli(), true},
+		{"zero", 0, true},
+		{"negative", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := contracts.ValidateEnvelope(valid(tc.ts))
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("ValidateEnvelope(ts=%d) error = %v, want nil", tc.ts, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateEnvelope(ts=%d) error = nil, want an error", tc.ts)
+			}
+			// Callers and the DLQ rely on the generic sentinel, so the specific
+			// timestamp error must still satisfy errors.Is(ErrInvalidEnvelope).
+			if !errors.Is(err, contracts.ErrInvalidEnvelope) {
+				t.Fatalf("ValidateEnvelope(ts=%d) error = %v, want it to wrap ErrInvalidEnvelope", tc.ts, err)
+			}
+			if tc.ts == 0 || tc.ts == -1 {
+				return // handled by the required-field check, not the range check
+			}
+			if !errors.Is(err, contracts.ErrEnvelopeTimestampOutOfRange) {
+				t.Fatalf("ValidateEnvelope(ts=%d) error = %v, want ErrEnvelopeTimestampOutOfRange", tc.ts, err)
+			}
+		})
 	}
 }

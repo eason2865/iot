@@ -112,6 +112,8 @@ export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
 export DEVICE_WORKER_TENANT_IDS=   # optional CSV allowlist; empty = all tenants
 export TDENGINE_TABLE=telemetry_v2
 export KAFKA_DLQ_TOPIC=iot.dlq
+export KAFKA_TOPIC_REPLICATION_FACTOR=1     # 生产：>= 3
+export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # 生产：>= 2，否则 acks=all 等价于 acks=1
 export MANAGEMENT_API_TOKEN=change-me
 export EMQX_INTERNAL_PASSWORD=change-me
 ```
@@ -163,12 +165,12 @@ make build
 - `POST /api/v1/telemetry`
 - `POST /api/v1/commands`
 - `GET /api/v1/commands?tenantId=<tenant-id>`
-- `GET /api/v1/commands/{id}`
+- `GET /api/v1/commands/{id}?tenantId=<tenant-id>`
 - `POST /api/v1/commands/{id}/ack`
 
 列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
 
-命令列表必须指定 `tenantId`，服务端在 gRPC 和 PostgreSQL 查询层都会按租户过滤；`pageSize` 和不透明 `cursor` 仍用于租户内分页。
+命令相关接口统一按租户隔离：列表与详情都必须指定 `tenantId`，ACK 还要求 `deviceId`。跨租户读取返回 not found 而不是 forbidden，避免响应泄露"该命令存在"。列表在 gRPC 和 PostgreSQL 查询层都按租户过滤；`pageSize` 和不透明 `cursor` 用于租户内分页。
 
 REST 接口以上方路由表与 `internal/adminapi` 为准，不再单独维护 OpenAPI 文档。
 

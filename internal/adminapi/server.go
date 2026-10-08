@@ -1,9 +1,7 @@
 package adminapi
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +11,8 @@ import (
 	"github.com/zeromicro/go-zero/core/service"
 	"github.com/zeromicro/go-zero/rest"
 	"github.com/zeromicro/go-zero/zrpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"iot/internal/contracts"
@@ -353,7 +353,13 @@ func (s *Server) getCommandHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	resp, err := s.rpc.GetCommand(r.Context(), &corev1.GetCommandRequest{Id: id})
+	// tenantId is required: iot-core answers InvalidArgument when it is missing
+	// and NotFound when the command belongs to another tenant, so the gateway
+	// does not duplicate either check.
+	resp, err := s.rpc.GetCommand(r.Context(), &corev1.GetCommandRequest{
+		Id:       id,
+		TenantId: r.URL.Query().Get("tenantId"),
+	})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -500,19 +506,39 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeRPCError maps an iot-core gRPC error onto the REST surface. The mapping
+// is by status code, never by message text: matching on substrings previously
+// turned "tenantId contains invalid MQTT topic characters" into 502 Bad Gateway
+// (no pattern matched) and "command does not belong to device" into 502 as well.
 func writeRPCError(w http.ResponseWriter, err error) {
-	status := http.StatusBadGateway
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		status = http.StatusGatewayTimeout
-	case strings.Contains(err.Error(), "not found"):
-		status = http.StatusNotFound
-	case strings.Contains(err.Error(), "already exists"):
-		status = http.StatusConflict
-	case strings.Contains(err.Error(), "required"):
-		status = http.StatusBadRequest
+	writeError(w, httpStatusFromGRPC(err), status.Convert(err).Message())
+}
+
+func httpStatusFromGRPC(err error) int {
+	switch status.Code(err) {
+	case codes.OK:
+		// status.Code(nil) is codes.OK, so a nil error maps to success rather
+		// than falling through to 500.
+		return http.StatusOK
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
+		return http.StatusBadRequest
+	case codes.NotFound:
+		return http.StatusNotFound
+	case codes.AlreadyExists, codes.Aborted:
+		return http.StatusConflict
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests
+	case codes.DeadlineExceeded:
+		return http.StatusGatewayTimeout
+	case codes.Unavailable:
+		return http.StatusBadGateway
+	default:
+		return http.StatusInternalServerError
 	}
-	writeError(w, status, err.Error())
 }
 
 func decodeJSON(r *http.Request, dst any) error {

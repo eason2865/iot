@@ -31,6 +31,10 @@ type WorkerConfig struct {
 	// before it is marked timeout. It starts only after the MQTT downlink
 	// succeeds (MarkCommandSent).
 	AckTimeout time.Duration
+	// TopicConfig controls how the topics this worker consumes are created when
+	// they are missing. The DLQ writer already used RequireAll, so the topic's
+	// min.insync.replicas must match or a degraded ISR blocks dead-lettering.
+	TopicConfig KafkaTopicConfig
 }
 
 type Worker struct {
@@ -70,7 +74,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		if dlqTopic == "" {
 			dlqTopic = "iot.dlq"
 		}
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, telemetryTopic, commandTopic, dlqTopic)
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, telemetryTopic, commandTopic, dlqTopic)
 		w.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {

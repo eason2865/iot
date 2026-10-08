@@ -16,6 +16,27 @@ var ErrDuplicateTelemetry = errors.New("duplicate telemetry message")
 // does not match the MQTT topic it arrived on (identity spoofing attempt).
 var errIdentityMismatch = errors.New("envelope identity does not match mqtt topic")
 
+// ErrNotFound marks a repository lookup that matched no row, or a row that
+// belongs to a different tenant or device. Both cases are deliberately the same
+// error: telling a caller that a command exists but belongs to someone else
+// leaks the existence of another tenant's data. Callers map it to a NotFound API
+// error, so the API surface never has to match on message text.
+var ErrNotFound = errors.New("not found")
+
+// ErrAlreadyExists marks a uniqueness conflict on create (tenant or device),
+// mapped to an AlreadyExists API error.
+var ErrAlreadyExists = errors.New("already exists")
+
+// IsNotFound reports whether err wraps ErrNotFound.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
+}
+
+// IsAlreadyExists reports whether err wraps ErrAlreadyExists.
+func IsAlreadyExists(err error) bool {
+	return errors.Is(err, ErrAlreadyExists)
+}
+
 // IsTelemetryDuplicate reports whether err wraps ErrDuplicateTelemetry.
 func IsTelemetryDuplicate(err error) bool {
 	return errors.Is(err, ErrDuplicateTelemetry)

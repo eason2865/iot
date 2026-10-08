@@ -21,6 +21,7 @@ type MQTTBridgeConfig struct {
 	PublishSlotTimeout time.Duration
 	KafkaBrokers       []string
 	DLQTopic           string
+	TopicConfig        KafkaTopicConfig
 }
 
 type MQTTBridge struct {
@@ -52,7 +53,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 		dlqTopic = "iot.dlq"
 	}
 	if len(cfg.KafkaBrokers) > 0 {
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, dlqTopic)
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, dlqTopic)
 	}
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.BrokerURL)

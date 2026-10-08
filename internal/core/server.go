@@ -112,11 +112,23 @@ func buildPublisher() (platform.MessagePublisher, func() error, error) {
 		Brokers:        brokers,
 		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+		TopicConfig:    topicConfigFromEnv(),
 	}, nil)
 	if publisher == nil {
 		return nil, nil, nil
 	}
 	return publisher, publisher.Close, nil
+}
+
+// topicConfigFromEnv carries the topic durability settings every service shares.
+// They only apply when this service creates a missing topic; an existing topic
+// keeps its configuration, so raising these on a live cluster is an operational
+// change (see docs/adr/0004).
+func topicConfigFromEnv() platform.KafkaTopicConfig {
+	return platform.KafkaTopicConfig{
+		ReplicationFactor: runtimeconfig.KafkaTopicReplicationFactor(),
+		MinInsyncReplicas: runtimeconfig.KafkaTopicMinInsyncReplicas(),
+	}
 }
 
 func rpcListenOn() string {

@@ -1491,8 +1491,12 @@ func (x *ListCommandsResponse) GetNextCursor() string {
 }
 
 type GetCommandRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Required. A command is only readable inside its own tenant, matching
+	// ListCommands and AckCommand. A mismatch is reported as not-found, so the
+	// response cannot confirm that another tenant's command exists.
+	TenantId      string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1530,6 +1534,13 @@ func (*GetCommandRequest) Descriptor() ([]byte, []int) {
 func (x *GetCommandRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *GetCommandRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
 	}
 	return ""
 }
@@ -1793,9 +1804,10 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\x14ListCommandsResponse\x12,\n" +
 	"\bcommands\x18\x01 \x03(\v2\x10.core.v1.CommandR\bcommands\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"#\n" +
+	"nextCursor\"@\n" +
 	"\x11GetCommandRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"@\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\"@\n" +
 	"\x12GetCommandResponse\x12*\n" +
 	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"]\n" +
 	"\x11AckCommandRequest\x12\x0e\n" +

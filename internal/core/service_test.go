@@ -3,10 +3,14 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
@@ -54,6 +58,85 @@ func TestListCommandsRequiresTenant(t *testing.T) {
 	svc := NewService(pagedFakeRepo{}, nil)
 	if _, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{}); err == nil || !strings.Contains(err.Error(), "tenantId is required") {
 		t.Fatalf("ListCommands() error = %v, want tenantId required", err)
+	}
+}
+
+// TestGetCommandScopesToTenant pins the tenant contract of the command detail
+// endpoint. Before this, ListCommands and AckCommand required a tenant while
+// GetCommand accepted a bare ID, so a caller could read any tenant's command and
+// the three endpoints disagreed about their contract.
+func TestGetCommandScopesToTenant(t *testing.T) {
+	svc := NewService(commandRepo{}, nil)
+
+	if _, err := svc.GetCommand(t.Context(), &corev1.GetCommandRequest{Id: "cmd-a"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("GetCommand() without tenantId: code = %v, want InvalidArgument (err=%v)", status.Code(err), err)
+	}
+
+	resp, err := svc.GetCommand(t.Context(), &corev1.GetCommandRequest{Id: "cmd-a", TenantId: "tenant-a"})
+	if err != nil {
+		t.Fatalf("GetCommand() for the owning tenant: %v", err)
+	}
+	if resp.GetCommand().GetId() != "cmd-a" {
+		t.Fatalf("GetCommand() returned %+v", resp.GetCommand())
+	}
+
+	// A foreign tenant and a nonexistent command must be indistinguishable, so
+	// the response cannot confirm that another tenant's command exists.
+	foreign, err := svc.GetCommand(t.Context(), &corev1.GetCommandRequest{Id: "cmd-a", TenantId: "tenant-b"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("GetCommand() cross-tenant: code = %v, want NotFound (err=%v)", status.Code(err), err)
+	}
+	if foreign != nil {
+		t.Fatal("GetCommand() returned a command for a foreign tenant")
+	}
+	if _, err := svc.GetCommand(t.Context(), &corev1.GetCommandRequest{Id: "missing", TenantId: "tenant-a"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("GetCommand() unknown id: code = %v, want NotFound", status.Code(err))
+	}
+}
+
+// TestValidationErrorsUseInvalidArgument guards the API status codes. iot-core
+// used to return plain errors, and the gateway matched on message substrings, so
+// "tenantId contains invalid MQTT topic characters" matched no pattern and
+// surfaced as 502 Bad Gateway instead of 400.
+func TestValidationErrorsUseInvalidArgument(t *testing.T) {
+	svc := NewService(fakeRepo{}, nil)
+
+	if _, err := svc.CreateTenant(t.Context(), &corev1.CreateTenantRequest{Id: "tenant/#", Name: "bad"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("CreateTenant() invalid id: code = %v, want InvalidArgument (err=%v)", status.Code(err), err)
+	}
+	if _, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ListCommands() without tenant: code = %v, want InvalidArgument", status.Code(err))
+	}
+	if _, err := svc.GetDevice(t.Context(), &corev1.GetDeviceRequest{TenantId: "t", DeviceId: "d"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("GetDevice() missing: code = %v, want NotFound", status.Code(err))
+	}
+}
+
+// TestRepoErrorsMapToStatusCodes pins the repository-to-status translation that
+// replaced substring matching in the gateway.
+func TestRepoErrorsMapToStatusCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want codes.Code
+	}{
+		{"not found", fmt.Errorf("tenant %w", platform.ErrNotFound), codes.NotFound},
+		{"already exists", fmt.Errorf("tenant %w", platform.ErrAlreadyExists), codes.AlreadyExists},
+		{"unexpected", errors.New("connection reset"), codes.Internal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := status.Code(mapRepoError(tc.err)); got != tc.want {
+				t.Fatalf("mapRepoError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+	if err := mapRepoError(nil); err != nil {
+		t.Fatalf("mapRepoError(nil) = %v, want nil", err)
+	}
+
+	svc := NewService(conflictRepo{}, nil)
+	if _, err := svc.CreateTenant(t.Context(), &corev1.CreateTenantRequest{Id: "tenant-a", Name: "A"}); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("CreateTenant() duplicate: code = %v, want AlreadyExists (err=%v)", status.Code(err), err)
 	}
 }
 
@@ -124,4 +207,21 @@ func TestIngestTelemetryRepublishesOnDuplicate(t *testing.T) {
 	if pub.telemetry != 1 {
 		t.Fatalf("expected Kafka publish on duplicate path, got %d publishes", pub.telemetry)
 	}
+}
+
+// commandRepo serves a single command owned by tenant-a.
+type commandRepo struct{ fakeRepo }
+
+func (commandRepo) GetCommand(id string) (platform.Command, bool) {
+	if id != "cmd-a" {
+		return platform.Command{}, false
+	}
+	return platform.Command{ID: "cmd-a", TenantID: "tenant-a", DeviceID: "device-a"}, true
+}
+
+// conflictRepo always reports a uniqueness conflict.
+type conflictRepo struct{ fakeRepo }
+
+func (conflictRepo) CreateTenant(platform.Tenant) (platform.Tenant, error) {
+	return platform.Tenant{}, fmt.Errorf("tenant %w", platform.ErrAlreadyExists)
 }

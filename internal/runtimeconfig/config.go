@@ -84,3 +84,18 @@ func ListenPort(addrKey, portKey string, fallback int) int {
 	}
 	return Int(portKey, fallback)
 }
+
+// KafkaTopicReplicationFactor is the replication factor this service asks for
+// when it creates a topic. Default 1 suits the single-broker local stack; a
+// production deployment must raise it together with the ISR minimum below.
+func KafkaTopicReplicationFactor() int {
+	return Int("KAFKA_TOPIC_REPLICATION_FACTOR", 1)
+}
+
+// KafkaTopicMinInsyncReplicas is the min.insync.replicas this service sets on
+// the topics it creates. With the default of 1, a producer using acks=all is no
+// more durable than acks=1: the ISR can shrink to the leader alone and writes
+// still succeed there. Production must set it to at least 2.
+func KafkaTopicMinInsyncReplicas() int {
+	return Int("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", 1)
+}

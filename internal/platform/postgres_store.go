@@ -287,7 +287,7 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 		return Device{}, err
 	}
 	if !exists {
-		return Device{}, fmt.Errorf("tenant not found")
+		return Device{}, fmt.Errorf("tenant %w", ErrNotFound)
 	}
 	d.CreatedAt = time.Now().UTC()
 	hash, err := HashDeviceSecret(d.Secret)
@@ -353,7 +353,7 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 	}
 	defer tx.Rollback()
 	if _, ok := s.GetDevice(env.TenantID, env.DeviceID); !ok {
-		return TelemetryRecord{}, fmt.Errorf("device not found")
+		return TelemetryRecord{}, fmt.Errorf("device %w", ErrNotFound)
 	}
 	payloadBytes, err := json.Marshal(env.Payload)
 	if err != nil {
@@ -506,7 +506,7 @@ func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.Ra
 	}
 	defer tx.Rollback()
 	if _, ok := s.GetDevice(tenantID, deviceID); !ok {
-		return Command{}, fmt.Errorf("device not found")
+		return Command{}, fmt.Errorf("device %w", ErrNotFound)
 	}
 	id := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
@@ -549,7 +549,7 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 	var deadline sql.NullTime
 	err = tx.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
 	if err == sql.ErrNoRows {
-		return Command{}, fmt.Errorf("command not found")
+		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
 	if err != nil {
 		return Command{}, err
@@ -559,7 +559,10 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 		cmd.DeadlineAt = deadline.Time
 	}
 	if cmd.TenantID != tenantID || cmd.DeviceID != deviceID {
-		return Command{}, fmt.Errorf("command does not belong to device")
+		// Deliberately indistinguishable from a command that does not exist:
+		// confirming that the ID belongs to another tenant or device would leak
+		// that tenant's data to the caller.
+		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
 	// ACK delivery is at-least-once. Duplicate or late ACKs are harmless and
 	// must not turn a healthy consumer into an error loop.
@@ -823,7 +826,7 @@ func translateSQLError(err error, kind string) error {
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "duplicate key value") {
-		return fmt.Errorf("%s already exists", kind)
+		return fmt.Errorf("%s %w", kind, ErrAlreadyExists)
 	}
 	return err
 }

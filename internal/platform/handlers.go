@@ -228,8 +228,16 @@ func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	if len(parts) == 1 && r.Method == http.MethodGet {
+		// Command reads are tenant-scoped, mirroring internal/adminapi and
+		// iot-core. The harness exists to validate the REST contract, so it must
+		// not serve a shape the production gateway would refuse.
+		tenantID := r.URL.Query().Get("tenantId")
+		if tenantID == "" {
+			writeError(w, http.StatusBadRequest, "tenantId is required")
+			return
+		}
 		cmd, ok := a.store.GetCommand(id)
-		if !ok {
+		if !ok || cmd.TenantID != tenantID {
 			writeError(w, http.StatusNotFound, "command not found")
 			return
 		}

@@ -46,7 +46,7 @@ func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
-		return Tenant{}, fmt.Errorf("tenant already exists")
+		return Tenant{}, fmt.Errorf("tenant %w", ErrAlreadyExists)
 	}
 	s.tenants[t.ID] = t
 	return t, nil
@@ -66,11 +66,11 @@ func (s *memoryStore) CreateDevice(d Device) (Device, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[d.TenantID]; !exists {
-		return Device{}, fmt.Errorf("tenant not found")
+		return Device{}, fmt.Errorf("tenant %w", ErrNotFound)
 	}
 	key := deviceKey(d.TenantID, d.DeviceID)
 	if _, exists := s.devices[key]; exists {
-		return Device{}, fmt.Errorf("device already exists")
+		return Device{}, fmt.Errorf("device %w", ErrAlreadyExists)
 	}
 	d.CreatedAt = time.Now().UTC()
 	s.devices[key] = d
@@ -100,7 +100,7 @@ func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, 
 	defer s.mu.Unlock()
 	key := deviceKey(env.TenantID, env.DeviceID)
 	if _, exists := s.devices[key]; !exists {
-		return TelemetryRecord{}, fmt.Errorf("device not found")
+		return TelemetryRecord{}, fmt.Errorf("device %w", ErrNotFound)
 	}
 	rec := TelemetryRecord{
 		MsgID:      env.MsgID,
@@ -127,7 +127,7 @@ func (s *memoryStore) CreateCommand(tenantID, deviceID string, payload json.RawM
 	defer s.mu.Unlock()
 	key := deviceKey(tenantID, deviceID)
 	if _, exists := s.devices[key]; !exists {
-		return Command{}, fmt.Errorf("device not found")
+		return Command{}, fmt.Errorf("device %w", ErrNotFound)
 	}
 	s.commandSeq++
 	id := fmt.Sprintf("cmd-%d", s.commandSeq)
@@ -156,10 +156,10 @@ func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error)
 	defer s.mu.Unlock()
 	cmd, exists := s.commands[id]
 	if !exists {
-		return Command{}, fmt.Errorf("command not found")
+		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
 	if cmd.TenantID != tenantID || cmd.DeviceID != deviceID {
-		return Command{}, fmt.Errorf("command does not belong to device")
+		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
 	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEventAcked)
 	if err != nil {

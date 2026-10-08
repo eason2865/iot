@@ -222,7 +222,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var got platform.Command
-		if err := e2eGetJSON(ts.URL+"/api/v1/commands/"+created.ID, &got); err != nil {
+		if err := e2eGetJSON(ts.URL+"/api/v1/commands/"+created.ID+"?tenantId="+tenantID, &got); err != nil {
 			return false
 		}
 		return got.Status == platform.CommandStatusAcked

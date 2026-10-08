@@ -7,6 +7,16 @@ replicas:
   telemetryIngestor: 2
   deviceWorker: 1
 
+kafka:
+  # Applied only when a service creates a topic that does not exist yet.
+  # Production must raise these (replicationFactor >= 3, minInsyncReplicas >= 2):
+  # with minInsyncReplicas=1 a producer using acks=all is no more durable than
+  # acks=1, because the in-sync replica set can shrink to the leader alone. See
+  # docs/adr/0004. Changing them on an existing topic has no effect, because
+  # topic creation is idempotent; alter live topics with kafka-configs instead.
+  topicReplicationFactor: 1
+  topicMinInsyncReplicas: 1
+
 deviceWorker:
   # Optional tenant isolation. Empty (the default) means the worker processes
   # every tenant, which matches the behaviour before the allowlist existed.

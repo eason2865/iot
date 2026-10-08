@@ -22,6 +22,7 @@ type KafkaPublisherConfig struct {
 	Brokers        []string
 	TelemetryTopic string
 	CommandTopic   string
+	TopicConfig    KafkaTopicConfig
 }
 
 func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublisher {
@@ -36,22 +37,34 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublish
 	if commandTopic == "" {
 		commandTopic = "iot.command"
 	}
-	ensureKafkaTopicsBestEffort(cfg.Brokers, telemetryTopic, commandTopic)
+	ensureKafkaTopicsBestEffort(cfg.Brokers, cfg.TopicConfig, telemetryTopic, commandTopic)
 	return &KafkaPublisher{
 		telemetryWriter: &kafka.Writer{
-			Addr:                   kafka.TCP(cfg.Brokers...),
-			Topic:                  telemetryTopic,
-			Balancer:               &kafka.Hash{},
-			RequiredAcks:           kafka.RequireOne,
+			Addr:     kafka.TCP(cfg.Brokers...),
+			Topic:    telemetryTopic,
+			Balancer: &kafka.Hash{},
+			// RequireAll: this producer carries events that PostgreSQL already
+			// considers committed, so a leader crash after an un-replicated ack
+			// would lose an event the database believes it published — the DLQ
+			// cannot cover that, it only covers consumer-side failures. BatchSize
+			// is 1, so each message already pays a full round trip; RequireAll
+			// only adds waiting for the slowest in-sync replica.
+			RequiredAcks:           kafka.RequireAll,
 			BatchSize:              1,
 			BatchTimeout:           10 * time.Millisecond,
 			AllowAutoTopicCreation: true,
 		},
 		commandWriter: &kafka.Writer{
-			Addr:                   kafka.TCP(cfg.Brokers...),
-			Topic:                  commandTopic,
-			Balancer:               &kafka.Hash{},
-			RequiredAcks:           kafka.RequireOne,
+			Addr:     kafka.TCP(cfg.Brokers...),
+			Topic:    commandTopic,
+			Balancer: &kafka.Hash{},
+			// RequireAll: this producer carries events that PostgreSQL already
+			// considers committed, so a leader crash after an un-replicated ack
+			// would lose an event the database believes it published — the DLQ
+			// cannot cover that, it only covers consumer-side failures. BatchSize
+			// is 1, so each message already pays a full round trip; RequireAll
+			// only adds waiting for the slowest in-sync replica.
+			RequiredAcks:           kafka.RequireAll,
 			BatchSize:              1,
 			BatchTimeout:           10 * time.Millisecond,
 			AllowAutoTopicCreation: true,

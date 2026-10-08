@@ -112,6 +112,8 @@ export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
 export DEVICE_WORKER_TENANT_IDS=   # optional CSV allowlist; empty = all tenants
 export TDENGINE_TABLE=telemetry_v2
 export KAFKA_DLQ_TOPIC=iot.dlq
+export KAFKA_TOPIC_REPLICATION_FACTOR=1     # production: >= 3
+export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # production: >= 2, else acks=all == acks=1
 export MANAGEMENT_API_TOKEN=change-me
 export EMQX_INTERNAL_PASSWORD=change-me
 ```
@@ -163,12 +165,12 @@ Core business endpoints:
 - `POST /api/v1/telemetry`
 - `POST /api/v1/commands`
 - `GET /api/v1/commands?tenantId=<tenant-id>`
-- `GET /api/v1/commands/{id}`
+- `GET /api/v1/commands/{id}?tenantId=<tenant-id>`
 - `POST /api/v1/commands/{id}/ack`
 
 List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page.
 
-The command list requires `tenantId`; the server filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
+Every command endpoint is tenant-scoped: the list and the detail both require `tenantId`, and the ACK additionally requires `deviceId`. A command that belongs to another tenant is reported as not found rather than forbidden, so a response never confirms that another tenant's data exists. The list filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
 
 The REST API is documented by the route table above and by `internal/adminapi`; it no longer ships a separate OpenAPI document.
 

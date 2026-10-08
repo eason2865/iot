@@ -79,10 +79,16 @@ func TestCommandAckFlow(t *testing.T) {
 	})
 
 	var got platform.Command
-	getJSON(t, ts.URL+"/api/v1/commands/"+created.ID, &got)
+	getJSON(t, ts.URL+"/api/v1/commands/"+created.ID+"?tenantId=tenant-a", &got)
 	if got.Status != platform.CommandStatusAcked {
 		t.Fatalf("command status = %q, want %q", got.Status, platform.CommandStatusAcked)
 	}
+
+	// Command reads are tenant-scoped like ListCommands and AckCommand: the
+	// detail endpoint must demand a tenant, and a foreign tenant must see
+	// not-found rather than being told the command exists.
+	getJSONStatus(t, ts.URL+"/api/v1/commands/"+created.ID, http.StatusBadRequest)
+	getJSONStatus(t, ts.URL+"/api/v1/commands/"+created.ID+"?tenantId=tenant-b", http.StatusNotFound)
 }
 
 func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
@@ -248,6 +254,18 @@ func postJSONStatus(t *testing.T, url string, wantStatus int, body map[string]an
 	defer resp.Body.Close()
 	if resp.StatusCode != wantStatus {
 		t.Fatalf("status code = %d, want %d", resp.StatusCode, wantStatus)
+	}
+}
+
+func getJSONStatus(t *testing.T, url string, wantStatus int) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("GET %s: status code = %d, want %d", url, resp.StatusCode, wantStatus)
 	}
 }
 

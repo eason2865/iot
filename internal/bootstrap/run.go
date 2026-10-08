@@ -133,6 +133,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			TopicFilter:  runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.SharedTelemetryTopicFilter),
 			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
 			DLQTopic:     runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
+			TopicConfig:  topicConfigFromEnv(),
 		}, publisher, res.metrics)
 		res.bridge = bridge
 	case "device-worker":
@@ -165,10 +166,24 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			// subscription stays a wildcard, so enforcement happens here, not in
 			// the broker ACL.
 			TenantIDs: runtimeconfig.SplitCSV(os.Getenv("DEVICE_WORKER_TENANT_IDS")),
+			// The DLQ writer already uses RequireAll, so the topics must tolerate
+			// it: min.insync.replicas has to match what the producers require.
+			TopicConfig: topicConfigFromEnv(),
 		}, store, tdWriter, res.metrics)
 	}
 
 	return res, nil
+}
+
+// topicConfigFromEnv carries the topic durability settings every service shares.
+// They only apply when this service creates a missing topic; an existing topic
+// keeps its configuration, so raising these on a live cluster is an operational
+// change (see docs/adr/0004).
+func topicConfigFromEnv() platform.KafkaTopicConfig {
+	return platform.KafkaTopicConfig{
+		ReplicationFactor: runtimeconfig.KafkaTopicReplicationFactor(),
+		MinInsyncReplicas: runtimeconfig.KafkaTopicMinInsyncReplicas(),
+	}
 }
 
 func mqttClientID(key, fallback string) string {
@@ -194,6 +209,7 @@ func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func(
 		Brokers:        brokers,
 		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
+		TopicConfig:    topicConfigFromEnv(),
 	}, metrics)
 	if publisher == nil {
 		return nil, nil, nil

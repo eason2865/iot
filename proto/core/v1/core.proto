@@ -154,6 +154,10 @@ message ListCommandsResponse {
 
 message GetCommandRequest {
   string id = 1;
+  // Required. A command is only readable inside its own tenant, matching
+  // ListCommands and AckCommand. A mismatch is reported as not-found, so the
+  // response cannot confirm that another tenant's command exists.
+  string tenant_id = 2;
 }
 
 message GetCommandResponse {

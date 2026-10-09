@@ -30,3 +30,16 @@ jobs:
 
       - name: Build binaries
         run: make build
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "36.2"
+
+      - name: Install protoc plugins
+        run: make proto-tools
+
+      - name: Check generated protobuf files are up to date
+        run: |
+          make proto
+          git diff --exit-code -- proto/

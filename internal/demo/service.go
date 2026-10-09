@@ -40,8 +40,6 @@ type Config struct {
 	TelemetryBurstMax int
 	CommandBurstMin   int
 	CommandBurstMax   int
-	TelemetryWeight   int
-	CommandWeight     int
 	Metrics           *platform.Metrics
 }
 
@@ -375,16 +373,6 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.CommandBurstMax < cfg.CommandBurstMin {
 		cfg.CommandBurstMax = cfg.CommandBurstMin
-	}
-	if cfg.TelemetryWeight <= 0 && cfg.CommandWeight <= 0 {
-		cfg.TelemetryWeight = 7
-		cfg.CommandWeight = 3
-	}
-	if cfg.TelemetryWeight < 0 {
-		cfg.TelemetryWeight = 0
-	}
-	if cfg.CommandWeight < 0 {
-		cfg.CommandWeight = 0
 	}
 	return cfg
 }

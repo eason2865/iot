@@ -232,8 +232,9 @@ func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func(
 func buildTDengineWriter(metrics *platform.Metrics) (*platform.TDengineWriter, func() error, error) {
 	dsn := runtimeconfig.EnvOrDefault("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
 	writer, err := platform.NewTDengineWriter(platform.TDengineConfig{
-		DSN:   dsn,
-		Table: runtimeconfig.EnvOrDefault("TDENGINE_TABLE", "telemetry_v2"),
+		DSN:      dsn,
+		Database: runtimeconfig.EnvOrDefault("TDENGINE_DATABASE", "iot"),
+		Table:    runtimeconfig.EnvOrDefault("TDENGINE_TABLE", "telemetry_v2"),
 	}, metrics)
 	if err != nil {
 		return nil, nil, err

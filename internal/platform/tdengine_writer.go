@@ -19,6 +19,7 @@ import (
 // TDengine side (connection pool / server capacity), not by batching here.
 type TDengineWriter struct {
 	db        *sql.DB
+	database  string
 	table     string
 	mu        sync.Mutex
 	closed    bool
@@ -27,8 +28,9 @@ type TDengineWriter struct {
 }
 
 type TDengineConfig struct {
-	DSN   string
-	Table string
+	DSN      string
+	Database string
+	Table    string
 }
 
 var errTDengineWriterClosed = errors.New("tdengine writer closed")
@@ -41,6 +43,10 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 	if table == "" {
 		table = "telemetry_v2"
 	}
+	database := cfg.Database
+	if database == "" {
+		database = "iot"
+	}
 	db, err := sql.Open("taosRestful", cfg.DSN)
 	if err != nil {
 		return nil, err
@@ -52,9 +58,10 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 		return nil, err
 	}
 	w := &TDengineWriter{
-		db:      db,
-		table:   table,
-		metrics: metrics,
+		db:       db,
+		database: database,
+		table:    table,
+		metrics:  metrics,
 	}
 	if err := w.ensureSchema(); err != nil {
 		_ = db.Close()
@@ -77,8 +84,8 @@ func (w *TDengineWriter) Close() error {
 
 func (w *TDengineWriter) ensureSchema() error {
 	stmts := []string{
-		"CREATE DATABASE IF NOT EXISTS iot",
-		fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s (
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", w.database),
+		fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s.%s (
   ts TIMESTAMP,
   msg_id VARCHAR(64),
   type VARCHAR(64),
@@ -88,7 +95,7 @@ func (w *TDengineWriter) ensureSchema() error {
 ) TAGS (
   tenant_id VARCHAR(64),
   device_id VARCHAR(64)
-)`, w.table),
+)`, w.database, w.table),
 	}
 	for _, stmt := range stmts {
 		if _, err := w.db.Exec(stmt); err != nil {
@@ -126,10 +133,11 @@ func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
 	// One subtable per device makes tenant/device dimensions TDengine tags.
 	// Raw JSON remains in PostgreSQL JSONB, eliminating a second bounded copy.
 	tableHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rec.TenantID+"\x00"+rec.DeviceID)))[:24]
-	childTable := w.table + "_" + tableHash
+	stable := w.database + "." + w.table
+	childTable := stable + "_" + tableHash
 	statement := fmt.Sprintf(
 		"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES ('%s', '%s', '%s', '%s', '%s', %d)",
-		childTable, w.table, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
+		childTable, stable, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
 		time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
 		escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
 	)

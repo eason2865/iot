@@ -279,11 +279,17 @@ func (m *Metrics) seedSeries() {
 	}
 	for _, method := range []string{
 		"/core.v1.CoreService/CreateTenant",
-		"/core.v1.CoreService/CreateDevice",
 		"/core.v1.CoreService/ListTenants",
+		"/core.v1.CoreService/CreateDevice",
 		"/core.v1.CoreService/ListDevices",
+		"/core.v1.CoreService/GetDevice",
+		"/core.v1.CoreService/GetDeviceStatus",
+		"/core.v1.CoreService/ListTelemetry",
 		"/core.v1.CoreService/IngestTelemetry",
+		"/core.v1.CoreService/RecordTelemetry",
 		"/core.v1.CoreService/CreateCommand",
+		"/core.v1.CoreService/ListCommands",
+		"/core.v1.CoreService/GetCommand",
 		"/core.v1.CoreService/AckCommand",
 	} {
 		for _, code := range []string{"OK", "InvalidArgument", "NotFound", "AlreadyExists", "Internal", "Unavailable"} {

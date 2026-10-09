@@ -510,7 +510,7 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 - `tenantId` 必须贯穿所有写入和查询路径
 - Kafka 消费端必须按幂等设计
 - TDengine 负责时序数据，PostgreSQL 负责业务元数据和状态
-- 命令状态机建议保持 `pending -> dispatched -> sent -> acked / timeout / failed`
+- 命令状态机建议保持 `created -> published -> sent -> acked / timeout / failed`
 - 保持逻辑多租户隔离，避免过早引入复杂分库分表
 - Demo 模拟器当前作为外部造流服务运行，不进入业务 Helm release
 

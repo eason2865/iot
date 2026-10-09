@@ -132,6 +132,8 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 本次变更（2026-10-09，十四轮：主容器非 root 加固）：4 个 Deployment 的 pod 级 securityContext 增加 `runAsNonRoot: true` + `runAsUser: 65534`（覆盖主容器与 busybox initContainer；全部监听端口 >1024，无需 NET_BIND_SERVICE）。kind 实测：crictl 确认容器进程 uid=65534、7 pod 正常 Running、遥测/命令链路无损。
 
+- 本次变更（2026-10-09，十五轮：文档漂移修正 + bin 残留清理）：① README.md / README.zh-CN.md 的 Development Guidelines 命令状态机从旧名 `pending -> dispatched -> sent` 改为实际 `created -> published -> sent -> acked / timeout / failed`（与 `domain.go:57-62` 对齐）。② 删除 `bin/` 下 4 个旧名二进制（`admin`/`core-rpc`/`ingress`/`worker`，gitignored 不入库）。同轮 review 的其余薄弱点（deviceWorker 单副本、单一静态 Bearer、Kafka topic 不 AlterConfigs 只对首次创建生效）**核实全部属实**，属生产化评估项，未动。
+
 ## 遗留说明
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。

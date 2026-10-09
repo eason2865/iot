@@ -510,7 +510,7 @@ The `iot-core` gRPC port (9001) supports mutual TLS: when enabled, the server re
 - `tenantId` must flow through every write and query path
 - Kafka consumers must be designed idempotently
 - TDengine holds time-series data; PostgreSQL holds business metadata and state
-- Keep the command state machine as `pending -> dispatched -> sent -> acked / timeout / failed`
+- Keep the command state machine as `created -> published -> sent -> acked / timeout / failed`
 - Keep logical multi-tenant isolation; avoid premature sharding
 - The demo simulator currently runs as an external traffic generator and is not part of the business Helm release
 

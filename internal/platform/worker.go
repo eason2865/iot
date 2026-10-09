@@ -40,6 +40,14 @@ type WorkerConfig struct {
 	DLQTopicConfig KafkaTopicConfig
 }
 
+// mqttPublishTimeout bounds how long the command consumer waits for a
+// downlink publish to complete. paho queues publishes while disconnected
+// (AutoReconnect is enabled), so an unbounded Wait would stall the whole
+// command loop for the duration of an EMQX outage. A timed-out publish may
+// still be delivered by paho after reconnect, which is acceptable under
+// at-least-once semantics.
+const mqttPublishTimeout = 5 * time.Second
+
 type Worker struct {
 	store           Repository
 	tdengine        *TDengineWriter
@@ -441,11 +449,28 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				continue
 			}
 			token := w.mqtt.Publish(topic, 1, false, payload)
-			token.Wait()
-			if err := token.Error(); err != nil {
+			if !token.WaitTimeout(mqttPublishTimeout) {
+				err = errors.New("mqtt publish timeout")
+			} else {
+				err = token.Error()
+			}
+			if err != nil {
 				log.Printf("mqtt publish error: %v", err)
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
+				}
+				// Requeue immediately so a transient MQTT outage redelivers
+				// within seconds (bounded by dispatch attempts) instead of
+				// waiting up to 5 minutes for the stale-command recovery scan.
+				// The DLQ copy below still preserves the event for
+				// observability. Same backoff formula as the dispatcher.
+				if requeuer, ok := w.store.(interface {
+					RequeueCommand(id string, retryAfter time.Duration) error
+				}); ok {
+					backoff := time.Second * time.Duration(1<<min(cmd.DispatchAttempts, 6))
+					if rqErr := requeuer.RequeueCommand(cmd.ID, backoff); rqErr != nil {
+						log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
+					}
 				}
 				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandMQTT, err, w.metrics); dlqErr != nil {
 					return dlqErr

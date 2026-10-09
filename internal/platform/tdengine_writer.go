@@ -128,7 +128,32 @@ func escapeTD(s string) string {
 	return strings.ReplaceAll(s, `'`, `''`)
 }
 
+// errTDFieldRejected marks an interpolated field containing control bytes.
+var errTDFieldRejected = errors.New("tdengine field contains control characters")
+
+// validateTDField is the second layer under escapeTD. escapeTD neutralizes
+// quote/backslash breakout; this rejects control bytes (NUL, \n, \r, DEL, ...)
+// that have no business in an identifier or label. The taosRestful driver has
+// no server-side parameters (Prepare returns "restful does not support stmt",
+// and its client-side InterpolateParams writes strings RAW — switching to '?'
+// placeholders would be less safe than escapeTD), so string interpolation
+// stays; rejection surfaces as a write error, which the worker dead-letters
+// (StageTelemetryTDengine) instead of silently storing garbage.
+func validateTDField(s string) error {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return errTDFieldRejected
+		}
+	}
+	return nil
+}
+
 func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
+	for _, field := range []string{rec.TenantID, rec.DeviceID, rec.MsgID, rec.Type, rec.Version} {
+		if err := validateTDField(field); err != nil {
+			return err
+		}
+	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(rec.Payload))
 	// One subtable per device makes tenant/device dimensions TDengine tags.
 	// Raw JSON remains in PostgreSQL JSONB, eliminating a second bounded copy.

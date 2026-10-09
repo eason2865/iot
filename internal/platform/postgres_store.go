@@ -657,6 +657,24 @@ func (s *PostgresStore) RescheduleCommand(id string, retryAfter time.Duration) e
 	return err
 }
 
+// RequeueCommand returns a 'published' command to 'created' so the dispatcher
+// redelivers it on the next poll instead of waiting up to 5 minutes for the
+// stale-command recovery scan. The worker calls this when the MQTT downlink
+// fails. It only matches 'published': if the dispatcher's MarkCommandPublished
+// has not landed yet (it writes Kafka first, then updates the row), the row is
+// still 'created' and will be re-claimed on its own — matching that state here
+// would only open an overwrite race with MarkCommandPublished. Attempts stay
+// bounded: each redelivery goes through ClaimCommandsForDispatch, which
+// increments dispatch_attempts, and RecoverStaleCommands marks the command
+// failed once the cap is hit.
+func (s *PostgresStore) RequeueCommand(id string, retryAfter time.Duration) error {
+	_, err := s.updateCommandsWithEvent(
+		`UPDATE commands SET status = 'created', next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
+		 WHERE id = $1 AND status = 'published' RETURNING id`,
+		"requeued", id, retryAfter.String())
+	return err
+}
+
 func (s *PostgresStore) ExpireCommands(now time.Time) (int64, error) {
 	rows, err := s.db.Query(`UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND deadline_at <= $1 RETURNING id`, now)
 	if err != nil {

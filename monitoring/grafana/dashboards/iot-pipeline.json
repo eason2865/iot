@@ -537,6 +537,51 @@
           "legendFormat": "tdengine"
         }
       ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "DLQ 死信与写入失败 (by stage)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (stage, result) (rate(iot_dlq_publish_total[5m])) or vector(0)",
+          "refId": "A",
+          "legendFormat": "{{stage}} / {{result}}"
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -558,6 +603,6 @@
   "timezone": "browser",
   "title": "IoT Pipeline",
   "uid": "iot-pipeline",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

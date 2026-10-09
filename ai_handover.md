@@ -121,11 +121,13 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 本次变更（2026-10-08，九轮：把"告警 + 人工重放"策略做成真正可用）：① 新增 ADR `0006-dead-letter-alerting-and-manual-replay.md`，明确不自动消费 DLQ 的三条理由（根因未修则重放回环、遥测幂等但**命令重放会让设备重复动作**、故障期自动回灌会放大故障）；② 修掉 `cmd/dlq-replay` 三个缺陷：共用单一 consumer group 会隐藏其他 stage 的记录（见上方"关键配置"）、`-dry-run` 在 malformed/invalid-payload 分支仍提交 offset（与文档承诺相反）、匹配记录不足 `-limit` 时会阻塞 10 分钟再 `log.Fatal` 而非正常结束；③ 新增 `-idle-timeout` 与 `-group`，结束时输出 scanned/replayed/skipped 汇总；④ README 中英新增「死信重放运行手册」（含 `kubectl exec` 具体命令与"先 dry-run、先修根因、命令类 stage 最需谨慎"的顺序要求），两条 DLQ 告警的描述改为引用该手册；⑤ 新增 `cmd/dlq-replay/main_test.go` 锁定 per-stage group 且各 stage 不重复。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`helm lint`、`helm template`、`make build`。
 
+- 本次变更（2026-10-08，十轮：DLQ 看板面板 + 监控资产一致性测试）：① `monitoring/grafana/dashboards/iot-pipeline.json` 新增 panel 14「DLQ 死信与写入失败 (by stage)」（`sum by (stage, result) (rate(iot_dlq_publish_total[5m])) or vector(0)`），放在「链路错误」行下；dashboard `version` 2→3（provision 文件靠版本递增触发更新）；② 两条 DLQ 告警的 `__panelId__` 补为 `14`，看板链接从"只打开看板"变成直接定位到该面板；③ 新增 `internal/platform/monitoring_assets_test.go` 三个用例，把这类漂移变成 CI 强制：**引用的指标必须真实存在**（如把 `iot_dlq_publish_total` 写成 `..._totals` 会失败）、告警的 `__dashboardUid__`/`__panelId__` 必须指向存在的看板与面板、看板 JSON 必须可解析且含必需字段。已红测验证后两个用例确实能拦住对应漂移。
+- **指标名来源必须用源码提取，不能用 `Registry().Gather()`**：Gather 只返回已有序列的 family，而 `iot_http_requests_total` / `*_duration_seconds` 是懒创建的（`seedSeries` 未预置），用 Gather 会把它们误判为"不存在"（本轮就是这么先踩了一次假阳性）。新增监控图表面板时，若引用的指标名不在 `internal/platform/metrics.go` 的 `Name:` 字面量里，测试会失败。
+
 ## 待办（2026-10-08 评审已确认，尚未开工）
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。
 - `iot.dlq` 无消费侧：只有离线 `cmd/dlq-replay`，无指标、无告警、无保留策略。
-- iot-pipeline 看板缺 DLQ 面板：`iot_dlq_publish_total` 目前只能靠 Prometheus 查询或告警看到，看板里没有图表。补面板需要本地起 Grafana 做视觉验证（本次环境未运行 Docker/Grafana，故未改这个自动 provision 的看板文件）。
 
 ## 文档入口
 

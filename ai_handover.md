@@ -75,8 +75,8 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 ## 当前本地资源
 
-- Host Docker 镜像：仅保留业务镜像 `iot-app:2.0`，供 Compose demo 使用。
-- Kubernetes containerd：仅保留当前业务镜像 `iot-app:local-030599ad5a35`。
+- Host Docker 镜像：仅保留业务镜像 `iot-app:2.0`，供 Compose demo 使用。**重建镜像前必须先 `make build`**——Dockerfile 是 `FROM scratch` 直接 COPY `bin/` 预编译二进制，`docker build` 本身不编译 Go。
+- Kubernetes containerd：仅保留当前业务镜像 `iot-app:local-d976cd4cb3be`。
 - 当前 Helm release：`iot`，namespace `iot`。
 - 当前 EMQX release：`emqx`，namespace `emqx`。
 - Grafana 数据卷：`iot-grafana-data`。

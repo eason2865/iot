@@ -128,6 +128,8 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 本次变更（2026-10-09，十二轮：大批量 review 的低危修复，5 项；review 第 6 项 "memory_store 推进 published" 核实不属实，实为 created，不修）：① **删除自定义 `min()`**（`command_dispatcher.go`），Go 1.21+ 内建 min 直接可用。② **`seedSeries` 补齐 13 个 gRPC method**（原只预置 7 个，缺 CreateTenant/ListTenants/CreateDevice/ListDevices/GetDevice/GetDeviceStatus），指标按 proto 顺序预置。③ **TDengine 库名可配**：`TDengineConfig.Database` + `TDENGINE_DATABASE`（默认 `iot`），SQL 用限定名 `db.table`，不再依赖 DSN 默认库。④ **删除 demo 死配置权重**：`Config.TelemetryWeight`/`CommandWeight` 及 normalize 校验块（cmd/demo 无对应 flag，全仓库无引用）。⑤ **proto 再生成入口 + CI 漂移检查**：Makefile 新增 `proto`（钉版本变量 `PROTOC_VERSION 36.2`/`PROTOC_GEN_GO_VERSION v1.36.8`/`PROTOC_GEN_GO_GRPC_VERSION v1.5.1`，与 pb.go 头部对齐）与 `proto-tools`；CI 追加 setup-protoc 36.2 → proto-tools → `make proto && git diff --exit-code proto/`。本地 libprotoc 36.2 重生成与已提交 pb.go **零漂移**已实证。已通过 `gofmt -l`、`go vet`、`go build ./...`、`go test ./...`。
 
+- 本次变更（2026-10-09，十三轮：busybox initContainer securityContext 补齐）：4 个 Deployment 的 `wait-for-deps`（busybox:1.36）补容器级 `allowPrivilegeEscalation: false` + `capabilities.drop: [ALL]`，与主容器对齐（pod 级 seccompProfile RuntimeDefault 原本已覆盖 initContainer，此轮补的是容器级纵深防御）。主容器**维持不加 runAsNonRoot/runAsUser**（scratch 无 USER，加固与否是取舍，用户已定不做）。已 kind 实测：7 个 pod 正常 Running（initContainer 正常通过）、遥测/命令链路持续流转、`helm lint` 通过。
+
 ## 遗留说明
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。

@@ -74,7 +74,7 @@
   "annotations": {
     "__dashboardUid__": "iot-pipeline",
     "summary": "grafana：死信产生（stage={{ $labels.stage }}）",
-    "description": "job {{ $labels.job }} 的 {{ $labels.stage }} 阶段最近 5 分钟平均每秒产生 {{ $values.A.Value }} 条死信，说明有消息未能进入正常链路。先用 kubectl logs 看该阶段的错误，再执行 `bin/dlq-replay -brokers <brokers> -dry-run -stage {{ $labels.stage }}` 检查记录与失败原因；修掉根因后再去掉 -dry-run 重放。注意死信只在 KAFKA_DLQ_RETENTION_MS 窗口内可重放（默认 7 天）。"
+    "description": "job {{ $labels.job }} 的 {{ $labels.stage }} 阶段最近 5 分钟平均每秒产生 {{ $values.A.Value }} 条死信，说明有消息未能进入正常链路。按 README 的「死信重放运行手册」处理：先 `dlq-replay -stage {{ $labels.stage }} -dry-run` 查看记录与失败原因，修掉根因后再去掉 -dry-run 重放。每个 stage 有独立 consumer group，定向重放不会漏掉其他 stage 的记录；死信只在 KAFKA_DLQ_RETENTION_MS 窗口内可重放（默认 7 天），超期即永久丢失。"
   },
   "labels": {
     "service": "iot-pipeline",

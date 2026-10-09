@@ -74,7 +74,7 @@
   "annotations": {
     "__dashboardUid__": "iot-pipeline",
     "summary": "grafana：死信写入失败（stage={{ $labels.stage }}）",
-    "description": "job {{ $labels.job }} 在 {{ $labels.stage }} 阶段的死信写入失败，平均每秒 {{ $values.A.Value }} 次。这意味着消息既没进正常链路、也没进 DLQ：消费者会一直阻塞在该 offset 上，device-worker 会在重试后退出并重启（见 docs/adr/0004）。先确认 Kafka 可用性与 topic 的 min.insync.replicas 是否高于当前 ISR；恢复后 worker 会自行继续消费，必要时用 bin/dlq-replay 补偿。"
+    "description": "job {{ $labels.job }} 在 {{ $labels.stage }} 阶段的死信写入失败，平均每秒 {{ $values.A.Value }} 次。这意味着消息既没进正常链路、也没进 DLQ：消费者会一直阻塞在该 offset 上，device-worker 会在重试后退出并重启（见 docs/adr/0004）。先确认 Kafka 可用性与 topic 的 min.insync.replicas 是否高于当前 ISR；恢复后 worker 会自行继续消费，必要时按 README 的「死信重放运行手册」用 dlq-replay 补偿。"
   },
   "labels": {
     "service": "iot-pipeline",

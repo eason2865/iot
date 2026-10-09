@@ -1,0 +1,88 @@
+{
+  "uid": "iot-dlq-write-failures",
+  "orgID": 1,
+  "folderUID": "efobmswzeefi8d",
+  "ruleGroup": "IoT DLQ",
+  "title": "死信写入失败（消息未保全）",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "prometheus",
+      "model": {
+        "refId": "A",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "editorMode": "code",
+        "expr": "sum by (job, stage) (rate(iot_dlq_publish_total{result=\"error\"}[5m])) or vector(0)",
+        "instant": true,
+        "range": false,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+      }
+    },
+    {
+      "refId": "C",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "C",
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+          {
+            "type": "query",
+            "query": {
+              "params": [
+                "C"
+              ]
+            },
+            "reducer": {
+              "type": "last",
+              "params": []
+            },
+            "evaluator": {
+              "type": "gt",
+              "params": [
+                0
+              ]
+            },
+            "operator": {
+              "type": "and"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "for": "0s",
+  "annotations": {
+    "__dashboardUid__": "iot-pipeline",
+    "summary": "grafana：死信写入失败（stage={{ $labels.stage }}）",
+    "description": "job {{ $labels.job }} 在 {{ $labels.stage }} 阶段的死信写入失败，平均每秒 {{ $values.A.Value }} 次。这意味着消息既没进正常链路、也没进 DLQ：消费者会一直阻塞在该 offset 上，device-worker 会在重试后退出并重启（见 docs/adr/0004）。先确认 Kafka 可用性与 topic 的 min.insync.replicas 是否高于当前 ISR；恢复后 worker 会自行继续消费，必要时用 bin/dlq-replay 补偿。"
+  },
+  "labels": {
+    "service": "iot-pipeline",
+    "severity": "critical"
+  },
+  "isPaused": false,
+  "notification_settings": {
+    "receiver": "钉钉",
+    "group_wait": "0s"
+  }
+}

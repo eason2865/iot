@@ -134,6 +134,9 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
 			DLQTopic:     runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
 			TopicConfig:  topicConfigFromEnv(),
+			// The bridge only ever writes the DLQ, so its retention policy is the
+			// one that applies here.
+			DLQTopicConfig: dlqTopicConfigFromEnv(),
 		}, publisher, res.metrics)
 		res.bridge = bridge
 	case "device-worker":
@@ -168,7 +171,8 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			TenantIDs: runtimeconfig.SplitCSV(os.Getenv("DEVICE_WORKER_TENANT_IDS")),
 			// The DLQ writer already uses RequireAll, so the topics must tolerate
 			// it: min.insync.replicas has to match what the producers require.
-			TopicConfig: topicConfigFromEnv(),
+			TopicConfig:    topicConfigFromEnv(),
+			DLQTopicConfig: dlqTopicConfigFromEnv(),
 		}, store, tdWriter, res.metrics)
 	}
 
@@ -184,6 +188,14 @@ func topicConfigFromEnv() platform.KafkaTopicConfig {
 		ReplicationFactor: runtimeconfig.KafkaTopicReplicationFactor(),
 		MinInsyncReplicas: runtimeconfig.KafkaTopicMinInsyncReplicas(),
 	}
+}
+
+// dlqTopicConfigFromEnv is topicConfigFromEnv plus the dead-letter retention
+// policy, so bounding the DLQ does not truncate the telemetry topics.
+func dlqTopicConfigFromEnv() platform.KafkaTopicConfig {
+	cfg := topicConfigFromEnv()
+	cfg.RetentionMs = runtimeconfig.KafkaDLQRetentionMs()
+	return cfg
 }
 
 func mqttClientID(key, fallback string) string {

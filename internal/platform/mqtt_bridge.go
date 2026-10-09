@@ -22,6 +22,7 @@ type MQTTBridgeConfig struct {
 	KafkaBrokers       []string
 	DLQTopic           string
 	TopicConfig        KafkaTopicConfig
+	DLQTopicConfig     KafkaTopicConfig
 }
 
 type MQTTBridge struct {
@@ -53,7 +54,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 		dlqTopic = "iot.dlq"
 	}
 	if len(cfg.KafkaBrokers) > 0 {
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, dlqTopic)
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, dlqTopic)
 	}
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.BrokerURL)
@@ -80,7 +81,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
-				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, "mqtt.decode", err)
+				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTDecode, err, bridge.metrics)
 				return
 			}
 			// Reject identity spoofing: the envelope tenant/device must match the
@@ -92,7 +93,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
-				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, "mqtt.identity", errIdentityMismatch)
+				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTIdentity, errIdentityMismatch, bridge.metrics)
 				return
 			}
 			rec := TelemetryRecord{
@@ -113,7 +114,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 						if bridge.metrics != nil {
 							bridge.metrics.IncMQTTBridge("error")
 						}
-						_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, "mqtt.kafka", err)
+						_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, err, bridge.metrics)
 						return
 					}
 					if bridge.metrics != nil {

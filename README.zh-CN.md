@@ -37,7 +37,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - 双存储分工：TDengine 保存时序数据，PostgreSQL 保存业务元数据和当前态
 - 命令闭环：创建、下发、ACK、状态机更新
 - 命令可靠投递：数据库领取租约、发布确认、超时扫描、UUIDv7 命令 ID、ACK 事件审计
-- 失败消息进入 `iot.dlq`，可通过 `dlq-replay` 按批次审核后重放
+- 失败消息进入 `iot.dlq`，可通过 `dlq-replay` 按批次审核后重放；每次死信写入按 stage 计入 `iot_dlq_publish_total`，积压由 `KAFKA_DLQ_RETENTION_MS` 约束，另有两条 Grafana 规则分别对“出现死信”和“死信写入失败”告警
 - EMQX 通过 `iot-core` HTTP 回调认证设备 bcrypt 密钥并下发租户级 MQTT ACL
 - 管理 API 除健康检查和契约端点外均要求 Bearer Token
 - TDengine 使用设备子表 + 租户/设备 Tags；完整长载荷保存在 PostgreSQL JSONB，时序库仅存哈希和索引字段
@@ -114,6 +114,7 @@ export TDENGINE_TABLE=telemetry_v2
 export KAFKA_DLQ_TOPIC=iot.dlq
 export KAFKA_TOPIC_REPLICATION_FACTOR=1     # 生产：>= 3
 export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # 生产：>= 2，否则 acks=all 等价于 acks=1
+export KAFKA_DLQ_RETENTION_MS=604800000     # 死信可重放保留时长
 export MANAGEMENT_API_TOKEN=change-me
 export EMQX_INTERNAL_PASSWORD=change-me
 ```
@@ -435,7 +436,9 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
 
-另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
+另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。
+
+另有两条规则针对死信链路而非单个服务。`monitoring/grafana/alerts/dlq-writes.json`（UID `iot-dlq-writes`，warning，`for: 1m`）在 `sum by (job, stage) (rate(iot_dlq_publish_total{result="ok"}[5m]))` 大于 0 时触发，表示正在产生死信；`monitoring/grafana/alerts/dlq-write-failures.json`（UID `iot-dlq-write-failures`，critical，`for: 0s`）在同样表达式取 `result="error"` 时触发，表示消息既没进正常链路也没进 DLQ：消费者会一直阻塞在该 offset，`device-worker` 重试后退出并重启（见 `docs/adr/0004`）。两条规则同属 `IoT DLQ` 分组、使用同一联系人，并都只关联 `iot-pipeline` 看板、不带 panel id——该看板目前没有死信面板，链接只打开看板而不是触发序列的图表。指标对每个 stage 都预置了序列，因此表达式在第一条死信出现前即可评估。死信可重放时长由 `KAFKA_DLQ_RETENTION_MS` 决定（默认 7 天），仅在本发布创建 `iot.dlq` 时生效。导入沿用同一 POST 命令、更换文件名。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
 
 ### 钉钉通知模板
 

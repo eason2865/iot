@@ -23,6 +23,7 @@ type Metrics struct {
 	telemetryIngestedTotal *prometheus.CounterVec
 	commandsTotal          *prometheus.CounterVec
 	kafkaPublishTotal      *prometheus.CounterVec
+	dlqPublishTotal        *prometheus.CounterVec
 	mqttBridgeTotal        *prometheus.CounterVec
 	deviceWorkerTotal      *prometheus.CounterVec
 	tdengineWriteTotal     *prometheus.CounterVec
@@ -74,6 +75,10 @@ func NewMetrics() *Metrics {
 			Name: "iot_kafka_publish_total",
 			Help: "Kafka publish counts.",
 		}, []string{"kind", "result"}),
+		dlqPublishTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "iot_dlq_publish_total",
+			Help: "Dead-letter publish counts by pipeline stage. result=error means the message was not dead-lettered.",
+		}, []string{"stage", "result"}),
 		mqttBridgeTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "iot_mqtt_bridge_total",
 			Help: "MQTT bridge message counts.",
@@ -116,6 +121,7 @@ func NewMetrics() *Metrics {
 		m.telemetryIngestedTotal,
 		m.commandsTotal,
 		m.kafkaPublishTotal,
+		m.dlqPublishTotal,
 		m.mqttBridgeTotal,
 		m.deviceWorkerTotal,
 		m.tdengineWriteTotal,
@@ -203,6 +209,12 @@ func (m *Metrics) IncKafkaPublish(kind, result string) {
 	incCounterVec(m.kafkaPublishTotal, kind, result)
 }
 
+// IncDLQPublish counts one dead-letter attempt for a pipeline stage. stage is
+// one of the Stage* constants; result is "ok" or "error".
+func (m *Metrics) IncDLQPublish(stage, result string) {
+	incCounterVec(m.dlqPublishTotal, stage, result)
+}
+
 func (m *Metrics) IncMQTTBridge(result string) {
 	incCounterVec(m.mqttBridgeTotal, result)
 }
@@ -250,6 +262,11 @@ func (m *Metrics) seedSeries() {
 			m.kafkaPublishTotal.WithLabelValues(kind, result).Add(0)
 		}
 	}
+	for _, stage := range DeadLetterStages() {
+		for _, result := range results {
+			m.dlqPublishTotal.WithLabelValues(stage, result).Add(0)
+		}
+	}
 	for _, kind := range []string{"telemetry", "command", "ack"} {
 		for _, result := range results {
 			m.deviceWorkerTotal.WithLabelValues(kind, result).Add(0)
@@ -269,7 +286,7 @@ func (m *Metrics) seedSeries() {
 		"/core.v1.CoreService/CreateCommand",
 		"/core.v1.CoreService/AckCommand",
 	} {
-		for _, code := range []string{"OK", "InvalidArgument", "NotFound", "AlreadyExists", "Internal"} {
+		for _, code := range []string{"OK", "InvalidArgument", "NotFound", "AlreadyExists", "Internal", "Unavailable"} {
 			m.grpcRequestsTotal.WithLabelValues(method, code).Add(0)
 		}
 	}

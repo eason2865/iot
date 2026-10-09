@@ -19,7 +19,7 @@ func main() {
 	brokers := flag.String("brokers", "localhost:9092", "comma-separated Kafka brokers")
 	dlqTopic := flag.String("topic", "iot.dlq", "dead-letter topic")
 	limit := flag.Int("limit", 100, "maximum records to replay")
-	stage := flag.String("stage", "", "only replay records from this stage (e.g. tdengine, kafka-publish); empty replays all stages")
+	stage := flag.String("stage", "", "only replay records from this stage; empty replays all stages. Known stages: "+strings.Join(platform.DeadLetterStages(), ", "))
 	dryRun := flag.Bool("dry-run", false, "inspect matching records without republishing or committing")
 	flag.Parse()
 	reader := kafka.NewReader(kafka.ReaderConfig{Brokers: splitCSV(*brokers), Topic: *dlqTopic, GroupID: "iot-dlq-replay", StartOffset: kafka.FirstOffset, MaxBytes: 10e6})

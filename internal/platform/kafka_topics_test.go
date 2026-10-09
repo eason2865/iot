@@ -18,11 +18,12 @@ func TestBuildTopicConfigs(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name        string
-		config      KafkaTopicConfig
-		wantRF      int
-		wantMinISR  string
-		wantConfigs int
+		name          string
+		config        KafkaTopicConfig
+		wantRF        int
+		wantMinISR    string
+		wantRetention string
+		wantConfigs   int
 	}{
 		{
 			name:        "defaults stay single-broker friendly",
@@ -47,6 +48,16 @@ func TestBuildTopicConfigs(t *testing.T) {
 			wantRF:      1,
 			wantMinISR:  "",
 			wantConfigs: 1,
+		},
+		{
+			name: "the dead-letter retention policy is applied",
+			// The DLQ is the only topic with a bounded retention: an unreplayed
+			// backlog must not grow forever.
+			config:        KafkaTopicConfig{ReplicationFactor: 1, MinInsyncReplicas: 1, RetentionMs: 604800000},
+			wantRF:        1,
+			wantMinISR:    "1",
+			wantRetention: "604800000",
+			wantConfigs:   1,
 		},
 		{
 			name:        "blank topic names are skipped",
@@ -81,6 +92,15 @@ func TestBuildTopicConfigs(t *testing.T) {
 			}
 			if isr := minISR(views); isr != tc.wantMinISR {
 				t.Fatalf("min.insync.replicas = %q, want %q", isr, tc.wantMinISR)
+			}
+			gotRetention := ""
+			for _, view := range views {
+				if view.name == "retention.ms" {
+					gotRetention = view.value
+				}
+			}
+			if gotRetention != tc.wantRetention {
+				t.Fatalf("retention.ms = %q, want %q", gotRetention, tc.wantRetention)
 			}
 		})
 	}

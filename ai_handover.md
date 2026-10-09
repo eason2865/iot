@@ -36,6 +36,7 @@
 - device-worker 租户隔离：`DEVICE_WORKER_TENANT_IDS`（CSV，默认空=处理全部租户，保持旧行为），Helm 对应 `deviceWorker.tenantIDs`。订阅仍是通配，过滤在 worker 内做，被跳过的消息记 result=`filtered` 并打日志（`telemetry skipped`/`command skipped`）。
 - TDengine 转义：`escapeTD` 先转义反斜杠再转义单引号（TDengine 中 `\` 是转义字符）。
 - Kafka 消费起点：新消费者组从 `FirstOffset` 启动重放积压（幂等消费兜底），避免 `LastOffset` 丢宕机期间消息。
+- DLQ 可见性与保留（2026-10-08 起）：每次死信写入都计入 `iot_dlq_publish_total{stage,result}`（`result=error` 表示**消息没被保全**，是阻塞消费/crash loop 的状态，不只是普通错误）；stage 收敛为 `platform.Stage*` 常量 + `DeadLetterStages()`，指标对每个 stage 预置序列，`cmd/dlq-replay -stage` 的帮助文本也从该列表生成（此前写的是 `tdengine`/`kafka-publish` 这类不存在的值）。死信保留由 `KAFKA_DLQ_RETENTION_MS` 约束（默认 7 天，Helm `kafka.dlqRetentionMs`），只在本发布创建 `iot.dlq` 时生效。告警模板：`monitoring/grafana/alerts/dlq-writes.json`（warning）与 `dlq-write-failures.json`（critical），均按 Grafana API 手工导入（非文件 provision），且**目前只关联 iot-pipeline 看板、无 panel**——该看板尚无死信面板。
 - DLQ 重放：`cmd/dlq-replay` 支持 `-stage` 按阶段过滤、`-dry-run` 只检查不发布不提交（不匹配的 offset 不提交，重启会重扫）。
 - MQTT 订阅默认值：`telemetry-ingestor` 用 `$share/iot-telemetry/...`，`device-worker` 用 `$share/iot-device-worker/...`（多副本负载均衡）。
 - NetworkPolicy：`iot-core-mqtt-auth` 限制 9090 仅 `emqx` namespace 可达，9001/9101 仅本 namespace。
@@ -114,11 +115,15 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 本次变更（2026-10-08，六轮：Kafka 持久性 + 命令租户隔离 + 错误码）：① 生产者 `RequireAll` + topic RF/min.insync.replicas 可配（`KafkaTopicConfig`/`buildTopicConfigs`，新增 `TestBuildTopicConfigs`）；② `GetCommandRequest` 加 `tenant_id`（用 `protoc` + `protoc-gen-go v1.36.8` 重新生成，先做空改动重生成验证 diff 为 0；`go install` 该插件可离线从 module cache 完成），iot-core 校验归属，adminapi 从 query 透传，harness 同步；③ 仓储改类型化哨兵 + iot-core `mapRepoError` + adminapi `httpStatusFromGRPC`，彻底去掉字符串匹配（顺带修掉跨设备 ACK 返回 502 的既有缺陷）。新增 ADR `0004-kafka-producer-durability.md`、`0005-tenant-scoped-command-reads.md`。新增测试：`TestGetCommandScopesToTenant`、`TestValidationErrorsUseInvalidArgument`、`TestRepoErrorsMapToStatusCodes`、`TestHTTPStatusFromGRPC`、`TestZRPCClientPreservesStatusCode`（真实 gRPC 服务 + 真实 zrpc 客户端，验证 status code 不被客户端吞掉——整个映射依赖这一点）、`TestWriteRPCErrorBodyOmitsTransportPrefix`、`TestBuildTopicConfigs`。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`helm lint`、`helm template`、`make build`。
 
+- 本次变更（2026-10-08，七轮：DLQ 可见性/告警/保留）：① 新增 `iot_dlq_publish_total{stage,result}` 指标与 `IncDLQPublish`，`publishDeadLetter`/`commitAfterDeadLetter` 增加 metrics 参数，`result=error` 覆盖"writer 未配置/marshal 失败/写入重试后仍失败"三条路径；② stage 魔法字符串收敛为 `Stage*` 常量 + `DeadLetterStages()`，并修正 `cmd/dlq-replay -stage` 的错误帮助文本（原写 `tdengine`、`kafka-publish` 均非真实 stage）；③ `KafkaTopicConfig.RetentionMs` 新增，`retention.ms` 与 `min.insync.replicas` 一样只在首次创建 topic 时生效，DLQ 走独立的 `DLQTopicConfig` 以免truncate 遥测 topic；④ 新增两条 Grafana 告警模板 dlq-writes / dlq-write-failures；⑤ **顺带修掉一个真 bug**：`helm template` 渲染出 `KAFKA_DLQ_RETENTION_MS: "6.048e+08"`（YAML 大整数被解析为 float64，`| quote` 输出科学计数法），会让 `strconv.Atoi` 失败并静默回退默认值——图表侧三个 Kafka 整数改为 `| int64 | quote`，同时让 `runtimeconfig.Int` 在解析失败时打日志而不是静默吞掉，并新增 `internal/runtimeconfig/config_test.go` 覆盖该场景。新增测试：`TestPublishDeadLetterCountsEveryOutcome`、`TestBuildTopicConfigs` 的保留用例、`TestIntHandlesValidUnparseableAndUnset`、`TestKafkaTopicDurabilityDefaults`。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`helm lint`、`helm template`（默认与生产值）、`make build`。
+
 ## 待办（2026-10-08 评审已确认，尚未开工）
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。
 - `iot.dlq` 无消费侧：只有离线 `cmd/dlq-replay`，无指标、无告警、无保留策略。
 - iot-core 只把 dispatcher 纳入了优雅停机；`serveMQTTAuthentication` 与 `serveIotCoreMetrics` 仍是裸 `http.ListenAndServe` goroutine，未接 `http.Server.Shutdown`。
+- iot-pipeline 看板缺 DLQ 面板：`iot_dlq_publish_total` 目前只能靠 Prometheus 查询或告警看到，看板里没有图表。补面板需要本地起 Grafana 做视觉验证（本次环境未运行 Docker/Grafana，故未改这个自动 provision 的看板文件）。
+- `iot.dlq` 仍无自动消费/重放：只有离线 `cmd/dlq-replay`。告警能告诉你"有死信"，但恢复仍需人工执行重放。
 
 ## 文档入口
 

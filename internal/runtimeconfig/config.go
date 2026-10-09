@@ -1,6 +1,7 @@
 package runtimeconfig
 
 import (
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -29,9 +30,13 @@ func SplitCSV(value string) []string {
 
 func Int(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		n, err := strconv.Atoi(v)
+		if err == nil {
 			return n
 		}
+		// Never swallow this: a value the deployment set but that cannot be
+		// parsed means the intended configuration is silently not in effect.
+		log.Printf("%s=%q is not an integer, using the default %d", key, v, fallback)
 	}
 	return fallback
 }
@@ -98,4 +103,12 @@ func KafkaTopicReplicationFactor() int {
 // still succeed there. Production must set it to at least 2.
 func KafkaTopicMinInsyncReplicas() int {
 	return Int("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", 1)
+}
+
+// KafkaDLQRetentionMs bounds how long a dead letter stays replayable. The
+// default matches Kafka's own 7-day default, but stating it explicitly means an
+// unreplayed backlog cannot grow forever just because the broker was configured
+// with retention.ms=-1. Zero or negative leaves the broker default alone.
+func KafkaDLQRetentionMs() int {
+	return Int("KAFKA_DLQ_RETENTION_MS", 7*24*60*60*1000)
 }

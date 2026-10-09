@@ -19,6 +19,11 @@ import (
 type KafkaTopicConfig struct {
 	ReplicationFactor int
 	MinInsyncReplicas int
+	// RetentionMs sets retention.ms on the topics created with this config. Zero
+	// or negative leaves the broker default in place, which is not necessarily
+	// bounded: a broker configured with -1 never deletes. The dead-letter topic
+	// uses this so an unreplayed backlog cannot grow without limit.
+	RetentionMs int
 }
 
 func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
@@ -59,6 +64,12 @@ func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfi
 			topicConfig.ConfigEntries = append(topicConfig.ConfigEntries, kafka.ConfigEntry{
 				ConfigName:  "min.insync.replicas",
 				ConfigValue: strconv.Itoa(cfg.MinInsyncReplicas),
+			})
+		}
+		if cfg.RetentionMs > 0 {
+			topicConfig.ConfigEntries = append(topicConfig.ConfigEntries, kafka.ConfigEntry{
+				ConfigName:  "retention.ms",
+				ConfigValue: strconv.Itoa(cfg.RetentionMs),
 			})
 		}
 		configs = append(configs, topicConfig)

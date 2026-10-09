@@ -14,8 +14,10 @@ data:
   KAFKA_COMMAND_TOPIC: iot.command
   KAFKA_DLQ_TOPIC: iot.dlq
   # Durability of the topics this release creates. See docs/adr/0004.
-  KAFKA_TOPIC_REPLICATION_FACTOR: {{ .Values.kafka.topicReplicationFactor | quote }}
-  KAFKA_TOPIC_MIN_INSYNC_REPLICAS: {{ .Values.kafka.topicMinInsyncReplicas | quote }}
+  KAFKA_TOPIC_REPLICATION_FACTOR: {{ .Values.kafka.topicReplicationFactor | int64 | quote }}
+  KAFKA_TOPIC_MIN_INSYNC_REPLICAS: {{ .Values.kafka.topicMinInsyncReplicas | int64 | quote }}
+  # int64 matters here: a bare large YAML integer renders as "6.048e+08".
+  KAFKA_DLQ_RETENTION_MS: {{ .Values.kafka.dlqRetentionMs | int64 | quote }}
   EMQX_TOPIC_FILTER: "$share/iot-telemetry/tenant/+/device/+/telemetry"
   EMQX_ACK_TOPIC_FILTER: "$share/iot-device-worker/tenant/+/device/+/ack"
   EMQX_TELEMETRY_INGESTOR_CLIENT_ID: iot-telemetry-ingestor

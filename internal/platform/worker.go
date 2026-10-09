@@ -35,6 +35,9 @@ type WorkerConfig struct {
 	// they are missing. The DLQ writer already used RequireAll, so the topic's
 	// min.insync.replicas must match or a degraded ISR blocks dead-lettering.
 	TopicConfig KafkaTopicConfig
+	// DLQTopicConfig is applied to the dead-letter topic only, so a retention
+	// policy can bound it without also truncating the telemetry topics.
+	DLQTopicConfig KafkaTopicConfig
 }
 
 type Worker struct {
@@ -74,7 +77,10 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		if dlqTopic == "" {
 			dlqTopic = "iot.dlq"
 		}
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, telemetryTopic, commandTopic, dlqTopic)
+		// The DLQ is created separately: it carries the same durability settings
+		// but its own retention policy.
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, telemetryTopic, commandTopic)
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, dlqTopic)
 		w.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
@@ -254,7 +260,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry", "error")
 			}
-			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.decode", err); err != nil {
+			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, StageTelemetryDecode, err, w.metrics); err != nil {
 				return err
 			}
 			continue
@@ -302,7 +308,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 					if w.metrics != nil {
 						w.metrics.IncDeviceWorker("telemetry", "error")
 					}
-					if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.postgres", err); dlqErr != nil {
+					if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, StageTelemetryPostgres, err, w.metrics); dlqErr != nil {
 						return dlqErr
 					}
 					continue
@@ -317,7 +323,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")
 				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, "telemetry.tdengine", err); dlqErr != nil {
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.telemetryReader, msg, StageTelemetryTDengine, err, w.metrics); dlqErr != nil {
 					return dlqErr
 				}
 				continue
@@ -361,7 +367,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("command", "error")
 			}
-			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.decode", err); err != nil {
+			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandDecode, err, w.metrics); err != nil {
 				return err
 			}
 			continue
@@ -384,7 +390,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.topic", err); dlqErr != nil {
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandTopic, err, w.metrics); dlqErr != nil {
 					return dlqErr
 				}
 				continue
@@ -403,7 +409,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.encode", err); dlqErr != nil {
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandEncode, err, w.metrics); dlqErr != nil {
 					return dlqErr
 				}
 				continue
@@ -415,7 +421,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("command", "error")
 				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, "command.mqtt", err); dlqErr != nil {
+				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandMQTT, err, w.metrics); dlqErr != nil {
 					return dlqErr
 				}
 				continue

@@ -16,6 +16,9 @@ kafka:
   # topic creation is idempotent; alter live topics with kafka-configs instead.
   topicReplicationFactor: 1
   topicMinInsyncReplicas: 1
+  # How long a dead letter stays replayable. Bounds the iot.dlq backlog; only
+  # applied when this release creates the topic.
+  dlqRetentionMs: 604800000
 
 deviceWorker:
   # Optional tenant isolation. Empty (the default) means the worker processes

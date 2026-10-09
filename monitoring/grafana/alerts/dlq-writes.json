@@ -1,0 +1,88 @@
+{
+  "uid": "iot-dlq-writes",
+  "orgID": 1,
+  "folderUID": "efobmswzeefi8d",
+  "ruleGroup": "IoT DLQ",
+  "title": "DLQ 正在产生死信",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "prometheus",
+      "model": {
+        "refId": "A",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "editorMode": "code",
+        "expr": "sum by (job, stage) (rate(iot_dlq_publish_total{result=\"ok\"}[5m])) or vector(0)",
+        "instant": true,
+        "range": false,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+      }
+    },
+    {
+      "refId": "C",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "C",
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+          {
+            "type": "query",
+            "query": {
+              "params": [
+                "C"
+              ]
+            },
+            "reducer": {
+              "type": "last",
+              "params": []
+            },
+            "evaluator": {
+              "type": "gt",
+              "params": [
+                0
+              ]
+            },
+            "operator": {
+              "type": "and"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "for": "1m",
+  "annotations": {
+    "__dashboardUid__": "iot-pipeline",
+    "summary": "grafana：死信产生（stage={{ $labels.stage }}）",
+    "description": "job {{ $labels.job }} 的 {{ $labels.stage }} 阶段最近 5 分钟平均每秒产生 {{ $values.A.Value }} 条死信，说明有消息未能进入正常链路。先用 kubectl logs 看该阶段的错误，再执行 `bin/dlq-replay -brokers <brokers> -dry-run -stage {{ $labels.stage }}` 检查记录与失败原因；修掉根因后再去掉 -dry-run 重放。注意死信只在 KAFKA_DLQ_RETENTION_MS 窗口内可重放（默认 7 天）。"
+  },
+  "labels": {
+    "service": "iot-pipeline",
+    "severity": "warning"
+  },
+  "isPaused": false,
+  "notification_settings": {
+    "receiver": "钉钉",
+    "group_wait": "0s"
+  }
+}

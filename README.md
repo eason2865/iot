@@ -37,7 +37,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - Dual storage: TDengine for time-series data, PostgreSQL for business metadata and current state
 - Command loop: create, dispatch, ACK, state-machine updates
 - Reliable command delivery: database lease claiming, publish confirmation, timeout sweeping, UUIDv7 command IDs, ACK event auditing
-- Failed messages land in `iot.dlq` and can be reviewed and replayed in batches via `dlq-replay`
+- Failed messages land in `iot.dlq` and can be reviewed and replayed in batches via `dlq-replay`; every dead-letter attempt is counted in `iot_dlq_publish_total` by stage, the backlog is bounded by `KAFKA_DLQ_RETENTION_MS`, and two Grafana rules alert on dead letters and on dead-letter write failures
 - EMQX authenticates device bcrypt secrets via an `iot-core` HTTP callback and issues tenant-scoped MQTT ACLs
 - The management API requires a Bearer Token on all endpoints except health checks and contract endpoints
 - TDengine uses per-device subtables with tenant/device tags; full long payloads live in PostgreSQL JSONB, while the time-series store keeps only hashes and index fields
@@ -114,6 +114,7 @@ export TDENGINE_TABLE=telemetry_v2
 export KAFKA_DLQ_TOPIC=iot.dlq
 export KAFKA_TOPIC_REPLICATION_FACTOR=1     # production: >= 3
 export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # production: >= 2, else acks=all == acks=1
+export KAFKA_DLQ_RETENTION_MS=604800000     # how long a dead letter stays replayable
 export MANAGEMENT_API_TOKEN=change-me
 export EMQX_INTERNAL_PASSWORD=change-me
 ```
@@ -435,7 +436,9 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 To update an existing rule, use `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx` instead. The template never overwrites edits made in the Grafana UI. A paused rule produces no new firing marks; historical marks are recorded only from the moment the panel association is created — earlier events are not backfilled.
 
-There is also `monitoring/grafana/alerts/management-api-healthz-qps.json`: it only watches the `/healthz`, `2xx` series, using the same 5-minute average QPS, and fires on the next evaluation when strictly `> 0.3 req/s` (`for: 0s`, notification `group_wait: 0s`). The local `Management API HTTP` group evaluates every 60 seconds; notifications use the existing "钉钉" (DingTalk) contact point. The panel shows an orange dashed threshold, the rule links to the same HTTP panel, and it does not change the 5xx rule. For first-time import reuse the POST command above with the new filename; for updates use UID `iot-management-api-healthz-qps`. The health-check rate itself hovers near 0.3, so sampling jitter may cause repeated firing/resolution.
+There is also `monitoring/grafana/alerts/management-api-healthz-qps.json`: it only watches the `/healthz`, `2xx` series, using the same 5-minute average QPS, and fires on the next evaluation when strictly `> 0.3 req/s` (`for: 0s`, notification `group_wait: 0s`). The local `Management API HTTP` group evaluates every 60 seconds; notifications use the existing "钉钉" (DingTalk) contact point. The panel shows an orange dashed threshold, the rule links to the same HTTP panel, and it does not change the 5xx rule. For first-time import reuse the POST command above with the new filename; for updates use UID `iot-management-api-healthz-qps`.
+
+Two more rules cover the dead-letter path rather than a single service. `monitoring/grafana/alerts/dlq-writes.json` (UID `iot-dlq-writes`, warning, `for: 1m`) fires when `sum by (job, stage) (rate(iot_dlq_publish_total{result="ok"}[5m]))` is `> 0`, meaning messages are being dead-lettered; `monitoring/grafana/alerts/dlq-write-failures.json` (UID `iot-dlq-write-failures`, critical, `for: 0s`) fires on the same expression with `result="error"`, which means the message reached neither the normal path nor the DLQ: the consumer stays blocked on that offset and `device-worker` exits and restarts (see `docs/adr/0004`). Both live in the `IoT DLQ` group, notify through the same contact point, and link to the `iot-pipeline` dashboard without a panel id because that dashboard has no DLQ panel yet — the link opens the dashboard, not a chart of the firing series. The metric is seeded for every stage, so the expressions evaluate against series that exist before the first dead letter. How long a dead letter stays replayable is set by `KAFKA_DLQ_RETENTION_MS` (default 7 days), applied only when this release creates `iot.dlq`. Import with the same POST command, replacing the filename. The health-check rate itself hovers near 0.3, so sampling jitter may cause repeated firing/resolution.
 
 ### DingTalk Notification Template
 

@@ -32,6 +32,8 @@ spec:
         app: management-api
     spec:
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}

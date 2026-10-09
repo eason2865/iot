@@ -29,6 +29,8 @@ spec:
         app: telemetry-ingestor
     spec:
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}

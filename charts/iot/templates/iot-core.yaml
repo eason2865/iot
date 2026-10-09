@@ -35,6 +35,8 @@ spec:
         app: iot-core
     spec:
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}

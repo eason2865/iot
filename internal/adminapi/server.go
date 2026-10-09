@@ -21,9 +21,27 @@ import (
 	corev1 "iot/proto/core/v1"
 )
 
+// maxRequestBodyBytes caps every management API request body at 1 MiB. All
+// bodies here are small JSON documents (tenant/device/command/telemetry
+// envelopes); without a cap a client could force unbounded memory use while
+// the handler decodes.
+const maxRequestBodyBytes = 1 << 20
+
 type Server struct {
 	rpc     corev1.CoreServiceClient
 	metrics *platform.Metrics
+}
+
+// limitRequestBodyMiddleware enforces maxRequestBodyBytes centrally, so no
+// handler can forget to bound its decode. Handlers see an error from
+// MaxBytesReader when the limit is exceeded.
+func limitRequestBodyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func Run() error {
@@ -52,6 +70,7 @@ func Run() error {
 			Timeout:    true,
 		},
 	})
+	httpServer.Use(rest.ToMiddleware(limitRequestBodyMiddleware))
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
 	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddleware(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", ""))))

@@ -10,7 +10,7 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
     ports:
-      - "18080:18080"
+      - "127.0.0.1:18080:18080"
 
   k8s-forward-management-api-metrics:
     image: rancher/kubectl:v1.26.8
@@ -21,7 +21,7 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
     ports:
-      - "18090:18090"
+      - "127.0.0.1:18090:18090"
 
   k8s-forward-telemetry-ingestor:
     image: rancher/kubectl:v1.26.8
@@ -32,7 +32,7 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
     ports:
-      - "18081:18081"
+      - "127.0.0.1:18081:18081"
 
   k8s-forward-device-worker:
     image: rancher/kubectl:v1.26.8
@@ -43,7 +43,7 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
     ports:
-      - "18082:18082"
+      - "127.0.0.1:18082:18082"
 
   k8s-forward-iot-core:
     image: rancher/kubectl:v1.26.8
@@ -54,7 +54,7 @@ services:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
     ports:
-      - "18091:18091"
+      - "127.0.0.1:18091:18091"
 
   k8s-forward-emqx-listeners:
     image: rancher/kubectl:v1.26.8
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-listeners", "1883:1883", "-n", "emqx"]
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
@@ -73,7 +73,7 @@ services:
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-dashboard", "18083:18083", "-n", "emqx"]
     ports:
-      - "18083:18083"
+      - "127.0.0.1:18083:18083"
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]

@@ -84,8 +84,7 @@ prepare_local_app_image() {
             ;;
         esac
       done
-      echo "No repository digest for $APP_IMAGE; pull or publish this image before deploying." >&2
-      exit 1
+      echo "Warning: no repository digest for $APP_IMAGE; using the local image tag without digest pinning." >&2
     fi
   fi
 }

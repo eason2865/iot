@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -251,13 +249,11 @@ func topicConfigFromEnv() platform.KafkaTopicConfig {
 }
 
 func rpcListenOn() string {
+	// LISTEN_ADDR is deliberately NOT a fallback here: it is the generic HTTP
+	// listen variable shared by demo/management-api, so honouring it could
+	// point the gRPC listener at another process's port.
 	if addr := os.Getenv("IOT_CORE_LISTEN_ON"); addr != "" {
 		return addr
-	}
-	if addr := os.Getenv("LISTEN_ADDR"); addr != "" && strings.HasPrefix(addr, ":") {
-		if _, err := strconv.Atoi(strings.TrimPrefix(addr, ":")); err == nil {
-			return addr
-		}
 	}
 	return ":9001"
 }

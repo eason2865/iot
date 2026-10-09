@@ -28,6 +28,9 @@ spec:
       labels:
         app: telemetry-ingestor
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
         - ip: {{ .Values.externalDependencies.hostGatewayIP | quote }}
@@ -50,6 +53,13 @@ spec:
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/telemetry-ingestor"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.resources.telemetryIngestor | nindent 12 }}
           envFrom:
             - configMapRef:
                 name: iot-common-config

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ func TestPublishDeadLetterCountsEveryOutcome(t *testing.T) {
 	metrics := NewMetrics()
 
 	// No writer configured: the message is explicitly NOT dead-lettered.
-	if err := publishDeadLetter(nil, kafka.Message{Topic: "iot.telemetry", Value: []byte("x")}, StageTelemetryTDengine, errors.New("tdengine down"), metrics); err == nil {
+	if err := publishDeadLetter(context.Background(), nil, kafka.Message{Topic: "iot.telemetry", Value: []byte("x")}, StageTelemetryTDengine, errors.New("tdengine down"), metrics); err == nil {
 		t.Fatal("publishDeadLetter() without a writer returned nil")
 	}
 

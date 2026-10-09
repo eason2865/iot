@@ -136,7 +136,7 @@ func (s *Service) ListTelemetry(_ context.Context, req *corev1.ListTelemetryRequ
 	return &corev1.ListTelemetryResponse{Records: out, NextCursor: nextCursor}, nil
 }
 
-func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
+func (s *Service) IngestTelemetry(ctx context.Context, req *corev1.IngestTelemetryRequest) (*corev1.IngestTelemetryResponse, error) {
 	envelope := envelopeFromPB(req)
 	// The REST ingest path must enforce the same envelope contract as the MQTT
 	// path; otherwise malformed records reach Kafka and poison the worker/DLQ.
@@ -156,7 +156,7 @@ func (s *Service) IngestTelemetry(_ context.Context, req *corev1.IngestTelemetry
 	// PostgreSQL re-write idempotent and compensates the TDengine sink via
 	// tdengine_written.
 	if s.publisher != nil {
-		if err := s.publisher.PublishTelemetry(record); err != nil {
+		if err := s.publisher.PublishTelemetry(ctx, record); err != nil {
 			// The row is stored, so the caller may retry: a resend is idempotent
 			// and covers the "PostgreSQL committed but Kafka did not" window.
 			return nil, status.Errorf(codes.Unavailable, "telemetry stored but not published: %v", err)
@@ -180,7 +180,7 @@ func (s *Service) RecordTelemetry(_ context.Context, req *corev1.RecordTelemetry
 	return &corev1.RecordTelemetryResponse{Record: telemetryToPB(record)}, nil
 }
 
-func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequest) (*corev1.CreateCommandResponse, error) {
+func (s *Service) CreateCommand(ctx context.Context, req *corev1.CreateCommandRequest) (*corev1.CreateCommandResponse, error) {
 	if req.GetTenantId() == "" || req.GetDeviceId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenantId and deviceId are required")
 	}
@@ -195,7 +195,7 @@ func (s *Service) CreateCommand(_ context.Context, req *corev1.CreateCommandRequ
 	// background CommandDispatcher claims and publishes 'created' commands.
 	// Publishing synchronously here too would deliver the command twice.
 	if _, dispatchesAsync := s.repo.(platform.CommandDispatchStore); s.publisher != nil && !dispatchesAsync {
-		if err := s.publisher.PublishCommand(command); err != nil {
+		if err := s.publisher.PublishCommand(ctx, command); err != nil {
 			return nil, status.Errorf(codes.Unavailable, "command created but not published: %v", err)
 		}
 	}

@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 
 	"iot/internal/contracts"
 )
+
+// errPublishBacklogFull marks a message that could not get a publish slot
+// before the timeout; it is dead-lettered with this cause so the DLQ record
+// explains the drop.
+var errPublishBacklogFull = errors.New("mqtt bridge publish backlog full")
 
 type MQTTBridgeConfig struct {
 	BrokerURL          string
@@ -81,7 +87,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
-				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTDecode, err, bridge.metrics)
+				_ = publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTDecode, err, bridge.metrics)
 				return
 			}
 			// Reject identity spoofing: the envelope tenant/device must match the
@@ -93,7 +99,7 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
 				}
-				_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTIdentity, errIdentityMismatch, bridge.metrics)
+				_ = publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTIdentity, errIdentityMismatch, bridge.metrics)
 				return
 			}
 			rec := TelemetryRecord{
@@ -109,12 +115,17 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 			if acquirePublishSlot(bridge.publishSlots, publishSlotTimeout) {
 				go func() {
 					defer func() { <-bridge.publishSlots }()
-					if err := publisher.PublishTelemetry(rec); err != nil {
+					if err := publisher.PublishTelemetry(context.Background(), rec); err != nil {
 						log.Printf("mqtt bridge publish telemetry error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, err)
 						if bridge.metrics != nil {
 							bridge.metrics.IncMQTTBridge("error")
 						}
-						_ = publishDeadLetter(bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, err, bridge.metrics)
+						if dlqErr := publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, err, bridge.metrics); dlqErr != nil {
+							// The message is now lost for good: the publish failed
+							// and the dead-letter copy failed too. This must be
+							// visible in logs, not silently dropped.
+							log.Printf("mqtt bridge dead-letter error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, dlqErr)
+						}
 						return
 					}
 					if bridge.metrics != nil {
@@ -125,6 +136,11 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 				log.Printf("mqtt bridge publish backlog full: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
 				if bridge.metrics != nil {
 					bridge.metrics.IncMQTTBridge("error")
+				}
+				// Backpressure must not silently drop the message: dead-letter it
+				// on the same stage/path as a failed publish so it can be replayed.
+				if dlqErr := publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, errPublishBacklogFull, bridge.metrics); dlqErr != nil {
+					log.Printf("mqtt bridge dead-letter error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, dlqErr)
 				}
 				return
 			}

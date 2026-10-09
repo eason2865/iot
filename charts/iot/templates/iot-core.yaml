@@ -34,6 +34,9 @@ spec:
       labels:
         app: iot-core
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
         - ip: {{ .Values.externalDependencies.hostGatewayIP | quote }}
@@ -55,6 +58,13 @@ spec:
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/iot-core"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.resources.iotCore | nindent 12 }}
           envFrom:
             - configMapRef:
                 name: iot-common-config
@@ -95,3 +105,15 @@ spec:
           secret:
             secretName: {{ .Values.grpcTLS.secretName }}
       {{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: iot-core
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: iot-core

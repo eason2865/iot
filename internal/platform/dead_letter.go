@@ -59,7 +59,7 @@ type DeadLetter struct {
 // is counted in iot_dlq_publish_total: a failure here means the message was NOT
 // dead-lettered, which is the state that turns a bad record into a stuck
 // consumer or a crash loop, so it must be visible rather than only logged.
-func publishDeadLetter(writer *kafka.Writer, msg kafka.Message, stage string, cause error, metrics *Metrics) error {
+func publishDeadLetter(ctx context.Context, writer *kafka.Writer, msg kafka.Message, stage string, cause error, metrics *Metrics) error {
 	if writer == nil {
 		if metrics != nil {
 			metrics.IncDLQPublish(stage, "error")
@@ -73,7 +73,7 @@ func publishDeadLetter(writer *kafka.Writer, msg kafka.Message, stage string, ca
 		}
 		return err
 	}
-	if err := writeKafkaMessageWithRetry(writer, kafka.Message{Key: []byte(msg.Topic), Value: payload}); err != nil {
+	if err := writeKafkaMessageWithRetry(ctx, writer, kafka.Message{Key: []byte(msg.Topic), Value: payload}); err != nil {
 		if metrics != nil {
 			metrics.IncDLQPublish(stage, "error")
 		}
@@ -86,7 +86,7 @@ func publishDeadLetter(writer *kafka.Writer, msg kafka.Message, stage string, ca
 }
 
 func commitAfterDeadLetter(ctx context.Context, writer *kafka.Writer, reader *kafka.Reader, msg kafka.Message, stage string, cause error, metrics *Metrics) error {
-	if err := publishDeadLetter(writer, msg, stage, cause, metrics); err != nil {
+	if err := publishDeadLetter(ctx, writer, msg, stage, cause, metrics); err != nil {
 		return err
 	}
 	return reader.CommitMessages(ctx, msg)

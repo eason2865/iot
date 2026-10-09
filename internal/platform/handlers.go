@@ -154,7 +154,7 @@ func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.publisher.PublishTelemetry(record); err != nil {
+	if err := a.publisher.PublishTelemetry(r.Context(), record); err != nil {
 		if a.metrics != nil {
 			a.metrics.IncTelemetry("error")
 		}
@@ -201,7 +201,7 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := a.publisher.PublishCommand(cmd); err != nil {
+		if err := a.publisher.PublishCommand(r.Context(), cmd); err != nil {
 			if a.metrics != nil {
 				a.metrics.IncCommand("created", "error")
 			}

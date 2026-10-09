@@ -183,11 +183,11 @@ func (dupRepo) RecordTelemetry(env contracts.Envelope) (platform.TelemetryRecord
 // countingPublisher records how many times telemetry was published.
 type countingPublisher struct{ telemetry int }
 
-func (p *countingPublisher) PublishTelemetry(platform.TelemetryRecord) error {
+func (p *countingPublisher) PublishTelemetry(context.Context, platform.TelemetryRecord) error {
 	p.telemetry++
 	return nil
 }
-func (p *countingPublisher) PublishCommand(platform.Command) error { return nil }
+func (p *countingPublisher) PublishCommand(context.Context, platform.Command) error { return nil }
 
 // TestIngestTelemetryRepublishesOnDuplicate pins the fix for the Kafka-loss
 // race: when the first IngestTelemetry wrote PostgreSQL but failed to publish,

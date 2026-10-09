@@ -436,7 +436,7 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 已有规则更新时改用 `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx`。模板不会自动覆盖在 Grafana 页面中做的修改。暂停中的规则不会产生新的触发标记；历史标记从关联面板之后开始记录，不会补写之前的事件。
 
-另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 0.3 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。
+另有 `monitoring/grafana/alerts/management-api-healthz-qps.json`：只检测 `/healthz`、`2xx` 序列，与图表一样使用 5 分钟平均 QPS，严格 `> 1 req/s` 在下次评估时触发（`for: 0s`，通知 `group_wait: 0s`）。本地 `Management API HTTP` 分组每 60 秒评估一次；通知使用已有“钉钉”联系人。该曲线显示橙色虚线阈值，规则关联同一 HTTP 面板，且不会改变 5xx 规则。首次导入沿用上面的 POST 命令、更换文件名；更新使用 UID `iot-management-api-healthz-qps`。
 
 另有两条规则针对死信链路而非单个服务。`monitoring/grafana/alerts/dlq-writes.json`（UID `iot-dlq-writes`，warning，`for: 1m`）在 `sum by (job, stage) (rate(iot_dlq_publish_total{result="ok"}[5m]))` 大于 0 时触发，表示正在产生死信；`monitoring/grafana/alerts/dlq-write-failures.json`（UID `iot-dlq-write-failures`，critical，`for: 0s`）在同样表达式取 `result="error"` 时触发，表示消息既没进正常链路也没进 DLQ：消费者会一直阻塞在该 offset，`device-worker` 重试后退出并重启（见 `docs/adr/0004`）。两条规则同属 `IoT DLQ` 分组、使用同一联系人，并都只关联 `iot-pipeline` 看板、不带 panel id——该看板目前没有死信面板，链接只打开看板而不是触发序列的图表。指标对每个 stage 都预置了序列，因此表达式在第一条死信出现前即可评估。死信可重放时长由 `KAFKA_DLQ_RETENTION_MS` 决定（默认 7 天），仅在本发布创建 `iot.dlq` 时生效。导入沿用同一 POST 命令、更换文件名。
 
@@ -451,7 +451,7 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
    `kubectl exec -n iot deploy/device-worker -- /usr/local/bin/dlq-replay -brokers <bootstrap>:9092 -stage <stage> -limit 100`
 4. 再跑一次 dry-run 确认该 stage 已排空。工具会输出 `scanned/replayed/skipped`，并在 topic 静默 `-idle-timeout`（默认 5s）后正常退出。
 
-每个 stage 有独立 consumer group（`iot-dlq-replay-<stage>`），因此定向重放不会漏掉其他 stage 的记录；需要刻意全量重扫时用 `-group` 覆盖。记录只在 `KAFKA_DLQ_RETENTION_MS`（默认 7 天）窗口内可重放：修得比这更晚就会永久丢失，而告警是唯一的提醒。健康检查速率本身接近 0.3，采样波动可能造成反复触发/恢复。
+每个 stage 有独立 consumer group（`iot-dlq-replay-<stage>`），因此定向重放不会漏掉其他 stage 的记录；需要刻意全量重扫时用 `-group` 覆盖。记录只在 `KAFKA_DLQ_RETENTION_MS`（默认 7 天）窗口内可重放：修得比这更晚就会永久丢失，而告警是唯一的提醒。K8s 探针自身流量约为 0.3 req/s/副本（readiness periodSeconds=5 加 liveness periodSeconds=10），healthz QPS 阈值已设在探针基线之上，不会由探针流量触发；需要演示触发时可循环请求 /healthz 产生额外流量。
 
 ### 钉钉通知模板
 

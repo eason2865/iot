@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 
@@ -58,11 +59,11 @@ type Repository interface {
 }
 
 type MessagePublisher interface {
-	PublishTelemetry(TelemetryRecord) error
-	PublishCommand(Command) error
+	PublishTelemetry(context.Context, TelemetryRecord) error
+	PublishCommand(context.Context, Command) error
 }
 
 type noopPublisher struct{}
 
-func (noopPublisher) PublishTelemetry(TelemetryRecord) error { return nil }
-func (noopPublisher) PublishCommand(Command) error           { return nil }
+func (noopPublisher) PublishTelemetry(context.Context, TelemetryRecord) error { return nil }
+func (noopPublisher) PublishCommand(context.Context, Command) error           { return nil }

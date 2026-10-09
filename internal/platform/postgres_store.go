@@ -378,6 +378,23 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		return TelemetryRecord{}, err
 	}
 	inserted, _ := res.RowsAffected()
+	if inserted == 0 {
+		// Duplicate (e.g. DLQ replay). Do NOT touch device_state here: a
+		// replayed message must not mark the device online or refresh
+		// last_seen_at, otherwise a DLQ replay lies about liveness. Return the
+		// stored row so the caller can compensate the TDengine write if it
+		// never landed.
+		var stored TelemetryRecord
+		var payload []byte
+		if err := s.db.QueryRow(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at, tdengine_written
+			FROM telemetry_records WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
+			rec.MsgID, rec.TenantID, rec.DeviceID).
+			Scan(&stored.MsgID, &stored.TenantID, &stored.DeviceID, &stored.Ts, &stored.Type, &stored.Version, &payload, &stored.ReceivedAt, &stored.TDengineWritten); err != nil {
+			return TelemetryRecord{}, err
+		}
+		stored.Payload = json.RawMessage(payload)
+		return stored, ErrDuplicateTelemetry
+	}
 	_, err = tx.Exec(`INSERT INTO device_state (tenant_id, device_id, connected, last_seen_at, last_msg_id, updated_at)
 		VALUES ($1,$2,true,$3,$4,$3)
 		ON CONFLICT (tenant_id, device_id) DO UPDATE SET connected = true, last_seen_at = EXCLUDED.last_seen_at, last_msg_id = EXCLUDED.last_msg_id, updated_at = EXCLUDED.updated_at`,
@@ -387,15 +404,6 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 	}
 	if err := tx.Commit(); err != nil {
 		return TelemetryRecord{}, err
-	}
-	if inserted == 0 {
-		// Duplicate (e.g. DLQ replay). Return the stored row's TDengine completion
-		// state so the caller can compensate the TDengine write if it never landed.
-		var written bool
-		_ = s.db.QueryRow(`SELECT tdengine_written FROM telemetry_records WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
-			rec.MsgID, rec.TenantID, rec.DeviceID).Scan(&written)
-		rec.TDengineWritten = written
-		return rec, ErrDuplicateTelemetry
 	}
 	return rec, nil
 }

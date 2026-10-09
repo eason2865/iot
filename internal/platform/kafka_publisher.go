@@ -94,7 +94,7 @@ func (p *KafkaPublisher) Close() error {
 	return nil
 }
 
-func (p *KafkaPublisher) PublishTelemetry(record TelemetryRecord) error {
+func (p *KafkaPublisher) PublishTelemetry(ctx context.Context, record TelemetryRecord) error {
 	if p == nil || p.telemetryWriter == nil {
 		return nil
 	}
@@ -105,7 +105,7 @@ func (p *KafkaPublisher) PublishTelemetry(record TelemetryRecord) error {
 		}
 		return err
 	}
-	err = writeKafkaMessageWithRetry(p.telemetryWriter, kafka.Message{
+	err = writeKafkaMessageWithRetry(ctx, p.telemetryWriter, kafka.Message{
 		Key:   []byte(record.DeviceID),
 		Value: value,
 	})
@@ -121,7 +121,7 @@ func (p *KafkaPublisher) PublishTelemetry(record TelemetryRecord) error {
 	return nil
 }
 
-func (p *KafkaPublisher) PublishCommand(cmd Command) error {
+func (p *KafkaPublisher) PublishCommand(ctx context.Context, cmd Command) error {
 	if p == nil || p.commandWriter == nil {
 		return nil
 	}
@@ -132,7 +132,7 @@ func (p *KafkaPublisher) PublishCommand(cmd Command) error {
 		}
 		return err
 	}
-	err = writeKafkaMessageWithRetry(p.commandWriter, kafka.Message{
+	err = writeKafkaMessageWithRetry(ctx, p.commandWriter, kafka.Message{
 		Key:   []byte(cmd.DeviceID),
 		Value: value,
 	})
@@ -148,7 +148,7 @@ func (p *KafkaPublisher) PublishCommand(cmd Command) error {
 	return nil
 }
 
-func writeKafkaMessageWithRetry(writer *kafka.Writer, msg kafka.Message) error {
+func writeKafkaMessageWithRetry(ctx context.Context, writer *kafka.Writer, msg kafka.Message) error {
 	var err error
 	for _, delay := range []time.Duration{
 		0,
@@ -161,10 +161,16 @@ func writeKafkaMessageWithRetry(writer *kafka.Writer, msg kafka.Message) error {
 		16 * time.Second,
 	} {
 		if delay > 0 {
-			time.Sleep(delay)
+			// The backoff wait is interruptible: without this a shutdown could
+			// be stalled by the full ~32s retry schedule.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = writer.WriteMessages(ctx, msg)
+		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err = writer.WriteMessages(attemptCtx, msg)
 		cancel()
 		if err == nil {
 			return nil

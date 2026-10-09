@@ -3,7 +3,7 @@
   "orgID": 1,
   "folderUID": "efobmswzeefi8d",
   "ruleGroup": "Management API HTTP",
-  "title": "Management API healthz QPS 超过 0.3",
+  "title": "Management API healthz QPS 超过 1",
   "condition": "C",
   "data": [
     {
@@ -35,7 +35,7 @@
             "type": "query",
             "query": { "params": ["C"] },
             "reducer": { "type": "last", "params": [] },
-            "evaluator": { "type": "gt", "params": [0.3] },
+            "evaluator": { "type": "gt", "params": [1.0] },
             "operator": { "type": "and" }
           }
         ]
@@ -48,8 +48,8 @@
   "annotations": {
     "__dashboardUid__": "iot-management-api",
     "__panelId__": "6",
-    "summary": "grafana：{{ $labels.route }} / {{ $labels.status }} QPS 检测（阈值 0.3 req/s）",
-    "description": "路由 {{ $labels.route }}、状态 {{ $labels.status }} 最近 5 分钟平均请求速率为 {{ $values.A.Value }} req/s。触发条件：严格大于 0.3 req/s，不额外等待 pending 周期。请打开关联图表查看触发时间。"
+    "summary": "grafana：{{ $labels.route }} / {{ $labels.status }} QPS 检测（阈值 1 req/s）",
+    "description": "路由 {{ $labels.route }}、状态 {{ $labels.status }} 最近 5 分钟平均请求速率为 {{ $values.A.Value }} req/s。触发条件：严格大于 1 req/s，不额外等待 pending 周期。请打开关联图表查看触发时间。"
   },
   "labels": { "service": "management-api", "severity": "warning" },
   "isPaused": false,

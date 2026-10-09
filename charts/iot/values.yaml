@@ -7,6 +7,39 @@ replicas:
   telemetryIngestor: 2
   deviceWorker: 1
 
+# Per-component container resource requests/limits, rendered verbatim into each
+# Deployment. Requests are sized for local kind clusters; raise limits in
+# production if profiling shows pressure.
+resources:
+  managementAPI:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  iotCore:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  telemetryIngestor:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  deviceWorker:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 kafka:
   # Applied only when a service creates a topic that does not exist yet.
   # Production must raise these (replicationFactor >= 3, minInsyncReplicas >= 2):

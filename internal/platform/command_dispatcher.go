@@ -41,7 +41,7 @@ func (d *CommandDispatcher) Run(ctx context.Context) {
 	ticker := time.NewTicker(d.pollEvery)
 	defer ticker.Stop()
 	for {
-		d.dispatchOnce()
+		d.dispatchOnce(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -50,7 +50,7 @@ func (d *CommandDispatcher) Run(ctx context.Context) {
 	}
 }
 
-func (d *CommandDispatcher) dispatchOnce() {
+func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	// Requeue commands stranded in 'published' (Kafka event never confirmed by
 	// the worker) and fail commands that exhausted dispatch attempts.
 	staleBefore := time.Now().UTC().Add(-d.timeout)
@@ -70,7 +70,7 @@ func (d *CommandDispatcher) dispatchOnce() {
 		return
 	}
 	for _, command := range commands {
-		if err := d.publisher.PublishCommand(command); err != nil {
+		if err := d.publisher.PublishCommand(ctx, command); err != nil {
 			backoff := time.Second * time.Duration(1<<min(command.DispatchAttempts, 6))
 			log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
 			if retryErr := d.store.RescheduleCommand(command.ID, backoff); retryErr != nil {

@@ -230,6 +230,15 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		return nil
 	case err := <-errCh:
+		// One consumer failed: close both readers so the other consumer's
+		// FetchMessage unblocks instead of leaking its goroutine (Close is
+		// idempotent here, duplicate-close errors are ignored).
+		if w.telemetryReader != nil {
+			_ = w.telemetryReader.Close()
+		}
+		if w.commandReader != nil {
+			_ = w.commandReader.Close()
+		}
 		if err != nil {
 			return err
 		}
@@ -383,6 +392,23 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			continue
 		}
 		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
+		if w.mqtt == nil {
+			// No MQTT downlink configured: the command can never be delivered,
+			// so treat it like a delivery failure instead of falling through
+			// to the success path (which used to count "ok" and commit the
+			// offset while the command never left the broker). The store has
+			// no single-command mark-failed transition — only the batch
+			// RecoverStaleCommands repair — so the tradeoff is: log the cause,
+			// count an error, and commit. Committing avoids a poison-message
+			// redelivery loop; the command keeps its current status and the
+			// dispatcher's recovery scan remains responsible for requeue/fail.
+			log.Printf("command undeliverable: mqtt downlink not configured: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("command", "error")
+			}
+			_ = w.commandReader.CommitMessages(ctx, msg)
+			continue
+		}
 		if w.mqtt != nil {
 			topic, err := contracts.BuildCommandTopic(cmd.TenantID, cmd.DeviceID)
 			if err != nil {

@@ -31,6 +31,9 @@ spec:
       labels:
         app: management-api
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}
       hostAliases:
         - ip: {{ .Values.externalDependencies.hostGatewayIP | quote }}
@@ -51,6 +54,13 @@ spec:
           image: {{ .Values.images.app }}
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/management-api"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.resources.managementAPI | nindent 12 }}
           envFrom:
             - configMapRef:
                 name: iot-common-config
@@ -94,3 +104,15 @@ spec:
           secret:
             secretName: {{ .Values.grpcTLS.secretName }}
       {{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: management-api
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: management-api

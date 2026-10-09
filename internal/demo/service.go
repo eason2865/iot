@@ -91,14 +91,31 @@ func NewService(cfg Config, managementAPI ManagementAPI, factory BusFactory, rng
 	}
 }
 
+// closeAgents releases buses whose agents were built but never installed,
+// after a topology build failure discarded them.
+func closeAgents(agents map[string]*tenantAgent) {
+	for _, agent := range agents {
+		if agent.bus != nil {
+			_ = agent.bus.Close()
+		}
+	}
+}
+
 func (s *Service) EnsureTopology(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(s.tenants) > 0 {
+	// Only skip when both halves of the topology are ready: if a previous run
+	// failed after storing tenants but before creating agents (or vice versa),
+	// the retry must rebuild instead of being permanently short-circuited.
+	// Without a bus factory there are no agents to wait for.
+	if len(s.tenants) > 0 && (s.factory == nil || len(s.agents) > 0) {
 		return nil
 	}
 
+	// Build into local slices and only assign to the service once every step
+	// succeeded, so a mid-way failure leaves no partial topology behind.
+	tenants := make([]demoTenant, 0, s.cfg.TenantCount)
 	for ti := 0; ti < s.cfg.TenantCount; ti++ {
 		tenantID := fmt.Sprintf("%s-tenant-%d", s.cfg.TenantPrefix, ti)
 		tenant := demoTenant{
@@ -140,15 +157,17 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 			}
 		}
 
-		s.tenants = append(s.tenants, tenant)
+		tenants = append(tenants, tenant)
 	}
 
-	for _, tenant := range s.tenants {
+	agents := make(map[string]*tenantAgent, len(tenants))
+	for _, tenant := range tenants {
 		if s.factory == nil {
 			continue
 		}
 		bus, err := s.factory.NewClient(ctx, tenant.ID)
 		if err != nil {
+			closeAgents(agents)
 			return err
 		}
 		agent := &tenantAgent{
@@ -162,10 +181,14 @@ func (s *Service) EnsureTopology(ctx context.Context) error {
 		}
 		if err := agent.subscribe(); err != nil {
 			_ = bus.Close()
+			closeAgents(agents)
 			return err
 		}
-		s.agents[tenant.ID] = agent
+		agents[tenant.ID] = agent
 	}
+
+	s.tenants = tenants
+	s.agents = agents
 	if s.metrics != nil {
 		totalDevices := 0
 		for _, tenant := range s.tenants {

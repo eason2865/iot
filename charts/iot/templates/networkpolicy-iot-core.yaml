@@ -20,7 +20,7 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
-    # gRPC (9001) and metrics (9101) stay reachable from the iot namespace.
+    # gRPC (9001) stays reachable from the release namespace only.
     - from:
         - namespaceSelector:
             matchLabels:
@@ -28,5 +28,8 @@ spec:
       ports:
         - protocol: TCP
           port: 9001
+    # Metrics (9101) must be scrapeable by Prometheus, which can run outside
+    # the release namespace, so this port is open to all namespaces.
+    - ports:
         - protocol: TCP
           port: 9101

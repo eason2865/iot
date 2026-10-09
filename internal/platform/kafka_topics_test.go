@@ -1,6 +1,10 @@
 package platform
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/segmentio/kafka-go"
+)
 
 // TestBuildTopicConfigs pins how replication factor and min.insync.replicas are
 // applied when this service creates a missing topic. Getting this wrong makes
@@ -109,4 +113,61 @@ func TestBuildTopicConfigs(t *testing.T) {
 type configEntryView struct {
 	name  string
 	value string
+}
+
+// TestDriftedConfigEntries pins the reconciliation comparison: only entries
+// whose live value differs (or is missing) must be rewritten by AlterConfigs.
+// Rewriting entries that already match would churn topic config versions on
+// every restart for no reason.
+func TestDriftedConfigEntries(t *testing.T) {
+	desired := []kafka.ConfigEntry{
+		{ConfigName: "min.insync.replicas", ConfigValue: "2"},
+		{ConfigName: "retention.ms", ConfigValue: "604800000"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		live []kafka.DescribeConfigResponseConfigEntry
+		want []string
+	}{
+		{
+			name: "matching live config has no drift",
+			live: []kafka.DescribeConfigResponseConfigEntry{
+				{ConfigName: "min.insync.replicas", ConfigValue: "2"},
+				{ConfigName: "retention.ms", ConfigValue: "604800000"},
+			},
+			want: nil,
+		},
+		{
+			name: "differing value is rewritten",
+			live: []kafka.DescribeConfigResponseConfigEntry{
+				{ConfigName: "min.insync.replicas", ConfigValue: "2"},
+				{ConfigName: "retention.ms", ConfigValue: "-1"},
+			},
+			want: []string{"retention.ms"},
+		},
+		{
+			name: "missing entry is rewritten",
+			// An auto-created topic has neither entry set explicitly; both must
+			// be applied so broker defaults cannot silently win.
+			live: nil,
+			want: []string{"min.insync.replicas", "retention.ms"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drift := driftedConfigEntries(tc.live, desired)
+			got := make([]string, 0, len(drift))
+			for _, entry := range drift {
+				got = append(got, entry.ConfigName)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("drift = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("drift = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
 }

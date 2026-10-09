@@ -2,6 +2,7 @@ package platform
 
 import (
 	"crypto/subtle"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -20,6 +21,9 @@ func BearerTokenMiddleware(token string) func(http.Handler) http.Handler {
 			}
 			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if token == "" || len(provided) != len(token) || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+				// Log rejections so token misuse and brute-force attempts are
+				// visible; without this a 401 leaves no trace anywhere.
+				log.Printf("bearer auth rejected: method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 				writeError(w, http.StatusUnauthorized, "valid bearer token is required")
 				return
 			}

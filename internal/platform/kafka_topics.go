@@ -37,11 +37,12 @@ func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
 }
 
 // buildTopicConfigs is pure so the replication and in-sync-replica rules can be
-// unit tested without a broker. Note that CreateTopics is idempotent for an
-// existing topic (kafka-go skips TopicAlreadyExists), so these settings only
-// take effect on first creation: changing the replication factor or
-// min.insync.replicas of a live topic is an operational task, not something this
-// service can do.
+// unit tested without a broker. CreateTopics is idempotent for an existing
+// topic (kafka-go skips TopicAlreadyExists); ensureKafkaTopics follows it with
+// a reconciliation pass that AlterConfigs any drifted config entries. Partition
+// count and replication factor still only take effect on first creation —
+// changing them on a live topic is an operational task, not something this
+// service can do, so drift there is logged instead.
 func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfig {
 	cfg = cfg.normalized()
 	configs := make([]kafka.TopicConfig, 0, len(topics))
@@ -115,5 +116,113 @@ func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConf
 	}
 	defer controllerConn.Close()
 
-	return controllerConn.CreateTopics(configs...)
+	if err := controllerConn.CreateTopics(configs...); err != nil {
+		return err
+	}
+	return reconcileKafkaTopics(ctx, kafka.TCP(controllerAddr), configs)
+}
+
+// reconcileKafkaTopics brings pre-existing topics (broker auto.create, or a
+// previous deployment with different settings) in line with the desired
+// config. Config entries are compared and corrected via AlterConfigs; drift in
+// partition count or replication factor cannot be fixed safely here, so it is
+// logged loudly instead of staying silent.
+func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.TopicConfig) error {
+	client := &kafka.Client{Addr: addr}
+
+	names := make([]string, 0, len(desired))
+	for _, tc := range desired {
+		names = append(names, tc.Topic)
+	}
+	meta, err := client.Metadata(ctx, &kafka.MetadataRequest{Topics: names})
+	if err != nil {
+		return err
+	}
+	topics := make(map[string]kafka.Topic, len(meta.Topics))
+	for _, topic := range meta.Topics {
+		topics[topic.Name] = topic
+	}
+
+	for _, tc := range desired {
+		live, ok := topics[tc.Topic]
+		if !ok {
+			continue
+		}
+		if len(live.Partitions) != tc.NumPartitions {
+			log.Printf("kafka topic %s: partition count is %d, desired %d; not auto-correcting, this needs an operational change",
+				tc.Topic, len(live.Partitions), tc.NumPartitions)
+		}
+		if len(live.Partitions) > 0 && len(live.Partitions[0].Replicas) != tc.ReplicationFactor {
+			log.Printf("kafka topic %s: replication factor is %d, desired %d; not auto-correcting, this needs an operational change",
+				tc.Topic, len(live.Partitions[0].Replicas), tc.ReplicationFactor)
+		}
+		if len(tc.ConfigEntries) == 0 {
+			continue
+		}
+		entryNames := make([]string, 0, len(tc.ConfigEntries))
+		for _, entry := range tc.ConfigEntries {
+			entryNames = append(entryNames, entry.ConfigName)
+		}
+		desc, err := client.DescribeConfigs(ctx, &kafka.DescribeConfigsRequest{
+			Resources: []kafka.DescribeConfigRequestResource{{
+				ResourceType: kafka.ResourceTypeTopic,
+				ResourceName: tc.Topic,
+				ConfigNames:  entryNames,
+			}},
+		})
+		if err != nil {
+			return err
+		}
+		if len(desc.Resources) == 0 {
+			continue
+		}
+		resource := desc.Resources[0]
+		if resource.Error != nil {
+			log.Printf("kafka topic %s: describe configs failed: %v", tc.Topic, resource.Error)
+			continue
+		}
+		drift := driftedConfigEntries(resource.ConfigEntries, tc.ConfigEntries)
+		if len(drift) == 0 {
+			continue
+		}
+		configs := make([]kafka.AlterConfigRequestConfig, 0, len(drift))
+		for _, entry := range drift {
+			configs = append(configs, kafka.AlterConfigRequestConfig{Name: entry.ConfigName, Value: entry.ConfigValue})
+		}
+		alter, err := client.AlterConfigs(ctx, &kafka.AlterConfigsRequest{
+			Resources: []kafka.AlterConfigRequestResource{{
+				ResourceType: kafka.ResourceTypeTopic,
+				ResourceName: tc.Topic,
+				Configs:      configs,
+			}},
+		})
+		if err != nil {
+			return err
+		}
+		if failure := alter.Errors[kafka.AlterConfigsResponseResource{Type: int8(kafka.ResourceTypeTopic), Name: tc.Topic}]; failure != nil {
+			log.Printf("kafka topic %s: alter configs failed: %v", tc.Topic, failure)
+			continue
+		}
+		for _, entry := range drift {
+			log.Printf("kafka topic %s: reconciled %s=%s", tc.Topic, entry.ConfigName, entry.ConfigValue)
+		}
+	}
+	return nil
+}
+
+// driftedConfigEntries returns the desired entries whose live value differs or
+// is absent — exactly the set AlterConfigs must apply. Pure so the comparison
+// rules are unit-testable without a broker.
+func driftedConfigEntries(live []kafka.DescribeConfigResponseConfigEntry, desired []kafka.ConfigEntry) []kafka.ConfigEntry {
+	values := make(map[string]string, len(live))
+	for _, entry := range live {
+		values[entry.ConfigName] = entry.ConfigValue
+	}
+	var drift []kafka.ConfigEntry
+	for _, entry := range desired {
+		if current, ok := values[entry.ConfigName]; !ok || current != entry.ConfigValue {
+			drift = append(drift, entry)
+		}
+	}
+	return drift
 }

@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,14 +23,17 @@ import (
 	corev1 "iot/proto/core/v1"
 )
 
+// auxShutdownTimeout bounds how long the auxiliary HTTP endpoints drain. go-zero
+// force-quits the process 5.5s after SIGTERM, so this has to finish well inside
+// that window to be graceful rather than merely faster than the kill.
+const auxShutdownTimeout = 2 * time.Second
+
 func Run() error {
 	platform.ConfigureStdLogger("iot-core")
 	metrics := platform.NewMetrics()
 
-	// The dispatch loop is a background worker, not a request handler: without a
-	// cancellable context it kept claiming and publishing commands while the
-	// process was already shutting down. Tie it to SIGINT/SIGTERM so it stops
-	// between iterations instead of mid-cycle.
+	// Background workers, not request handlers, are tied to SIGINT/SIGTERM so
+	// they stop between iterations instead of mid-cycle.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -53,13 +58,6 @@ func Run() error {
 	if dispatchStore, ok := store.(platform.CommandDispatchStore); ok && publisher != nil {
 		go platform.NewCommandDispatcher(dispatchStore, publisher, runtimeconfig.Duration("COMMAND_ACK_TIMEOUT", 5*time.Minute)).Run(ctx)
 	}
-	if authenticator, ok := store.(platform.DeviceAuthenticator); ok {
-		go serveMQTTAuthentication(
-			authenticator,
-			runtimeconfig.EnvOrDefault("EMQX_INTERNAL_PASSWORD", ""),
-			runtimeconfig.EnvOrDefault("IOT_CORE_MQTT_AUTH_TOKEN", ""),
-		)
-	}
 
 	server := zrpc.MustNewServer(rpcServerConf(), func(grpcServer *grpc.Server) {
 		corev1.RegisterCoreServiceServer(grpcServer, NewService(store, publisher))
@@ -74,10 +72,131 @@ func Run() error {
 		server.AddOptions(grpc.Creds(tlsCreds))
 	}
 
-	go serveIotCoreMetrics(metrics.Handler(), iotCorePrometheusHost(), iotCorePrometheusPort(), runtimeconfig.EnvOrDefault("IOT_CORE_PROMETHEUS_PATH", "/metrics"))
+	// The auxiliary HTTP endpoints are bound here, before the gRPC server starts
+	// serving, so that a port conflict fails startup instead of leaving the
+	// endpoint silently down. That matters most for the MQTT authentication
+	// callback: it is fail-closed, so an unreachable one rejects every device
+	// while the pod still reports Ready.
+	auxServers := make([]*auxHTTPServer, 0, 2)
+	if authenticator, ok := store.(platform.DeviceAuthenticator); ok {
+		mqttAuth, err := newAuxHTTPServer(
+			"mqtt-auth",
+			runtimeconfig.EnvOrDefault("IOT_CORE_MQTT_AUTH_LISTEN", ":9090"),
+			mqttAuthMux(
+				authenticator,
+				runtimeconfig.EnvOrDefault("EMQX_INTERNAL_PASSWORD", ""),
+				runtimeconfig.EnvOrDefault("IOT_CORE_MQTT_AUTH_TOKEN", ""),
+			),
+		)
+		if err != nil {
+			return err
+		}
+		auxServers = append(auxServers, mqttAuth)
+	}
+	metricsServer, err := newAuxHTTPServer(
+		"metrics",
+		fmt.Sprintf("%s:%d", iotCorePrometheusHost(), iotCorePrometheusPort()),
+		metricsMux(metrics.Handler(), runtimeconfig.EnvOrDefault("IOT_CORE_PROMETHEUS_PATH", "/metrics")),
+	)
+	if err != nil {
+		closeAuxServers(auxServers)
+		return err
+	}
+	auxServers = append(auxServers, metricsServer)
+
+	for _, aux := range auxServers {
+		go aux.Serve()
+	}
+	// Drain the auxiliary endpoints on the same signal that stops the dispatcher:
+	// in-flight scrapes and auth callbacks finish, and the listeners close, rather
+	// than the process dying with connections half-served.
+	auxDrained := make(chan struct{})
+	go func() {
+		defer close(auxDrained)
+		<-ctx.Done()
+		shutdownAuxServers(auxServers)
+	}()
 
 	server.Start()
+
+	// Wait for that drain before returning. go-zero's gRPC GracefulStop can finish
+	// in about a second (it runs one second after the signal), while the drain is
+	// allowed auxShutdownTimeout, so returning immediately would exit the process
+	// underneath an in-flight request. The wait is bounded in case the signal path
+	// never ran, which is what would make it block forever.
+	select {
+	case <-auxDrained:
+	case <-time.After(auxShutdownTimeout + time.Second):
+		log.Printf("iot-core auxiliary servers did not finish draining in time")
+	}
 	return nil
+}
+
+// auxHTTPServer is one of iot-core's auxiliary HTTP endpoints: the EMQX
+// authentication callback and the metrics endpoint. Both are plain HTTP servers
+// created through newAuxHTTPServer so they can be bound up front and shut down
+// with the process.
+type auxHTTPServer struct {
+	name     string
+	listener net.Listener
+	server   *http.Server
+}
+
+func newAuxHTTPServer(name, addr string, handler http.Handler) (*auxHTTPServer, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("bind iot-core %s listener on %s: %w", name, addr, err)
+	}
+	return &auxHTTPServer{
+		name:     name,
+		listener: listener,
+		server: &http.Server{
+			Handler: handler,
+			// The MQTT auth endpoint is reachable from the emqx namespace, so a
+			// client that opens a connection and stalls must not pin it.
+			ReadHeaderTimeout: 5 * time.Second,
+		},
+	}, nil
+}
+
+// Serve blocks until the server stops. ErrServerClosed is the expected shutdown
+// path, not a failure.
+func (a *auxHTTPServer) Serve() {
+	log.Printf("starting iot-core %s server at %s", a.name, a.listener.Addr())
+	if err := a.server.Serve(a.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("iot-core %s server stopped: %v", a.name, err)
+	}
+}
+
+func shutdownAuxServers(servers []*auxHTTPServer) {
+	ctx, cancel := context.WithTimeout(context.Background(), auxShutdownTimeout)
+	defer cancel()
+	for _, aux := range servers {
+		if err := aux.server.Shutdown(ctx); err != nil {
+			log.Printf("iot-core %s server shutdown: %v", aux.name, err)
+			continue
+		}
+		log.Printf("iot-core %s server stopped gracefully", aux.name)
+	}
+}
+
+// closeAuxServers releases listeners bound before a later startup step failed.
+func closeAuxServers(servers []*auxHTTPServer) {
+	for _, aux := range servers {
+		_ = aux.listener.Close()
+	}
+}
+
+func metricsMux(handler http.Handler, path string) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	return mux
+}
+
+func mqttAuthMux(authenticator platform.DeviceAuthenticator, internalPassword, callbackToken string) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/internal/mqtt/authenticate", platform.MQTTAuthenticationHandler(authenticator, internalPassword, callbackToken))
+	return mux
 }
 
 func rpcServerConf() zrpc.RpcServerConf {
@@ -149,24 +268,4 @@ func iotCorePrometheusHost() string {
 
 func iotCorePrometheusPort() int {
 	return runtimeconfig.Int("IOT_CORE_PROMETHEUS_PORT", 9101)
-}
-
-func serveIotCoreMetrics(handler http.Handler, host string, port int, path string) {
-	mux := http.NewServeMux()
-	mux.Handle(path, handler)
-	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("starting iot-core metrics server at %s%s", addr, path)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Printf("iot-core metrics server stopped: %v", err)
-	}
-}
-
-func serveMQTTAuthentication(authenticator platform.DeviceAuthenticator, internalPassword, callbackToken string) {
-	mux := http.NewServeMux()
-	mux.Handle("/internal/mqtt/authenticate", platform.MQTTAuthenticationHandler(authenticator, internalPassword, callbackToken))
-	addr := runtimeconfig.EnvOrDefault("IOT_CORE_MQTT_AUTH_LISTEN", ":9090")
-	log.Printf("starting iot-core MQTT authentication server at %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Printf("iot-core MQTT authentication server stopped: %v", err)
-	}
 }

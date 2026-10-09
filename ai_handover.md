@@ -117,11 +117,12 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 - 本次变更（2026-10-08，七轮：DLQ 可见性/告警/保留）：① 新增 `iot_dlq_publish_total{stage,result}` 指标与 `IncDLQPublish`，`publishDeadLetter`/`commitAfterDeadLetter` 增加 metrics 参数，`result=error` 覆盖"writer 未配置/marshal 失败/写入重试后仍失败"三条路径；② stage 魔法字符串收敛为 `Stage*` 常量 + `DeadLetterStages()`，并修正 `cmd/dlq-replay -stage` 的错误帮助文本（原写 `tdengine`、`kafka-publish` 均非真实 stage）；③ `KafkaTopicConfig.RetentionMs` 新增，`retention.ms` 与 `min.insync.replicas` 一样只在首次创建 topic 时生效，DLQ 走独立的 `DLQTopicConfig` 以免truncate 遥测 topic；④ 新增两条 Grafana 告警模板 dlq-writes / dlq-write-failures；⑤ **顺带修掉一个真 bug**：`helm template` 渲染出 `KAFKA_DLQ_RETENTION_MS: "6.048e+08"`（YAML 大整数被解析为 float64，`| quote` 输出科学计数法），会让 `strconv.Atoi` 失败并静默回退默认值——图表侧三个 Kafka 整数改为 `| int64 | quote`，同时让 `runtimeconfig.Int` 在解析失败时打日志而不是静默吞掉，并新增 `internal/runtimeconfig/config_test.go` 覆盖该场景。新增测试：`TestPublishDeadLetterCountsEveryOutcome`、`TestBuildTopicConfigs` 的保留用例、`TestIntHandlesValidUnparseableAndUnset`、`TestKafkaTopicDurabilityDefaults`。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`helm lint`、`helm template`（默认与生产值）、`make build`。
 
+- 本次变更（2026-10-08，八轮：iot-core 辅助 HTTP 服务接入优雅停机）：`serveMQTTAuthentication`/`serveIotCoreMetrics` 原为裸 `http.ListenAndServe` goroutine，改为 `auxHTTPServer`（`newAuxHTTPServer` 先同步 `net.Listen` 绑定，再用 `http.Server.Serve`）。三个效果：① **绑定失败即启动失败**——MQTT 认证端点是 fail-closed，绑定失败会导致全部设备认证失败而 Pod 仍 Ready，原来只有一行日志；现在 `Run` 直接返回错误（`ls` 冲突表现为 CrashLoopBackOff，可见）；② SIGTERM 时 `Shutdown` 排空在途请求（预算 `auxShutdownTimeout=2s`，远小于 go-zero 5.5s 的强杀窗口）并释放端口；③ **`Run` 会等待排空完成再返回**——这是必须的，因为 go-zero 的 gRPC `GracefulStop` 在信号后约 1 秒就完成并让 `Run` 返回，不等待的话进程会在排空途中退出、截断在途请求。另外给两个端点加了 `ReadHeaderTimeout: 5s`（MQTT 认证端点对 emqx namespace 可达，防慢速连接占用）。新增测试：绑定冲突报错、在途请求排空（已用 `Shutdown`→`Close` 红测验证该用例能区分"优雅"与"直接关闭"）、排空后端口释放、失败路径 `closeAuxServers` 不漏 listener、两个 mux 的路由存在性。已通过 `gofmt -l`、`go build ./...`、`go vet ./...`、`go test -count=1 ./...`、`helm lint`、`helm template`、`make build`。
+
 ## 待办（2026-10-08 评审已确认，尚未开工）
 
 - `internal/platform/handlers.go` + `memory_store.go`：**已确认保留，不删**。它们在生产路径无调用方（现在 `EnableBusinessAPI` 也没有任何生产入口会开启），但承载 8 处测试调用，含两个真实 E2E 的 HTTP 入口；删除只减测试覆盖、无生产收益。风险仍在：它与 `internal/adminapi` 是两套 REST 实现，改契约时容易只改一边。新增 REST 一律进 adminapi，此文件只维护测试所需行为。
 - `iot.dlq` 无消费侧：只有离线 `cmd/dlq-replay`，无指标、无告警、无保留策略。
-- iot-core 只把 dispatcher 纳入了优雅停机；`serveMQTTAuthentication` 与 `serveIotCoreMetrics` 仍是裸 `http.ListenAndServe` goroutine，未接 `http.Server.Shutdown`。
 - iot-pipeline 看板缺 DLQ 面板：`iot_dlq_publish_total` 目前只能靠 Prometheus 查询或告警看到，看板里没有图表。补面板需要本地起 Grafana 做视觉验证（本次环境未运行 Docker/Grafana，故未改这个自动 provision 的看板文件）。
 - `iot.dlq` 仍无自动消费/重放：只有离线 `cmd/dlq-replay`。告警能告诉你"有死信"，但恢复仍需人工执行重放。
 

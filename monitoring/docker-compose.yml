@@ -2,7 +2,7 @@ name: iot
 
 services:
   k8s-forward-management-api:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-management-api
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/management-api", "18080:8080", "-n", "iot"]
@@ -13,7 +13,7 @@ services:
       - "127.0.0.1:18080:18080"
 
   k8s-forward-management-api-metrics:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-management-api-metrics
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/management-api", "18090:9100", "-n", "iot"]
@@ -24,7 +24,7 @@ services:
       - "127.0.0.1:18090:18090"
 
   k8s-forward-telemetry-ingestor:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-telemetry-ingestor
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/telemetry-ingestor", "18081:8080", "-n", "iot"]
@@ -35,7 +35,7 @@ services:
       - "127.0.0.1:18081:18081"
 
   k8s-forward-device-worker:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-device-worker
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/device-worker", "18082:8080", "-n", "iot"]
@@ -46,7 +46,7 @@ services:
       - "127.0.0.1:18082:18082"
 
   k8s-forward-iot-core:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-iot-core
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/iot-core", "18091:9101", "-n", "iot"]
@@ -57,7 +57,7 @@ services:
       - "127.0.0.1:18091:18091"
 
   k8s-forward-emqx-listeners:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-emqx-listeners
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-listeners", "1883:1883", "-n", "emqx"]
@@ -68,7 +68,7 @@ services:
     networks: [default, kind]
 
   k8s-forward-emqx-dashboard:
-    image: rancher/kubectl:v1.26.8
+    image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-emqx-dashboard
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-dashboard", "18083:18083", "-n", "emqx"]

@@ -65,6 +65,8 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 一键脚本默认检查 PostgreSQL、Kafka、EMQX 和 TDengine 的可达性，然后只部署 `iot` namespace 中的业务服务。监控端口转发由 Compose 中的 `iot-k8s-forward-*` 容器维护。
 
+**Docker Desktop 新版（kind v1.36.1+）变化（2026-10-10 实记）**：① cloud-provider-kind（`kindccm-*` 容器）会把 LoadBalancer 类型 Service 直接发布到宿主机——`emqx-listeners`（1883/8883/8083/8084）和 `emqx-dashboard`（18083）均已被它占用，Compose 里 `k8s-forward-emqx-dashboard` 已删除、`k8s-forward-emqx-listeners` 不再绑宿主机端口（仅保留容器名供 docker 网络内 demo 访问）；宿主机访问 EMQX 直接用 127.0.0.1:1883/18083。② forward 容器挂的 kubeconfig 是 `monitoring/.env` 里 `KUBECONFIG_HOST_PATH` 指定的 `~/.kube/iot-local.config` **静态副本**——Docker Desktop 升级重建集群（控制面节点换 kindest 版本，etcd 数据保留）后 CA 轮换，该副本过期导致全部 forward 容器 x509 崩溃，需 `kubectl config view --raw --minify --flatten > ~/.kube/iot-local.config` 刷新后 `docker compose up -d --force-recreate`。③ 集群重建后 EMQX Operator 需重装：`curl -fsSL https://ghfast.top/https://github.com/emqx/emqx-operator/releases/download/2.3.0/install.yaml | kubectl apply --server-side=true -f -`（github 直连不通时走 ghfast.top 镜像）。
+
 常用地址：
 
 - Management API：`http://localhost:18080`

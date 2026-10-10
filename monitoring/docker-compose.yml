@@ -61,22 +61,15 @@ services:
     container_name: iot-k8s-forward-emqx-listeners
     restart: unless-stopped
     command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-listeners", "1883:1883", "-n", "emqx"]
-    ports:
-      - "127.0.0.1:1883:1883"
+    # 不再映射宿主机 1883：Docker Desktop 的 cloud-provider-kind（kindccm 容器）
+    # 已把 LoadBalancer 类型的 emqx-listeners 直接发布到宿主机 1883，再绑会冲突。
+    # 本容器只为 default/kind docker 网络内的 demo 提供 k8s-forward-emqx-listeners:1883。
     volumes:
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
     networks: [default, kind]
 
-  k8s-forward-emqx-dashboard:
-    image: rancher/kubectl:v1.34.9
-    container_name: iot-k8s-forward-emqx-dashboard
-    restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/emqx-dashboard", "18083:18083", "-n", "emqx"]
-    ports:
-      - "127.0.0.1:18083:18083"
-    volumes:
-      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
-    networks: [default, kind]
+  # k8s-forward-emqx-dashboard 已删除：emqx-dashboard 是 LoadBalancer，
+  # Docker Desktop cloud-provider-kind 已把 18083 直接发布到宿主机，无需转发容器。
 
   postgres:
     image: postgres:16-alpine

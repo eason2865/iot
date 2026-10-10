@@ -159,6 +159,11 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 			opts.SetPassword(cfg.MQTTPassword)
 		}
 		opts.SetAutoReconnect(true)
+		// ACK persistence can take several seconds during database retries.
+		// Run callbacks independently so queued ACKs cannot block the MQTT
+		// router from processing PUBACKs for unrelated command downlinks.
+		// PostgreSQL row locks serialize duplicate ACK transitions.
+		opts.SetOrderMatters(false)
 		// Keep the worker alive while EMQX is starting or briefly unavailable.
 		opts.SetConnectRetry(true)
 		opts.SetConnectRetryInterval(2 * time.Second)

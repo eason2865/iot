@@ -31,6 +31,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}
@@ -78,6 +79,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          volumeMounts:
+            - name: runtime-tmp
+              mountPath: /tmp
           ports:
             # The single HTTP port serves /healthz, /readyz and /metrics. It is
             # named "metrics" so Prometheus kubernetes_sd can select it by port
@@ -96,6 +100,10 @@ spec:
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
+      volumes:
+        - name: runtime-tmp
+          emptyDir:
+            sizeLimit: 128Mi
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

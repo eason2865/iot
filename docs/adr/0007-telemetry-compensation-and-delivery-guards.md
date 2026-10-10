@@ -27,6 +27,9 @@ can also present a command whose device has already acknowledged it.
 - MQTT ACK writes retry three times with bounded database calls; exhausted
   failures are retained in DLQ as `command.ack`. Manual replay applies the ACK
   transition directly. Terminal command states retain their existing semantics.
+- ACK callbacks run independently of the MQTT packet router. Database retry
+  latency must not block other commands' PUBACKs; PostgreSQL row locks serialize
+  duplicate ACK transitions rather than relying on callback ordering.
 - Tenant allowlists derive separate Kafka consumer groups from a normalized
   SHA-256 fingerprint, preventing independent tenant subsets from advancing
   each other's offsets. Changing an allowlist creates new offsets and can replay

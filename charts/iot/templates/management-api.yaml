@@ -34,6 +34,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.externalDependencies.hostGatewayIP }}
@@ -89,8 +90,10 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: 9100
-          {{- if .Values.grpcTLS.enabled }}
           volumeMounts:
+            - name: runtime-tmp
+              mountPath: /tmp
+          {{- if .Values.grpcTLS.enabled }}
             - name: grpc-tls
               mountPath: {{ .Values.grpcTLS.mountPath }}
               readOnly: true
@@ -107,8 +110,11 @@ spec:
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
-      {{- if .Values.grpcTLS.enabled }}
       volumes:
+        - name: runtime-tmp
+          emptyDir:
+            sizeLimit: 128Mi
+      {{- if .Values.grpcTLS.enabled }}
         - name: grpc-tls
           secret:
             secretName: {{ .Values.grpcTLS.secretName }}

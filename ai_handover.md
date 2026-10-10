@@ -2,7 +2,21 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
-## 本轮修复（2026-10-10，验证通过，发布版本 2.41）
+## 全链路故障验证追加修复（2026-10-10，版本 2.42 验证通过）
+
+- 使用实际部署 management-api/iot-core、EMQX、Kafka 和双存储验证完整遥测/命令/ACK链路、非法输入DLQ、幂等和活跃worker Pod故障接替；隔离租户 closed-20261010-160635，30条接替期间遥测全部写入PG/TD，新命令ACK成功。
+- 对测试命令单行持有PG锁，触发已部署worker的3次ACK超时，6.62s后进入command.ack DLQ；解除锁后实际dlq-replay CLI补ACK成功；dry-run未移动独立验证group位点。未中断数据库服务，测试锁已释放。
+- 该注入暴露串行MQTT ACK回调阻塞后续入站包，造成其他命令PUBACK超时。新增真实MQTT协议回归测试先失败，修复worker SetOrderMatters(false)后通过；PG行锁维持重复ACK幂等。
+- Pod重建发现scratch镜像非root进程无法创建/tmp，tracing exporter启动报错。四个Helm Deployment添加fsGroup=65534及128Mi emptyDir挂载/tmp，保留非root；本地trace随Pod删除，需要持久化时使用外部OTLP。
+- 验证证据及临时运行器位于被gitignore的 outputs/closed-loop-20261010/。
+- 2.42已部署：Helm revision 4，镜像iot-app:local-21f4cc7aea70，8个业务Pod全Ready、0重启；Prometheus 9目标全up，Grafana→Prometheus健康检查OK，DLQ写入失败计数0。
+- 修复后实际服务闭环：隔离租户closed-20261010-161645，33条遥测全部PG/TD完成；5个命令4个acked、1个有意超时。再次删除活跃worker Pod，30/30遥测及命令ACK闭环通过。
+- ACK单行锁注入期间另一命令在0.99s内完成下发/设备ACK；原ACK重试6.63s进入死信，dry-run位点不变，真实CLI重放后acked，ACK记录与审计各1，设备重下发0。测试锁已释放。
+- go test -count=1 ./...、go vet ./...、make fmt-check、三包-race、Helm两种TLS配置渲染/lint、Compose配置及git diff --check通过；新MQTT协议回归测试修复前失败、修复后通过。
+- 各Pod trace文件存在且UID/GID=65534；management-api和iot-core trace有实际内容。全局超期未完成遥测=0，sent无deadline=0。
+
+
+## 上一轮修复（2026-10-10，发布版本 2.41）
 
 - 接续用户确认的现有未提交改动，完成租户 Token 鉴权、逐 Pod 指标、命令终态防重投、ACK 有限重试/死信重放、遥测补偿和旧命令 NULL deadline 收敛。
 - 租户 Token `MANAGEMENT_API_TOKENS` 是 JSON token→tenant 映射（本地脚本用 `IOT_MANAGEMENT_API_TOKENS`），写接口只按实际 body 租户鉴权；全局租户/设备列表拒绝租户 Token，任意 query 不能覆盖 body；必须有 Bearer scheme，配置错误启动失败。

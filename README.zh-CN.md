@@ -58,7 +58,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 
 - 每个服务都暴露 `/metrics`
 - `management-api` 和 `iot-core` 已启用 go-zero 的 trace / log middleware
-- 服务启动时会开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`
+- 服务启动时会开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`。Helm 为非 root Pod 挂载可写的 128Mi 临时卷；Pod 重建后本地 trace 丢失，需要保留时配置外部 OTLP exporter。
 - HTTP 请求会自动补 `X-Request-Id`，并透传到 `management-api -> iot-core` 的 gRPC 调用
 - `demo` 发往 `management-api` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
 - 标准输出日志已切换为结构化 JSON，便于在容器和本地直接检索

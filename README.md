@@ -58,7 +58,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 
 - Every service exposes `/metrics`
 - `management-api` and `iot-core` enable go-zero trace / log middleware
-- Each service starts an OpenTelemetry trace agent, writing to `/tmp/<service>-traces.log` by default
+- Each service starts an OpenTelemetry trace agent, writing to `/tmp/<service>-traces.log` by default. Helm mounts a writable 128Mi temporary volume for each non-root Pod; these local traces are lost when the Pod is replaced. Configure an external OTLP exporter for retained traces.
 - HTTP requests automatically get an `X-Request-Id`, propagated through the `management-api -> iot-core` gRPC call
 - `demo` requests to `management-api` carry a request id and trace context, making load-test/integration chains easy to follow
 - stdout logs are structured JSON, easy to search in containers and locally

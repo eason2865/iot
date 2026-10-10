@@ -32,6 +32,7 @@ func TestIntHandlesValidUnparseableAndUnset(t *testing.T) {
 func TestKafkaTopicDurabilityDefaults(t *testing.T) {
 	t.Setenv("KAFKA_TOPIC_REPLICATION_FACTOR", "")
 	t.Setenv("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", "")
+	t.Setenv("KAFKA_TOPIC_PARTITIONS", "")
 	t.Setenv("KAFKA_DLQ_RETENTION_MS", "")
 
 	if got := KafkaTopicReplicationFactor(); got != 1 {
@@ -40,12 +41,16 @@ func TestKafkaTopicDurabilityDefaults(t *testing.T) {
 	if got := KafkaTopicMinInsyncReplicas(); got != 1 {
 		t.Fatalf("KafkaTopicMinInsyncReplicas() = %d, want 1", got)
 	}
+	if got := KafkaTopicPartitions(); got != 1 {
+		t.Fatalf("KafkaTopicPartitions() = %d, want the single-partition default 1", got)
+	}
 	if got := KafkaDLQRetentionMs(); got != 7*24*60*60*1000 {
 		t.Fatalf("KafkaDLQRetentionMs() = %d, want 7 days", got)
 	}
 
 	t.Setenv("KAFKA_TOPIC_REPLICATION_FACTOR", "3")
 	t.Setenv("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", "2")
+	t.Setenv("KAFKA_TOPIC_PARTITIONS", "6")
 	t.Setenv("KAFKA_DLQ_RETENTION_MS", "3600000")
 
 	if got := KafkaTopicReplicationFactor(); got != 3 {
@@ -53,6 +58,9 @@ func TestKafkaTopicDurabilityDefaults(t *testing.T) {
 	}
 	if got := KafkaTopicMinInsyncReplicas(); got != 2 {
 		t.Fatalf("KafkaTopicMinInsyncReplicas() = %d, want 2", got)
+	}
+	if got := KafkaTopicPartitions(); got != 6 {
+		t.Fatalf("KafkaTopicPartitions() = %d, want 6", got)
 	}
 	if got := KafkaDLQRetentionMs(); got != 3600000 {
 		t.Fatalf("KafkaDLQRetentionMs() = %d, want 3600000", got)

@@ -16,6 +16,7 @@ data:
   # Durability of the topics this release creates. See docs/adr/0004.
   KAFKA_TOPIC_REPLICATION_FACTOR: {{ .Values.kafka.topicReplicationFactor | int64 | quote }}
   KAFKA_TOPIC_MIN_INSYNC_REPLICAS: {{ .Values.kafka.topicMinInsyncReplicas | int64 | quote }}
+  KAFKA_TOPIC_PARTITIONS: {{ .Values.kafka.topicPartitions | int64 | quote }}
   # int64 matters here: a bare large YAML integer renders as "6.048e+08".
   KAFKA_DLQ_RETENTION_MS: {{ .Values.kafka.dlqRetentionMs | int64 | quote }}
   EMQX_TOPIC_FILTER: "$share/iot-telemetry/tenant/+/device/+/telemetry"

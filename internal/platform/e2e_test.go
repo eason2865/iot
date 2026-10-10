@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/segmentio/kafka-go"
 	_ "github.com/taosdata/driver-go/v3/taosRestful"
 
 	"iot/internal/contracts"
@@ -26,15 +24,12 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		t.Skip("set IOT_E2E=1 to run the end-to-end local stack test")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	metrics := platform.NewMetrics()
 
 	postgresDSN := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	kafkaBrokers := splitCSV(envOr("KAFKA_BROKERS", "localhost:9092"))
 	emqxURL := envOr("EMQX_URL", "tcp://127.0.0.1:1883")
 	tdengineDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
-	emqxInternalPassword := envOr("EMQX_PASSWORD", "local-mqtt-service-password")
 
 	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
 	if err != nil {
@@ -78,56 +73,9 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	tenantID := fmt.Sprintf("tenant-%d", time.Now().UnixNano())
 	deviceID := fmt.Sprintf("device-%d", time.Now().UnixNano())
 	clientIDPrefix := fmt.Sprintf("iot-e2e-%d", time.Now().UnixNano())
-	ackTopicFilter := fmt.Sprintf("tenant/%s/device/+/ack", tenantID)
-
-	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
-		BrokerURL:   emqxURL,
-		ClientID:    "iot-telemetry-ingestor-" + clientIDPrefix,
-		Username:    "iot-service",
-		Password:    emqxInternalPassword,
-		TopicFilter: contracts.TelemetryTopicFilter,
-	}, publisher, metrics)
-	if bridge == nil {
-		t.Fatal("NewMQTTBridge() returned nil")
-	}
-	worker := platform.NewWorker(platform.WorkerConfig{
-		KafkaBrokers:     kafkaBrokers,
-		KafkaGroupID:     fmt.Sprintf("iot-e2e-%d", time.Now().UnixNano()),
-		KafkaStartOffset: kafka.LastOffset,
-		TelemetryTopic:   "iot.telemetry",
-		CommandTopic:     "iot.command",
-		AckTopicFilter:   ackTopicFilter,
-		TenantIDs:        []string{tenantID},
-		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     "iot-device-worker-" + clientIDPrefix,
-		MQTTUsername:     "iot-service",
-		MQTTPassword:     emqxInternalPassword,
-	}, store, tdWriter, metrics)
-	if worker == nil {
-		t.Fatal("NewWorker() returned nil")
-	}
-
-	runErr := make(chan error, 2)
-	go func() {
-		if err := bridge.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			runErr <- fmt.Errorf("bridge: %w", err)
-		}
-	}()
-	go func() {
-		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			runErr <- fmt.Errorf("worker: %w", err)
-		}
-	}()
-	defer func() {
-		cancel()
-		select {
-		case err := <-runErr:
-			if err != nil {
-				t.Fatalf("background service error: %v", err)
-			}
-		default:
-		}
-	}()
+	// Exercise the deployed ingestor and worker. Starting a second consumer
+	// group against the same command table would intentionally double-deliver
+	// pending events and cannot test the production group's redelivery guard.
 
 	waitFor(t, 10*time.Second, func() bool {
 		return mqttReachable(emqxURL)
@@ -227,6 +175,79 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		}
 		return got.Status == platform.CommandStatusAcked
 	})
+	// A replay of an already ACKed event must not reach the real device again.
+	if err := publisher.PublishCommand(context.Background(), created); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case duplicate := <-commandCh:
+		t.Fatalf("ACKed command was delivered twice: %s", duplicate.ID)
+	case <-time.After(3 * time.Second):
+	}
+
+}
+
+// TestE2EExpireCommandsNullDeadlineBackstop pins the defensive backstop for
+// legacy 'sent' rows with no deadline_at: with a grace period they converge to
+// timeout; with grace disabled they are left alone.
+func TestE2EExpireCommandsNullDeadlineBackstop(t *testing.T) {
+	if os.Getenv("IOT_E2E") == "" {
+		t.Skip("set IOT_E2E=1 to run the end-to-end local stack test")
+	}
+	postgresDSN := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
+	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("NewPostgresStore() error = %v", err)
+	}
+	defer store.Close()
+
+	db, err := sql.Open("pgx", postgresDSN)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer db.Close()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenantID := "tenant-expire-" + suffix
+	deviceID := "device-expire-" + suffix
+	if _, err := store.CreateTenant(platform.Tenant{ID: tenantID, Name: tenantID}); err != nil {
+		t.Fatalf("CreateTenant() error = %v", err)
+	}
+	if _, err := store.CreateDevice(platform.Device{TenantID: tenantID, DeviceID: deviceID, ProductID: "p", Secret: "s"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	cmd, err := store.CreateCommand(tenantID, deviceID, json.RawMessage(`{"switch":"on"}`))
+	if err != nil {
+		t.Fatalf("CreateCommand() error = %v", err)
+	}
+	// Simulate a legacy row: sent, no deadline, last touched long ago.
+	stale := time.Now().UTC().Add(-time.Hour)
+	if _, err := db.Exec(`UPDATE commands SET status = 'sent', deadline_at = NULL, updated_at = $1 WHERE id = $2`, stale, cmd.ID); err != nil {
+		t.Fatalf("legacy row setup error = %v", err)
+	}
+
+	// Grace disabled: the NULL-deadline row must survive the scan.
+	_, err = store.ExpireCommands(time.Now().UTC(), 0)
+	if err != nil {
+		t.Fatalf("ExpireCommands(grace=0) error = %v", err)
+	}
+	if got, _ := store.GetCommand(cmd.ID); got.Status != platform.CommandStatusSent {
+		t.Fatal("NULL deadline expired with grace disabled")
+	}
+
+	// Grace enabled and already exceeded: the row converges to timeout.
+	_, err = store.ExpireCommands(time.Now().UTC(), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ExpireCommands(grace=5m) error = %v", err)
+	}
+
+	got, ok := store.GetCommand(cmd.ID)
+	if !ok {
+		t.Fatal("GetCommand() did not find the seeded command")
+	}
+	if got.Status != platform.CommandStatusTimeout {
+		t.Fatalf("command status = %q, want timeout", got.Status)
+	}
 }
 
 type commandEnvelope struct {
@@ -426,4 +447,80 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+// Uses real PostgreSQL and TDengine to exercise the compensation path without
+// publishing a Kafka event (the PG-commit/Kafka-failure window).
+func TestE2ETelemetryCompensation(t *testing.T) {
+	if os.Getenv("IOT_E2E") == "" {
+		t.Skip("set IOT_E2E=1")
+	}
+	dsn := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
+	store, err := platform.NewPostgresStore(dsn, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenant := "comp-" + suffix
+	device := "d"
+	if _, err := store.CreateTenant(platform.Tenant{ID: tenant, Name: tenant}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateDevice(platform.Device{TenantID: tenant, DeviceID: device, ProductID: "p", Secret: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	env := contracts.Envelope{MsgID: "comp-" + suffix, TenantID: tenant, DeviceID: device, Ts: time.Now().UnixMilli(), Type: "telemetry", Version: "v1", Payload: json.RawMessage(`{"x":1}`)}
+	if _, err := store.RecordTelemetry(env); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE telemetry_records SET received_at=NOW()-interval '3 minutes' WHERE msg_id=$1 AND tenant_id=$2`, env.MsgID, tenant); err != nil {
+		t.Fatal(err)
+	}
+	rows, cursor, err := store.ListUnwrittenTelemetry(context.Background(), time.Now(), 0, []string{tenant}, 1)
+	if err != nil || len(rows) != 1 || cursor == 0 {
+		t.Fatalf("scoped scan len=%d cursor=%d err=%v", len(rows), cursor, err)
+	}
+	next, _, err := store.ListUnwrittenTelemetry(context.Background(), time.Now(), cursor, []string{tenant}, 1)
+	if err != nil || len(next) != 0 {
+		t.Fatalf("cursor did not advance: %v %v", next, err)
+	}
+	foreign, _, err := store.ListUnwrittenTelemetry(context.Background(), time.Now(), 0, []string{"not-this-tenant"}, 1)
+	if err != nil || len(foreign) != 0 {
+		t.Fatal("scan leaked foreign tenants")
+	}
+	tdDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
+	writer, err := platform.NewTDengineWriter(platform.TDengineConfig{DSN: tdDSN, Table: "telemetry_v2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	worker := platform.NewWorker(platform.WorkerConfig{TenantIDs: []string{tenant}}, store, writer, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	waitFor(t, 70*time.Second, func() bool {
+		var written bool
+		err := db.QueryRow(`SELECT tdengine_written FROM telemetry_records WHERE msg_id=$1 AND tenant_id=$2`, env.MsgID, tenant).Scan(&written)
+		return err == nil && written
+	})
+	count, err := tdengineTelemetryCount(tdDSN, tenant, device)
+	if err != nil || count != 1 {
+		t.Fatalf("compensated TD rows=%d err=%v", count, err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker shutdown stalled")
+	}
 }

@@ -2,6 +2,26 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 本轮修复（2026-10-10，验证通过，发布版本 2.41）
+
+- 接续用户确认的现有未提交改动，完成租户 Token 鉴权、逐 Pod 指标、命令终态防重投、ACK 有限重试/死信重放、遥测补偿和旧命令 NULL deadline 收敛。
+- 租户 Token `MANAGEMENT_API_TOKENS` 是 JSON token→tenant 映射（本地脚本用 `IOT_MANAGEMENT_API_TOKENS`），写接口只按实际 body 租户鉴权；全局租户/设备列表拒绝租户 Token，任意 query 不能覆盖 body；必须有 Bearer scheme，配置错误启动失败。
+- Prometheus 改为 namespace=iot 的 Pod discovery + apiserver proxy，kind 网络内连 desktop-control-plane:6443，校验挂载 CA，TLS server_name=localhost；job 仍为服务名，instance 为 Pod 名。首次启动先执行 scripts/port-forward-local-monitoring.sh，生成被 gitignore 的 k8s-token/k8s-ca.crt。旧 4 个指标 forward 容器不再需要。
+- 发现并修复本地 containerd busybox:1.36 错指 Prometheus digest；重新拉取、导入 busybox，并将 initContainer 与 netcheck 固定到 sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662。
+- 四个服务均有 PDB；gateway /readyz 检查 gRPC/SQL，ingestor、worker /readyz 检查 SQL；/healthz 仍为存活检查。
+- worker 发送前查 PostgreSQL 并校验消息 tenant/device，sent/acked/timeout/failed 或未知/伪造身份跳过；数据库错误、发送后状态写失败、消费位点提交失败会停止消费，避免假成功。依旧 at-least-once，设备必须按 commandId 去重。
+- ACK 数据库调用单次最多 2s、最多 3 次，失败写 command.ack DLQ（限时 5s）。dlq-replay 用 POSTGRES_DSN 直接补 ACK，不向 MQTT topic 名的 Kafka topic 写入；mqtt.kafka 会转成 TelemetryRecord，发送 KAFKA_TELEMETRY_TOPIC；非法 MQTT decode/identity 不可盲目重放。
+- 遥测补偿：30s/500条，received_at 早于 2min，部分索引 idx_telemetry_unwritten + ID 游标，SQL 在 LIMIT 前过滤 tenantIDs，游标扫完归零。失败保留标记等待后续，控制字符记录不阻塞其余记录。多个 worker 重复补写仍按现有设备时间戳幂等；同设备同 ts 的不同消息冲突语义未改变。
+- 租户 worker 的 Kafka group 从去重排序的 tenant 集合 SHA-256 派生；改变集合会建立新消费位点并重读保留历史，勿部署重叠集合。ACK 仍由共享订阅统一处理。
+- 旧 sent+NULL deadline 按 updated_at + COMMAND_ACK_TIMEOUT 收敛为 timeout，不重发设备动作。
+- 数据库在本轮开始前已由外部操作清理旧记录，本轮基线 pending=0、sent+NULL deadline=0，不能声称恢复了上次分析的 27 万遥测/418 条命令。
+- E2E 主链路测试改为使用已部署 ingestor/worker，不再额外启动不同 consumer group 来双发同一设备命令；补偿、NULL deadline 和 ACK replay 分别增加真实存储验证。
+- 可靠性边界和取舍见 docs/adr/0007。HPA、跨节点/地域 HA、TDengine 业务数值列与数据生命周期仍是独立生产规划项。
+
+- 最终验证：go test -count=1 ./...、go vet ./...、平台/网关/核心 go test -race、helm lint、Compose 配置和 promtool 均通过。真实 E2E（遥测/命令/ACK + ACK 后事件重投 + NULL deadline + 无 Kafka 事件遥测补偿 + PostgreSQL ACK 重放）通过。
+- 部署：Helm iot revision 3，业务镜像 iot-app:local-bc5c9e1f4bca（对应 host iot-app:2.41），8 个 Pod Ready、4 个 PDB；Prometheus 9 个目标（8业务Pod+demo）全部 up，旧4个指标forward容器已移除。demo 已更新至2.41。
+- 线上租户鉴权验证：本租户200，跨租户/全局列表/query-body绕过403，管理Token200；临时验证Token已移除并重启gateway。最终 overdue遥测=0、sent无deadline=0。Kafka仍为1分区，2副本提供故障接替。
+
 ## 当前架构
 
 - Kubernetes namespace `iot`：`management-api`、`iot-core`、`telemetry-ingestor`、`device-worker`。
@@ -63,7 +83,7 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 **EMQX 单节点滚动更新**：本地单节点 license 不允许滚动更新时瞬时双 core（报 `SINGLE_NODE_LICENSE` 崩溃）。改 EMQX CR 后需 `kubectl delete sts -n emqx --all` 让 Operator 重建单节点。
 
-一键脚本默认检查 PostgreSQL、Kafka、EMQX 和 TDengine 的可达性，然后只部署 `iot` namespace 中的业务服务。监控端口转发由 Compose 中的 `iot-k8s-forward-*` 容器维护。
+一键脚本默认检查 PostgreSQL、Kafka、EMQX 和 TDengine 的可达性，然后只部署 `iot` namespace 中的业务服务。API/MQTT 端口转发由 Compose 管理，指标由 Prometheus 逐 Pod proxy 抓取。
 
 **Docker Desktop 新版（kind v1.36.1+）变化（2026-10-10 实记）**：① cloud-provider-kind（`kindccm-*` 容器）会把 LoadBalancer 类型 Service 直接发布到宿主机——`emqx-listeners`（1883/8883/8083/8084）和 `emqx-dashboard`（18083）均已被它占用，Compose 里 `k8s-forward-emqx-dashboard` 已删除、`k8s-forward-emqx-listeners` 不再绑宿主机端口（仅保留容器名供 docker 网络内 demo 访问）；宿主机访问 EMQX 直接用 127.0.0.1:1883/18083。② forward 容器挂的 kubeconfig 是 `monitoring/.env` 里 `KUBECONFIG_HOST_PATH` 指定的 `~/.kube/iot-local.config` **静态副本**——Docker Desktop 升级重建集群（控制面节点换 kindest 版本，etcd 数据保留）后 CA 轮换，该副本过期导致全部 forward 容器 x509 崩溃，需 `kubectl config view --raw --minify --flatten > ~/.kube/iot-local.config` 刷新后 `docker compose up -d --force-recreate`。③ 集群重建后 EMQX Operator 需重装：`curl -fsSL https://ghfast.top/https://github.com/emqx/emqx-operator/releases/download/2.3.0/install.yaml | kubectl apply --server-side=true -f -`（github 直连不通时走 ghfast.top 镜像）。
 
@@ -77,8 +97,8 @@ kubectl apply -f deploy/emqx/cluster.local.yaml  # 再跑：部署/更新 EMQX C
 
 ## 当前本地资源
 
-- Host Docker 镜像：仅保留业务镜像 `iot-app:2.0`，供 Compose demo 使用。**重建镜像前必须先 `make build`**——Dockerfile 是 `FROM scratch` 直接 COPY `bin/` 预编译二进制，`docker build` 本身不编译 Go。
-- Kubernetes containerd：仅保留当前业务镜像 `iot-app:local-4c38a8361d1e`。
+- Host Docker 镜像：当前业务镜像 `iot-app:2.41`，供 Compose demo 使用。**重建镜像前必须先 `make build`**——Dockerfile 是 `FROM scratch` 直接 COPY `bin/` 预编译二进制，`docker build` 本身不编译 Go。
+- Kubernetes containerd：当前业务镜像 `iot-app:local-bc5c9e1f4bca`（保留上一版供回滚）。
 - 当前 Helm release：`iot`，namespace `iot`。
 - 当前 EMQX release：`emqx`，namespace `emqx`。
 - Grafana 数据卷：`iot-grafana-data`。

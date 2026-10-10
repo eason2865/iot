@@ -168,7 +168,8 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			// telemetry and commands for tenants it is not responsible for. The
 			// subscription stays a wildcard, so enforcement happens here, not in
 			// the broker ACL.
-			TenantIDs: runtimeconfig.SplitCSV(os.Getenv("DEVICE_WORKER_TENANT_IDS")),
+			TenantIDs:  runtimeconfig.SplitCSV(os.Getenv("DEVICE_WORKER_TENANT_IDS")),
+			AckTimeout: runtimeconfig.Duration("COMMAND_ACK_TIMEOUT", 5*time.Minute),
 			// The DLQ writer already uses RequireAll, so the topics must tolerate
 			// it: min.insync.replicas has to match what the producers require.
 			TopicConfig:    topicConfigFromEnv(),
@@ -187,6 +188,7 @@ func topicConfigFromEnv() platform.KafkaTopicConfig {
 	return platform.KafkaTopicConfig{
 		ReplicationFactor: runtimeconfig.KafkaTopicReplicationFactor(),
 		MinInsyncReplicas: runtimeconfig.KafkaTopicMinInsyncReplicas(),
+		NumPartitions:     runtimeconfig.KafkaTopicPartitions(),
 	}
 }
 

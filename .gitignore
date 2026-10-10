@@ -9,6 +9,9 @@ ai_handover.md
 *.key
 *.crt
 deploy/grpc-certs/
+# ServiceAccount token mounted into the Compose Prometheus (pod proxy scraping)
+monitoring/prometheus/k8s-token
+monitoring/prometheus/k8s-ca.crt
 
 # Build outputs
 bin/

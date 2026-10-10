@@ -41,8 +41,8 @@
 | API Gateway / Ingress | TLS 终止、认证、限流和对外 API 入口 | 平台网关命名空间 | 由平台统一部署高可用 Gateway 或 Ingress Controller；仅将 `management-api` 暴露为 HTTP API。当前 Chart 不安装网关。 |
 | `management-api` | REST API、鉴权边界、调用核心服务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。通过 `iot-core:9001` Service DNS 调用核心服务。 |
 | `iot-core` | 租户、设备、命令、状态等核心 gRPC 业务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。仅用 ClusterIP Service 暴露 gRPC 与指标端口。 |
-| `telemetry-ingestor` | MQTT 上行消息解析并写入 Kafka | `iot` | Kubernetes Deployment。通过 EMQX 共享订阅扩容，并为每个 Pod 注入唯一 MQTT Client ID；当前 Chart 默认 2 副本，已具备这两项配置。生产仍应补齐 HPA、PDB 和拓扑分散。 |
-| `device-worker` | Kafka 消费、状态/时序落库、命令投递、ACK 更新 | `iot` | Kubernetes Deployment。通过 Kafka 分区和消费者组扩容；ACK MQTT 订阅使用共享订阅且 Client ID 由 Pod 名唯一化。当前默认 1 副本，扩容前需增加 Kafka 分区并验证命令、ACK 的幂等语义。 |
+| `telemetry-ingestor` | MQTT 上行消息解析并写入 Kafka | `iot` | Kubernetes Deployment。通过 EMQX 共享订阅扩容，并为每个 Pod 注入唯一 MQTT Client ID；当前 Chart 默认 2 副本，已具备这两项配置。Chart 已有 PDB，生产仍应补齐 HPA 和拓扑分散。 |
+| `device-worker` | Kafka 消费、状态/时序落库、命令投递、ACK 更新 | `iot` | Kubernetes Deployment。通过 Kafka 分区和消费者组扩容；ACK MQTT 订阅使用共享订阅且 Client ID 由 Pod 名唯一化。当前 Chart 默认 2 副本；worker 在投递前做命令终态预检（`sent/acked/timeout/failed` 直接跳过并提交位点），ACK 落库失败重试后转入 DLQ，具备多副本下的幂等语义。进一步扩容前仍需增加 Kafka 分区（`kafka.topicPartitions`，仅在 topic 创建时生效）。 |
 | EMQX | MQTT 接入、会话、订阅和设备长连接 | `emqx` | 独立 EMQX 集群，由 EMQX Operator 管理；至少多节点、反亲和、PDB、滚动升级和 TCP 负载均衡。设备长连接通过 L4 负载均衡进入 EMQX，而不是进入业务 Pod。EMQX 5.9+ 的集群必须配置许可证 Secret。仓库清单见 [`deploy/emqx/cluster.yaml`](../deploy/emqx/cluster.yaml)。 |
 | PostgreSQL | 租户、设备、命令、当前状态等事务数据 | 独立数据平台 | 优先使用托管高可用 PostgreSQL；自建时使用受支持的 PostgreSQL Operator，配置主备、备份、PITR、监控和定期恢复演练。 |
 | Kafka | 遥测、命令等异步事件流 | 独立消息平台 | 优先使用托管 Kafka；自建时使用 Kafka Operator，至少 3 broker、跨故障域、副本因子、幂等生产和消费者 lag 监控。业务消费者必须保持幂等。 |
@@ -69,8 +69,8 @@
 ## 安全、可靠性与数据模型基线
 
 - MQTT 认证统一回调 `iot-core` 内部认证端点，设备用户名为 `tenantId:deviceId`，密码只在注册时出现，数据库保存 bcrypt 哈希；EMQX `authorization.no_match=deny`，由认证响应下发精确租户/设备 ACL。生产环境应再通过 NetworkPolicy、服务身份认证和 TLS 保护回调端点。
-- `management-api` 免鉴权只开放 `/healthz` 和 MQTT Schema；所有业务 REST 请求要求 Bearer Token，令牌通过 Secret Manager 注入，不写入镜像和 Git。
-- 命令创建先写 PostgreSQL `created` 状态；`iot-core` 多副本通过 `FOR UPDATE SKIP LOCKED` 领取租约，发布成功后变为 `sent`，达到 deadline 变为 `timeout`，ACK 写入 `command_ack` 和 `command_events`。命令 ID 使用 UUIDv7，便于排序和跨副本唯一。
+- `management-api` 免鉴权只开放 `/healthz`、`/readyz` 和 MQTT Schema（kubelet 探针不携带凭证）；所有业务 REST 请求要求 Bearer Token，令牌通过 Secret Manager 注入，不写入镜像和 Git。可选配置 `MANAGEMENT_API_TOKENS` 将令牌绑定到指定租户，单个租户令牌泄露时无法访问其他租户数据。
+- 命令创建先写 PostgreSQL `created` 状态；`iot-core` 多副本通过 `FOR UPDATE SKIP LOCKED` 领取租约，发布到 Kafka 成功后变为 `published`，worker 投递到设备（MQTT）成功后变为 `sent` 并写入 deadline，达到 deadline 未 ACK 变为 `timeout`，ACK 写入 `command_ack` 和 `command_events`。命令 ID 使用 UUIDv7，便于排序和跨副本唯一。
 - JSON 解码、PostgreSQL、TDengine、MQTT 投递失败的 Kafka 消息先写入 `iot.dlq`，成功后才提交原消费位点。人工检查 `stage/error` 后使用 `dlq-replay --limit N` 重放，禁止自动无限重试造成毒丸消息循环。
 - 租户和命令列表使用 keyset cursor 分页，单页上限 100；禁止在 REST 层一次性拉取全表。
 - TDengine 使用 `telemetry_v2` 超级表和每设备子表，`tenant_id/device_id` 为 Tags，保存 `msg_id/type/version/payload_hash/payload_bytes`；完整 payload 的权威副本为 PostgreSQL JSONB，避免 4096 字符限制和时序库字符串截断。
@@ -78,6 +78,12 @@
 
 ## 当前 Chart 与生产差异
 
-当前 `charts/iot` 是本地可运行的 applications-only Chart，默认部署 `management-api`、`iot-core`、`telemetry-ingestor` 各 2 副本和 `device-worker` 1 副本，并连接外部依赖。它不包含网关、EMQX、PostgreSQL、Kafka、TDengine、Prometheus、Grafana、Alertmanager 或 demo。
+当前 `charts/iot` 是本地可运行的 applications-only Chart，默认将 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 四个服务各部署 2 副本，且每个服务均带 PDB（`minAvailable: 1`），并连接外部依赖。它不包含网关、EMQX、PostgreSQL、Kafka、TDengine、Prometheus、Grafana、Alertmanager 或 demo。
 
-投入生产前，应按本指南分别建设这些平台服务，并补齐 HPA、PDB、拓扑分散、TLS/Secret、容量基线与灾备演练；`device-worker` 扩容前还必须完成 Kafka 分区规划和多副本消费语义验证。
+投入生产前，应按本指南分别建设这些平台服务，并补齐 HPA、拓扑分散、TLS/Secret、容量基线与灾备演练（Chart 已为四个业务服务内置 PDB）；`device-worker` 扩容前还必须完成 Kafka 分区规划（`kafka.topicPartitions`）。
+
+## 已实现的可靠性与监控基线
+
+四个业务 Deployment 均已有 PDB。management-api readiness 验证核心 gRPC 与 PostgreSQL，ingestor/worker readiness 验证 PostgreSQL；存活检查独立。本地 Prometheus 使用命名空间级 Role 经 apiserver proxy 抓取每个 Pod，并校验 CA、保留服务 job 标签；生产由可观测平台直接抓取 Pod。
+
+可选租户 Token 使用 Secret 中的 JSON token→tenant 映射，全局列表仍要求管理 Token。Kafka 新 topic 的分区数可配；现存分区及副本变更由运维执行，动态配置在启动时对账。命令重投跳过已 sent/终态，ACK 有限重试与人工重放保留终态语义；PostgreSQL 遥测完成标记支持后台补偿。重复投递和双依赖同时故障的边界见 ADR 0007。

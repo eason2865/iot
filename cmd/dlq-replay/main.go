@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
+	"iot/internal/contracts"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -55,6 +58,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
+	var ackStore *platform.PostgresStore
+	defer func() {
+		if ackStore != nil {
+			_ = ackStore.Close()
+		}
+	}()
 	var scanned, replayed, skipped int
 	for replayed < *limit {
 		// Bound each fetch so reaching the end of the topic ends the run
@@ -102,12 +111,31 @@ func main() {
 			skipped++
 			continue
 		}
-		writer := &kafka.Writer{Addr: kafka.TCP(splitCSV(*brokers)...), Topic: item.SourceTopic, RequiredAcks: kafka.RequireAll, BatchSize: 1}
-		err = writer.WriteMessages(ctx, kafka.Message{Key: []byte(item.Key), Value: value, Headers: []kafka.Header{{Key: "x-replayed-from-dlq", Value: []byte("true")}}})
-		_ = writer.Close()
-		if err != nil {
-			log.Fatalf("republish stage=%s offset=%d failed: %v", item.Stage, item.SourceOffset, err)
+		if item.Stage == platform.StageCommandAck {
+			if ackStore == nil {
+				dsn := os.Getenv("POSTGRES_DSN")
+				if dsn == "" {
+					log.Fatal("command.ack replay requires POSTGRES_DSN")
+				}
+				ackStore, err = platform.NewPostgresStore(dsn, 5*time.Minute)
+				if err != nil {
+					log.Fatal("cannot open ACK replay store")
+				}
+			}
+			err = replayAck(ctx, item, value, ackStore)
+		} else {
+			topic, payload, planErr := replayKafkaPayload(item, value)
+			if planErr != nil {
+				log.Fatalf("cannot replay stage=%s: %v", item.Stage, planErr)
+			}
+			writer := &kafka.Writer{Addr: kafka.TCP(splitCSV(*brokers)...), Topic: topic, RequiredAcks: kafka.RequireAll, BatchSize: 1}
+			err = writer.WriteMessages(ctx, kafka.Message{Key: []byte(item.Key), Value: payload, Headers: []kafka.Header{{Key: "x-replayed-from-dlq", Value: []byte("true")}}})
+			_ = writer.Close()
 		}
+		if err != nil {
+			log.Fatalf("replay stage=%s offset=%d failed: %v", item.Stage, item.SourceOffset, err)
+		}
+
 		commitReplay(ctx, reader, msg, false)
 		replayed++
 		log.Printf("replayed stage=%s topic=%s offset=%d", item.Stage, item.SourceTopic, item.SourceOffset)
@@ -148,4 +176,44 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+type ackReplayStore interface {
+	AckCommandContext(context.Context, string, string, string) (platform.Command, error)
+}
+
+func replayAck(ctx context.Context, item platform.DeadLetter, value []byte, store ackReplayStore) error {
+	var ack platform.CommandAckMessage
+	if err := json.Unmarshal(value, &ack); err != nil {
+		return err
+	}
+	tenant, device, suffix, ok := contracts.ParseDeviceTopic(item.SourceTopic)
+	if !ok || suffix != contracts.TopicSuffixAck || tenant != ack.TenantID || device != ack.DeviceID || ack.CommandID == "" {
+		return fmt.Errorf("ACK identity does not match source topic")
+	}
+	_, err := store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
+	return err
+}
+
+func replayKafkaPayload(item platform.DeadLetter, value []byte) (string, []byte, error) {
+	if item.Stage == platform.StageMQTTDecode || item.Stage == platform.StageMQTTIdentity {
+		return "", nil, fmt.Errorf("invalid MQTT messages must be corrected at their source")
+	}
+	if item.Stage != platform.StageMQTTKafka {
+		return item.SourceTopic, value, nil
+	}
+	var env contracts.Envelope
+	if err := json.Unmarshal(value, &env); err != nil {
+		return "", nil, err
+	}
+	tenant, device, suffix, ok := contracts.ParseDeviceTopic(item.SourceTopic)
+	if !ok || suffix != contracts.TopicSuffixTelemetry || tenant != env.TenantID || device != env.DeviceID {
+		return "", nil, fmt.Errorf("telemetry identity does not match source topic")
+	}
+	topic := os.Getenv("KAFKA_TELEMETRY_TOPIC")
+	if topic == "" {
+		topic = "iot.telemetry"
+	}
+	payload, err := json.Marshal(platform.TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts, Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: time.Now().UTC()})
+	return topic, payload, err
 }

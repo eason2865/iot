@@ -105,6 +105,14 @@ func KafkaTopicMinInsyncReplicas() int {
 	return Int("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", 1)
 }
 
+// KafkaTopicPartitions is the partition count this service asks for when it
+// creates a topic. The default of 1 suits the local stack; production
+// deployments that need consumption parallelism must raise it. It only
+// applies at topic creation time.
+func KafkaTopicPartitions() int {
+	return Int("KAFKA_TOPIC_PARTITIONS", 1)
+}
+
 // KafkaDLQRetentionMs bounds how long a dead letter stays replayable. The
 // default matches Kafka's own 7-day default, but stating it explicitly means an
 // unreplayed backlog cannot grow forever just because the broker was configured

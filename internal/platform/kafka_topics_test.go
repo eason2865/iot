@@ -22,12 +22,13 @@ func TestBuildTopicConfigs(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name          string
-		config        KafkaTopicConfig
-		wantRF        int
-		wantMinISR    string
-		wantRetention string
-		wantConfigs   int
+		name           string
+		config         KafkaTopicConfig
+		wantRF         int
+		wantMinISR     string
+		wantPartitions int
+		wantRetention  string
+		wantConfigs    int
 	}{
 		{
 			name:        "defaults stay single-broker friendly",
@@ -42,6 +43,17 @@ func TestBuildTopicConfigs(t *testing.T) {
 			wantRF:      3,
 			wantMinISR:  "2",
 			wantConfigs: 1,
+		},
+		{
+			name: "a raised partition count is applied at creation",
+			// Single-partition topics serialize consumption onto one consumer
+			// per group; the configured count must reach the topic, not be
+			// silently clamped back to 1.
+			config:         KafkaTopicConfig{ReplicationFactor: 1, MinInsyncReplicas: 1, NumPartitions: 6},
+			wantRF:         1,
+			wantMinISR:     "1",
+			wantPartitions: 6,
+			wantConfigs:    1,
 		},
 		{
 			name: "min.insync.replicas above the replication factor is dropped",
@@ -87,8 +99,12 @@ func TestBuildTopicConfigs(t *testing.T) {
 			if got.ReplicationFactor != tc.wantRF {
 				t.Fatalf("replicationFactor = %d, want %d", got.ReplicationFactor, tc.wantRF)
 			}
-			if got.NumPartitions != 1 {
-				t.Fatalf("numPartitions = %d, want 1", got.NumPartitions)
+			wantPartitions := tc.wantPartitions
+			if wantPartitions == 0 {
+				wantPartitions = 1
+			}
+			if got.NumPartitions != wantPartitions {
+				t.Fatalf("numPartitions = %d, want %d", got.NumPartitions, wantPartitions)
 			}
 			views := make([]configEntryView, 0, len(got.ConfigEntries))
 			for _, entry := range got.ConfigEntries {

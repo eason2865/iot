@@ -313,11 +313,11 @@ iot/
 - Docker：PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo，以及访问 Kubernetes 服务的转发器
 - Kubernetes：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`，以及独立 `emqx` 命名空间中的 EMQX 集群
 
-Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。它们经由 `k8s-forward-*` 容器抓取 Kubernetes 中四个业务服务的指标；这样可以在重新部署业务服务时保留监控配置与历史数据。
+Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。Prometheus 通过 Kubernetes API（`kubernetes_sd`，role `pod`）发现 `iot` 命名空间下的所有 Pod，并经由 apiserver pod proxy 逐副本抓取 `metrics` 端口，多副本服务不再有单 Pod 盲区；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
 本地与生产都通过 EMQX Operator 在独立 `emqx` 命名空间管理 EMQX 集群。生产使用持证多节点清单 [`deploy/emqx/cluster.yaml`](deploy/emqx/cluster.yaml)，本地使用社区许可可运行的单节点清单 [`deploy/emqx/cluster.local.yaml`](deploy/emqx/cluster.local.yaml)。本地 Compose 仅转发 MQTT `1883` 和 Dashboard `18083` 到该集群；生产环境应通过 L4 负载均衡和 TLS 暴露 MQTT，Dashboard 保持私网访问。
 
-Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo` 与 `iot-k8s-forward-*`。EMQX 运行在 Kubernetes 的 `emqx` 命名空间。
+Docker Desktop 中所有本地 IoT 依赖均归入 Compose 项目 `iot`。原生服务使用原名：`postgres`、`kafka`、`tdengine`、`prometheus`、`grafana`；项目自定义容器采用 `iot-` 前缀，例如 `iot-demo`、`iot-k8s-forward-management-api` 与 `iot-k8s-forward-emqx-listeners`。EMQX 运行在 Kubernetes 的 `emqx` 命名空间。
 
 先确认本机 Docker 依赖已经启动，并且 Kafka 同时给宿主机测试和 k8s Pod 暴露了各自可达的 advertised listener：
 
@@ -367,7 +367,7 @@ scripts/helm-deploy-local.sh
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
 在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.0`。
 
-Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 抓取 k8s port-forward 后的 metrics。
+Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 
@@ -385,7 +385,6 @@ docker compose -f monitoring/docker-compose.yml up -d
 
 ```bash
 curl http://127.0.0.1:18080/healthz
-curl http://127.0.0.1:18090/metrics
 curl http://127.0.0.1:18084/healthz
 curl 'http://127.0.0.1:9090/api/v1/targets?state=active'
 docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
@@ -393,7 +392,7 @@ docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
 
 ## 本地监控
 
-Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 通过 Docker 网络内的 `iot-k8s-forward-*` 容器抓取 k8s 业务服务的 `/metrics`，Grafana 数据源已经预置为 Compose 内部地址 `http://prometheus:9090`。
+Prometheus 和 Grafana 都用 Docker 本地启动。Prometheus 使用 `kubernetes_sd`（role `pod`）配合专用 ServiceAccount token，经由 apiserver pod proxy（`/api/v1/namespaces/<ns>/pods/<pod>:<port>/proxy/metrics`）抓取 `iot` 命名空间中所有暴露了名为 `metrics` 容器端口的运行中 Pod——每个服务的每个副本都会被单独抓取。Grafana 数据源已经预置为 Compose 内部地址 `http://prometheus:9090`。
 现在本地监控会同时覆盖 `management-api / iot-core / telemetry-ingestor / device-worker / demo`，其中 `iot-core` 走独立的 gRPC 指标端口 `9101`。
 
 ```bash
@@ -504,6 +503,16 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 - Helm 通过 `grpcTLS.enabled=true` 开启，Secret（默认 `iot-grpc-tls`）需包含 `ca.crt`、`server.crt`、`server.key`、`client.crt`、`client.key`，挂载到两个 Deployment 的 `/etc/iot/grpc-tls`。
 - 本地脚本 `scripts/helm-deploy-local.sh` 默认启用 mTLS：自动调用 `scripts/gen-grpc-certs.sh` 生成本地自签 CA 与服务端/客户端证书（输出到 `deploy/grpc-certs/`，已 gitignore）并创建 Secret。可用 `GRPC_TLS_ENABLED=0` 关闭。
 - 生产环境应使用真实 CA 或 cert-manager 签发证书，并注意轮换证书后需要重启 Pod 生效。
+
+### 可靠性补偿与租户访问
+
+`MANAGEMENT_API_TOKEN` 是跨租户管理 Token；可通过 Secret 中的 `MANAGEMENT_API_TOKENS` JSON 对象（例如 `{"token-a":"tenant-a"}`）增加租户 Token。租户 Token 仅可访问对应设备、命令及遥测接口，不能访问全局租户或设备列表；写接口按 body 中的 tenantId 鉴权。本地部署脚本接受 `IOT_MANAGEMENT_API_TOKENS`。
+
+worker 每 30 秒按 ID 游标扫描最多 500 条、接收时间超过两分钟的未完成遥测，补写 TDengine 并更新标记。租户过滤在 LIMIT 前完成。`command.ack` 死信重放需要 `POSTGRES_DSN`，直接补写 ACK；`mqtt.kafka` 重放转换为 Kafka 遥测记录，非法 MQTT 消息不可直接重放。已 sent 或进入终态的命令重放跳过 MQTT 下发，设备仍需按 commandId 去重，详细语义见 ADR 0007。
+
+`/healthz` 用于存活检查；`/readyz` 检查 PostgreSQL，management-api 则检查 gRPC 到核心及 PostgreSQL 的完整路径。四个服务均配置 PDB。Kafka 分区数可通过 `kafka.topicPartitions` 设置，只对新 topic 生效；现存 topic 扩分区须人工执行。
+
+本地监控首次启动前执行 `scripts/port-forward-local-monitoring.sh`，生成专用只读 token 和 CA 文件。Prometheus 通过 kind 网络访问 apiserver，校验证书并逐 Pod 抓取，保留原有 job 标签以兼容看板。CA 轮换后需重新运行脚本并重建 Prometheus 容器。
 
 ## 开发建议
 

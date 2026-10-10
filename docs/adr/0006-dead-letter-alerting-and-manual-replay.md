@@ -41,13 +41,19 @@ Set against that, the volume is low and a fix almost always needs a human anyway
   Grafana rules alert on dead letters appearing (warning) and on dead-letter
   writes failing (critical).
 - The backlog is bounded by `KAFKA_DLQ_RETENTION_MS`, applied when this service
-  creates the topic (see ADR 0004 for the same caveat: an existing topic keeps its
-  configuration).
+  creates the topic and reconciled for existing topics on startup (ADR 0004).
 - `cmd/dlq-replay` is the recovery tool, and it is deliberately conservative:
   `-dry-run` changes nothing at all, including the consumer group position; each
   stage has its own consumer group so a targeted run cannot hide another stage's
   records; and a run ends successfully when the topic goes idle rather than
   blocking until a timeout.
+- ACK failures use stage `command.ack`; replay applies the PostgreSQL ACK
+  transition using `POSTGRES_DSN`, without republishing a device command.
+- `mqtt.kafka` replay converts the original envelope to a telemetry record and
+  publishes to `KAFKA_TELEMETRY_TOPIC`. Invalid `mqtt.decode`/`mqtt.identity`
+  messages are inspectable but cannot be blindly replayed.
+- PostgreSQL-backed telemetry sink compensation is a separate bounded scan,
+  described in ADR 0007. It never consumes the DLQ or resends commands.
 - The operator procedure is documented as the dead-letter replay runbook in the
   README.
 
@@ -55,10 +61,11 @@ Set against that, the volume is low and a fix almost always needs a human anyway
 
 - Recovery depends on a human and on the retention window. A dead letter older
   than `KAFKA_DLQ_RETENTION_MS` (default 7 days) is gone, so a fix deferred past
-  that window loses data permanently and the alert is the only warning.
-- The pipeline never re-injects traffic on its own, so a transient fault cannot be
-  amplified by the recovery mechanism.
-- Replaying a command still re-sends its downlink. The tool cannot know whether a
+  that window can lose messages whose payload was not persisted elsewhere and the alert is the only warning.
+- The DLQ never re-injects traffic on its own. PostgreSQL telemetry compensation
+  is limited to one bounded batch per tick and never replays commands.
+- Replaying a command in `sent`, `acked`, `timeout`, or `failed` skips its
+  downlink. Pending commands may still be sent again. The tool cannot know whether a
   device already acted, so the runbook requires fixing the cause and inspecting
   with `-dry-run` first, and treats command stages as the ones needing the most
   care.

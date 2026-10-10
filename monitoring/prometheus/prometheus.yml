@@ -3,25 +3,54 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: management-api
-    static_configs:
-      - targets:
-          - k8s-forward-management-api-metrics:18090
-
-  - job_name: telemetry-ingestor
-    static_configs:
-      - targets:
-          - k8s-forward-telemetry-ingestor:18081
-
-  - job_name: device-worker
-    static_configs:
-      - targets:
-          - k8s-forward-device-worker:18082
-
-  - job_name: iot-core
-    static_configs:
-      - targets:
-          - k8s-forward-iot-core:18091
+  # Discover every Pod in the iot namespace and scrape each one individually.
+  # Pod IPs are unreachable from this Docker network, so targets are rewritten
+  # to the apiserver pod proxy. This replaces the former per-Service
+  # port-forward containers, which pinned one Pod per Service and left the
+  # other replicas unmonitored.
+  - job_name: kubernetes-pods
+    scheme: https
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [iot]
+        api_server: https://desktop-control-plane:6443
+        tls_config:
+          ca_file: /etc/prometheus/k8s/ca.crt
+          server_name: localhost
+        bearer_token_file: /etc/prometheus/k8s/token
+    tls_config:
+      ca_file: /etc/prometheus/k8s/ca.crt
+      server_name: localhost
+    bearer_token_file: /etc/prometheus/k8s/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace]
+        action: keep
+        regex: iot
+      # The chart names the scrape-relevant container port "metrics" on every
+      # service; one target is generated per container port, so this keeps
+      # exactly one target per Pod.
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: metrics
+      - source_labels: [__meta_kubernetes_pod_phase]
+        action: keep
+        regex: Running
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_name, __meta_kubernetes_pod_container_port_number]
+        separator: ";"
+        regex: "(.+);(.+);(.+)"
+        target_label: __metrics_path__
+        replacement: /api/v1/namespaces/$1/pods/$2:$3/proxy/metrics
+      - target_label: __address__
+        replacement: desktop-control-plane:6443
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: job
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: instance
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
 
   - job_name: demo-docker
     static_configs:

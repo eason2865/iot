@@ -17,7 +17,9 @@ func (s *stubDispatchStore) ClaimCommandsForDispatch(int, time.Duration) ([]Comm
 
 func (s *stubDispatchStore) MarkCommandPublished(string) error             { return nil }
 func (s *stubDispatchStore) RescheduleCommand(string, time.Duration) error { return nil }
-func (s *stubDispatchStore) ExpireCommands(time.Time) (int64, error)       { return 0, nil }
+func (s *stubDispatchStore) ExpireCommands(time.Time, time.Duration) (int64, error) {
+	return 0, nil
+}
 func (s *stubDispatchStore) RecoverStaleCommands(time.Time, int) (int64, int64, error) {
 	return 0, 0, nil
 }

@@ -41,8 +41,8 @@ Local is not a production substitute, but it mirrors production deployment bound
 | API Gateway / Ingress | TLS termination, authentication, rate limiting, public API entrypoint | Platform gateway namespace | A highly available Gateway or Ingress Controller deployed uniformly by the platform; expose only `management-api` as the HTTP API. The current chart does not install a gateway. |
 | `management-api` | REST API, auth boundary, calls the core service | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Calls the core via the `iot-core:9001` Service DNS. |
 | `iot-core` | Core gRPC business: tenants, devices, commands, status | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Expose gRPC and metrics ports via ClusterIP Services only. |
-| `telemetry-ingestor` | Parses MQTT uplink messages and writes to Kafka | `iot` | Kubernetes Deployment. Scales via EMQX shared subscriptions with a unique MQTT Client ID per Pod; the current chart defaults to 2 replicas with both already configured. Production should still add HPA, PDB, and topology spread. |
-| `device-worker` | Kafka consumption, state/time-series persistence, command delivery, ACK updates | `iot` | Kubernetes Deployment. Scales via Kafka partitions and consumer groups; the ACK MQTT subscription uses a shared subscription with the Client ID uniquified by Pod name. Currently 1 replica by default — before scaling, add Kafka partitions and verify command/ACK idempotency. |
+| `telemetry-ingestor` | Parses MQTT uplink messages and writes to Kafka | `iot` | Kubernetes Deployment. Scales via EMQX shared subscriptions with a unique MQTT Client ID per Pod; the current chart defaults to 2 replicas with both already configured. The chart already has a PDB; production should still add HPA and topology spread. |
+| `device-worker` | Kafka consumption, state/time-series persistence, command delivery, ACK updates | `iot` | Kubernetes Deployment. Scales via Kafka partitions and consumer groups; the ACK MQTT subscription uses a shared subscription with the Client ID uniquified by Pod name. The chart defaults to 2 replicas; the worker performs a terminal-state precheck before delivery (`sent/acked/timeout/failed` are skipped and the offset committed), and failed ACK persistence is retried then routed to the DLQ, reducing duplicate deliveries (devices must still deduplicate command IDs). Further scaling still requires more Kafka partitions (`kafka.topicPartitions`, applied only at topic creation). |
 | EMQX | MQTT access, sessions, subscriptions, device long connections | `emqx` | A standalone EMQX cluster managed by the EMQX Operator; at minimum multi-node with anti-affinity, PDB, rolling upgrades, and TCP load balancing. Device long connections enter EMQX through an L4 load balancer, not business Pods. EMQX 5.9+ clusters require a license Secret. See the repo manifest [`deploy/emqx/cluster.yaml`](../deploy/emqx/cluster.yaml). |
 | PostgreSQL | Transactional data: tenants, devices, commands, current state | Independent data platform | Prefer managed HA PostgreSQL; when self-hosting, use a supported PostgreSQL Operator with primary/standby, backups, PITR, monitoring, and regular restore drills. |
 | Kafka | Async event streams: telemetry, commands | Independent messaging platform | Prefer managed Kafka; when self-hosting, use a Kafka Operator with at least 3 brokers across failure domains, replication factor, idempotent producers, and consumer-lag monitoring. Business consumers must remain idempotent. |
@@ -69,8 +69,8 @@ Local is not a production substitute, but it mirrors production deployment bound
 ## Security, Reliability, and Data-Model Baselines
 
 - MQTT authentication uniformly calls back into `iot-core`'s internal auth endpoint; the device username is `tenantId:deviceId`, passwords appear only at registration time, and the database stores bcrypt hashes. EMQX runs with `authorization.no_match=deny`, and precise tenant/device ACLs are issued by the auth response. In production, additionally protect the callback endpoint with NetworkPolicy, service-identity authentication, and TLS.
-- `management-api` exposes only `/healthz` and the MQTT schema without a token; all business REST requests require a Bearer Token injected via a Secret Manager — never baked into images or Git.
-- Command creation first writes the `created` state to PostgreSQL; `iot-core` replicas claim leases via `FOR UPDATE SKIP LOCKED`, transition to `sent` after a successful publish, to `timeout` at the deadline, and ACKs write `command_ack` and `command_events`. Command IDs use UUIDv7 for sortability and cross-replica uniqueness.
+- `management-api` exposes only `/healthz`, `/readyz`, and the MQTT schema without a token (kubelet probes carry no credentials); all business REST requests require a Bearer Token injected via a Secret Manager — never baked into images or Git. Optionally, `MANAGEMENT_API_TOKENS` binds tokens to specific tenants so a leaked tenant token cannot reach other tenants' data.
+- Command creation first writes the `created` state to PostgreSQL; `iot-core` replicas claim leases via `FOR UPDATE SKIP LOCKED`, transition to `published` after a successful Kafka publish, then to `sent` (with a deadline) once the worker delivers to the device over MQTT, to `timeout` if the deadline passes without an ACK, and ACKs write `command_ack` and `command_events`. Command IDs use UUIDv7 for sortability and cross-replica uniqueness.
 - Kafka messages that fail JSON decoding, PostgreSQL, TDengine, or MQTT delivery are first written to `iot.dlq`; the original consumer offset is committed only after success. After manually inspecting `stage/error`, replay with `dlq-replay --limit N`; never auto-retry indefinitely and create poison-message loops.
 - Tenant and command lists use keyset cursor pagination with a page-size cap of 100; never pull entire tables through the REST layer.
 - TDengine uses the `telemetry_v2` super table with per-device subtables, `tenant_id/device_id` as tags, storing `msg_id/type/version/payload_hash/payload_bytes`; the authoritative copy of the full payload is PostgreSQL JSONB, avoiding the 4096-character limit and time-series string truncation.
@@ -78,6 +78,22 @@ Local is not a production substitute, but it mirrors production deployment bound
 
 ## Current Chart vs. Production
 
-The current `charts/iot` is a locally runnable, applications-only chart that by default deploys `management-api`, `iot-core`, and `telemetry-ingestor` at 2 replicas each and `device-worker` at 1 replica, connecting to external dependencies. It does not include the gateway, EMQX, PostgreSQL, Kafka, TDengine, Prometheus, Grafana, Alertmanager, or demo.
+The current `charts/iot` is a locally runnable, applications-only chart that by default deploys all four services — `management-api`, `iot-core`, `telemetry-ingestor`, and `device-worker` — at 2 replicas each, with a PDB (`minAvailable: 1`) per service, connecting to external dependencies. It does not include the gateway, EMQX, PostgreSQL, Kafka, TDengine, Prometheus, Grafana, Alertmanager, or demo.
 
-Before going to production, build these platform services separately per this guide, and fill in HPAs, PDBs, topology spread, TLS/Secrets, capacity baselines, and disaster-recovery drills. Scaling `device-worker` additionally requires Kafka partition planning and multi-replica consumption-semantics verification first.
+Before going to production, build these platform services separately per this guide, and fill in HPAs, topology spread, TLS/Secrets, capacity baselines, and disaster-recovery drills (the chart already ships PDBs for all four business services). Scaling `device-worker` additionally requires Kafka partition planning (`kafka.topicPartitions`).
+
+## Implemented reliability and monitoring baseline
+
+All four application Deployments now have a PDB. Gateway readiness checks the
+core/SQL path; ingestor and worker readiness checks PostgreSQL, while liveness
+remains separate. Local Prometheus discovers and scrapes all Pods through a
+namespace-scoped apiserver proxy role with CA verification, retaining service job
+labels. Production should use direct Pod scraping through its observability stack.
+
+Optional tenant tokens are a JSON token-to-tenant map in the runtime Secret.
+Global lists require the operator token. Kafka partition count is configurable
+for newly created topics; live partition/replica changes remain operator actions,
+while managed dynamic config entries are reconciled at startup. Command publishing
+skips delivered/terminal states; bounded ACK retries and manual ACK replay preserve
+existing terminal semantics. Telemetry compensation uses the PostgreSQL completion
+marker. See ADR 0007 for duplicate delivery and simultaneous-outage limitations.

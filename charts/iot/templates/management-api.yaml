@@ -44,7 +44,7 @@ spec:
       {{- end }}
       initContainers:
         - name: wait-for-deps
-          image: busybox:1.36
+          image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -85,8 +85,10 @@ spec:
               value: iot-core
           {{- end }}
           ports:
-            - containerPort: 8080
-            - containerPort: 9100
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9100
           {{- if .Values.grpcTLS.enabled }}
           volumeMounts:
             - name: grpc-tls
@@ -95,7 +97,7 @@ spec:
           {{- end }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5

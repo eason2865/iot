@@ -19,6 +19,11 @@ import (
 type KafkaTopicConfig struct {
 	ReplicationFactor int
 	MinInsyncReplicas int
+	// NumPartitions is the partition count for topics this service creates.
+	// Single-partition topics serialize all consumption onto one consumer per
+	// group, so production deployments that need horizontal scale must raise
+	// it. Like the replication factor it only applies at creation time.
+	NumPartitions int
 	// RetentionMs sets retention.ms on the topics created with this config. Zero
 	// or negative leaves the broker default in place, which is not necessarily
 	// bounded: a broker configured with -1 never deletes. The dead-letter topic
@@ -32,6 +37,9 @@ func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
 	}
 	if c.MinInsyncReplicas <= 0 {
 		c.MinInsyncReplicas = 1
+	}
+	if c.NumPartitions <= 0 {
+		c.NumPartitions = 1
 	}
 	return c
 }
@@ -52,7 +60,7 @@ func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfi
 		}
 		topicConfig := kafka.TopicConfig{
 			Topic:             topic,
-			NumPartitions:     1,
+			NumPartitions:     cfg.NumPartitions,
 			ReplicationFactor: cfg.ReplicationFactor,
 		}
 		// The broker rejects min.insync.replicas above the replication factor.

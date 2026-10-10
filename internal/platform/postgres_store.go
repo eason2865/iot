@@ -19,6 +19,12 @@ type PostgresStore struct {
 	ttl time.Duration
 }
 
+// PingContext exposes the underlying connection health check so the /readyz
+// probe can fail closed when PostgreSQL is unreachable.
+func (s *PostgresStore) PingContext(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 func NewPostgresStore(dsn string, ttl time.Duration) (*PostgresStore, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -149,6 +155,9 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tena
 		}
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_commands_dispatch ON commands(status, next_dispatch_at)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_telemetry_unwritten ON telemetry_records(id) WHERE tdengine_written=FALSE`); err != nil {
 		return err
 	}
 	return s.migrateLegacyDeviceSecrets(ctx)
@@ -416,6 +425,40 @@ func (s *PostgresStore) MarkTelemetryTDengineWritten(msgID, tenantID, deviceID s
 	return err
 }
 
+// ListUnwrittenTelemetry returns rows whose TDengine write never completed
+// (tdengine_written = FALSE), oldest first, for the device-worker's background
+// compensation scan. olderThan excludes freshly ingested rows so the scan does
+// not race the consumer that is about to write them.
+func (s *PostgresStore) ListUnwrittenTelemetry(ctx context.Context, olderThan time.Time, afterID int64, tenantIDs []string, limit int) ([]TelemetryRecord, int64, error) {
+	if limit < 1 {
+		return nil, afterID, nil
+	}
+	query := `SELECT id,msg_id,tenant_id,device_id,ts,type,version,payload,received_at FROM telemetry_records WHERE tdengine_written=FALSE AND received_at <= $1 AND id>$2`
+	args := []any{olderThan, afterID, limit}
+	if len(tenantIDs) > 0 {
+		query += ` AND tenant_id = ANY($4)`
+		args = append(args, tenantIDs)
+	}
+	query += ` ORDER BY id LIMIT $3`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, afterID, err
+	}
+	defer rows.Close()
+	var out []TelemetryRecord
+	cursor := afterID
+	for rows.Next() {
+		var rec TelemetryRecord
+		var payload []byte
+		if err := rows.Scan(&cursor, &rec.MsgID, &rec.TenantID, &rec.DeviceID, &rec.Ts, &rec.Type, &rec.Version, &payload, &rec.ReceivedAt); err != nil {
+			return nil, afterID, err
+		}
+		rec.Payload = json.RawMessage(payload)
+		out = append(out, rec)
+	}
+	return out, cursor, rows.Err()
+}
+
 func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
 	rows, err := s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
 		FROM telemetry_records WHERE tenant_id = $1 AND device_id = $2 ORDER BY received_at ASC`, tenantID, deviceID)
@@ -547,7 +590,11 @@ func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.Ra
 }
 
 func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	tx, err := s.db.Begin()
+	return s.AckCommandContext(context.Background(), id, tenantID, deviceID)
+}
+
+func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, deviceID string) (Command, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Command{}, err
 	}
@@ -555,7 +602,7 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime
-	err = tx.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
+	err = tx.QueryRowContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
 	if err == sql.ErrNoRows {
 		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
@@ -585,17 +632,17 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 		return Command{}, err
 	}
 	now := time.Now().UTC()
-	_, err = tx.Exec(`UPDATE commands SET status = $1, updated_at = $2 WHERE id = $3`, next, now, id)
+	_, err = tx.ExecContext(ctx, `UPDATE commands SET status = $1, updated_at = $2 WHERE id = $3`, next, now, id)
 	if err != nil {
 		return Command{}, err
 	}
 	cmd.Status = next
 	cmd.UpdatedAt = now
-	if _, err = tx.Exec(`INSERT INTO command_ack (command_id, tenant_id, device_id, ack_status, created_at)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO command_ack (command_id, tenant_id, device_id, ack_status, created_at)
 		SELECT $1, $2, $3, 'acked', $4 WHERE NOT EXISTS (SELECT 1 FROM command_ack WHERE command_id = $1 AND ack_status = 'acked')`, id, tenantID, deviceID, now); err != nil {
 		return Command{}, err
 	}
-	if _, err = tx.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'acked')`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO command_events (command_id, event_type) VALUES ($1, 'acked')`, id); err != nil {
 		return Command{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -675,8 +722,19 @@ func (s *PostgresStore) RequeueCommand(id string, retryAfter time.Duration) erro
 	return err
 }
 
-func (s *PostgresStore) ExpireCommands(now time.Time) (int64, error) {
-	rows, err := s.db.Query(`UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND deadline_at <= $1 RETURNING id`, now)
+// ExpireCommands marks 'sent' commands whose ACK deadline passed as timeout.
+// The NULL-deadline branch is a defensive backstop: MarkCommandSent always
+// writes deadline_at, but rows written by older versions (or by a manual
+// status flip) can sit in 'sent' with no deadline and would otherwise never
+// converge. nullDeadlineGrace <= 0 disables that backstop.
+func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error) {
+	query := `UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND deadline_at <= $1 RETURNING id`
+	args := []any{now}
+	if nullDeadlineGrace > 0 {
+		query = `UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND (deadline_at <= $1 OR (deadline_at IS NULL AND updated_at + $2::interval <= $1)) RETURNING id`
+		args = append(args, nullDeadlineGrace.String())
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -855,4 +913,23 @@ func translateSQLError(err error, kind string) error {
 		return fmt.Errorf("%s %w", kind, ErrAlreadyExists)
 	}
 	return err
+}
+
+// GetCommandForDelivery fails closed on database errors before an MQTT publish.
+func (s *PostgresStore) GetCommandForDelivery(ctx context.Context, id string) (Command, error) {
+	var cmd Command
+	var payload []byte
+	var deadline sql.NullTime
+	err := s.db.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at FROM commands WHERE id=$1`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
+	if err == sql.ErrNoRows {
+		return Command{}, ErrNotFound
+	}
+	if err != nil {
+		return Command{}, err
+	}
+	cmd.Payload = json.RawMessage(payload)
+	if deadline.Valid {
+		cmd.DeadlineAt = deadline.Time
+	}
+	return cmd, nil
 }

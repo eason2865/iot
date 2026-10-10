@@ -2,9 +2,12 @@ package platform
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/eclipse/paho.mqtt.golang"
@@ -47,6 +50,24 @@ type WorkerConfig struct {
 // still be delivered by paho after reconnect, which is acceptable under
 // at-least-once semantics.
 const mqttPublishTimeout = 5 * time.Second
+
+// ACK store retry policy: short and bounded, because the ACK handler runs on
+// the MQTT client's callback goroutine and must not block it for long.
+const (
+	ackStoreAttempts = 3
+	ackStoreBackoff  = 200 * time.Millisecond
+)
+
+// TDengine compensation scan: rows whose PostgreSQL record never got its
+// TDengine write confirmed (tdengine_written = FALSE) are retried in the
+// background, so a transient TDengine outage heals without a DLQ replay or
+// manual SQL. minAge keeps the scan away from rows the consumer is still
+// processing.
+const (
+	tdengineCompensateInterval = 30 * time.Second
+	tdengineCompensateMinAge   = 2 * time.Minute
+	tdengineCompensateBatch    = 500
+)
 
 type Worker struct {
 	store           Repository
@@ -93,6 +114,15 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
 			groupID = "iot-device-worker"
+		}
+		// Tenant-scoped workers share the topic subscription but skip (and
+		// commit past) other tenants' messages. If two workers with different
+		// allowlists shared one consumer group, whichever worker got assigned a
+		// partition would commit offsets for messages the other tenant's worker
+		// was supposed to deliver — silent data loss. Deriving the group from
+		// the allowlist gives each tenant subset its own offsets.
+		if len(w.tenantAllowlist) > 0 {
+			groupID = groupID + "-" + tenantSetHash(cfg.TenantIDs)
 		}
 		startOffset := cfg.KafkaStartOffset
 		if startOffset == 0 {
@@ -187,16 +217,48 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 		ack.CommandID = string(msg.Payload())
 	}
 	if w.store != nil {
-		if _, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID); err != nil {
-			log.Printf("command ack store error: %v", err)
+		// A failed AckCommand must not silently drop the ACK: without the
+		// transition the command expires as a false timeout. Retry the store
+		// write, then dead-letter the uplink so nothing is lost even if
+		// PostgreSQL stays down.
+		var err error
+		for attempt := 0; attempt < ackStoreAttempts; attempt++ {
+			if err = w.applyAck(ack); err == nil {
+				break
+			}
+			if IsNotFound(err) {
+				// Unknown or foreign command: retrying cannot help, and
+				// dead-lettering another tenant's probe adds noise. This is
+				// already the dominant benign case (late/duplicate ACKs).
+				break
+			}
+			if attempt+1 < ackStoreAttempts {
+				time.Sleep(ackStoreBackoff * time.Duration(attempt+1))
+			}
+		}
+		if err != nil {
+			if IsNotFound(err) {
+				log.Printf("command ack for unknown command: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
+				if w.metrics != nil {
+					w.metrics.IncDeviceWorker("ack", "error")
+				}
+				return
+			}
+			log.Printf("command ack store error after retries: %v", err)
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("ack", "error")
 			}
-		} else {
-			log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
-			if w.metrics != nil {
-				w.metrics.IncDeviceWorker("ack", "ok")
+			dlqMsg := kafka.Message{Topic: msg.Topic(), Key: []byte(ack.CommandID), Value: msg.Payload()}
+			dlqCtx, cancelDLQ := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelDLQ()
+			if dlqErr := publishDeadLetter(dlqCtx, w.dlqWriter, dlqMsg, StageCommandAck, err, w.metrics); dlqErr != nil {
+				log.Printf("command ack dead-letter error: %v", dlqErr)
 			}
+			return
+		}
+		log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("ack", "ok")
 		}
 	}
 }
@@ -220,6 +282,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	errCh := make(chan error, 2)
 	if w.telemetryReader != nil {
 		go func() { errCh <- w.consumeTelemetry(ctx) }()
+	}
+	if w.tdengine != nil {
+		go w.compensateUnwrittenTelemetry(ctx)
 	}
 	if w.commandReader != nil {
 		go func() { errCh <- w.consumeCommands(ctx) }()
@@ -290,7 +355,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry", "filtered")
 			}
-			_ = w.telemetryReader.CommitMessages(ctx, msg)
+			if err := w.telemetryReader.CommitMessages(ctx, msg); err != nil {
+				return err
+			}
 			continue
 		}
 		log.Printf("telemetry consumed: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
@@ -314,7 +381,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 					// compensate the missing TDengine write below.
 					if stored.TDengineWritten {
 						log.Printf("telemetry replay already complete: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-						_ = w.telemetryReader.CommitMessages(ctx, msg)
+						if err := w.telemetryReader.CommitMessages(ctx, msg); err != nil {
+							return err
+						}
 						continue
 					}
 					log.Printf("telemetry replay compensating tdengine: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
@@ -357,7 +426,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 		if w.metrics != nil {
 			w.metrics.IncDeviceWorker("telemetry", "ok")
 		}
-		_ = w.telemetryReader.CommitMessages(ctx, msg)
+		if err := w.telemetryReader.CommitMessages(ctx, msg); err != nil {
+			return err
+		}
 	}
 }
 
@@ -396,9 +467,32 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("command", "filtered")
 			}
-			_ = w.commandReader.CommitMessages(ctx, msg)
+			if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
+				return err
+			}
 			continue
 		}
+		// Publish-side idempotency: Kafka redelivery, DLQ replay, or a
+		// dispatcher requeue can present the same command event again after
+		// the device already received it. The store status is the source of
+		// truth — a command past 'published' must not be re-published, or the
+		// device would execute it twice. 'created'/'published' still publish:
+		// a requeue resets to 'created' on purpose, and a 'published' row
+		// means the first downlink never completed.
+		deliver, lookupErr := w.commandForDelivery(ctx, cmd)
+		if lookupErr != nil {
+			return fmt.Errorf("command delivery lookup: %w", lookupErr)
+		}
+		if !deliver {
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("command", "duplicate")
+			}
+			if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
+				return err
+			}
+			continue
+		}
+
 		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
 		if w.mqtt == nil {
 			// No MQTT downlink configured: the command can never be delivered,
@@ -414,7 +508,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("command", "error")
 			}
-			_ = w.commandReader.CommitMessages(ctx, msg)
+			if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
+				return err
+			}
 			continue
 		}
 		if w.mqtt != nil {
@@ -483,15 +579,133 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				MarkCommandSent(id string, deadline time.Time) error
 			}); ok {
 				if err := marker.MarkCommandSent(cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
-					log.Printf("command mark sent error: id=%s err=%v", cmd.ID, err)
+					return fmt.Errorf("command mark sent: id=%s: %w", cmd.ID, err)
 				}
 			}
 		}
 		if w.metrics != nil {
 			w.metrics.IncDeviceWorker("command", "ok")
 		}
-		_ = w.commandReader.CommitMessages(ctx, msg)
+		if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
+			return err
+		}
 	}
+}
+
+// compensateUnwrittenTelemetry periodically rewrites PostgreSQL telemetry rows
+// whose TDengine write never landed. It is best-effort by design: failures are
+// logged and retried on the next tick, so a TDengine outage never blocks or
+// kills the main consumers. The tenant allowlist applies here too — a scoped
+// worker must not write another tenant's rows.
+func (w *Worker) compensateUnwrittenTelemetry(ctx context.Context) {
+	scanner, ok := w.store.(interface {
+		ListUnwrittenTelemetry(context.Context, time.Time, int64, []string, int) ([]TelemetryRecord, int64, error)
+	})
+	if !ok || scanner == nil {
+		return
+	}
+	marker, ok := w.store.(interface {
+		MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
+	})
+	if !ok || marker == nil {
+		return
+	}
+	var afterID int64
+	tenants := make([]string, 0, len(w.tenantAllowlist))
+	for tenant := range w.tenantAllowlist {
+		tenants = append(tenants, tenant)
+	}
+	ticker := time.NewTicker(tdengineCompensateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		scanCtx, cancelScan := context.WithTimeout(ctx, 5*time.Second)
+		rows, nextID, err := scanner.ListUnwrittenTelemetry(scanCtx, time.Now().UTC().Add(-tdengineCompensateMinAge), afterID, tenants, tdengineCompensateBatch)
+		cancelScan()
+		if err != nil {
+			log.Printf("tdengine compensation scan error: %v", err)
+			continue
+		}
+		if len(rows) == 0 {
+			afterID = 0
+			continue
+		}
+		failedRound := false
+		for _, rec := range rows {
+			if ctx.Err() != nil {
+				return
+			}
+			if !w.tenantAllowed(rec.TenantID) {
+				continue
+			}
+			if err := w.tdengine.WriteTelemetry(rec); err != nil {
+				// Stop the round on the first write error: during a TDengine
+				// outage every row fails, and continuing only spams logs. The
+				// next tick resumes from the same oldest row.
+				log.Printf("tdengine compensation write error: msg=%s err=%v", rec.MsgID, err)
+				if w.metrics != nil {
+					w.metrics.IncDeviceWorker("telemetry_compensate", "error")
+				}
+				if errors.Is(err, errTDFieldRejected) {
+					continue
+				}
+				failedRound = true
+				break
+			}
+			if err := marker.MarkTelemetryTDengineWritten(rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
+				log.Printf("tdengine compensation mark error: msg=%s err=%v", rec.MsgID, err)
+				continue
+			}
+			log.Printf("tdengine compensation wrote: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("telemetry_compensate", "ok")
+			}
+		}
+		if !failedRound {
+			afterID = nextID
+		}
+	}
+}
+
+// commandAlreadyDelivered reports whether the stored command status proves the
+// downlink already reached (or conclusively failed to reach) the device, so a
+// replayed Kafka event must not trigger another MQTT publish.
+func commandAlreadyDelivered(status contracts.CommandStatus) bool {
+	switch status {
+	case contracts.CommandStatusSent, contracts.CommandStatusAcked, contracts.CommandStatusTimeout, contracts.CommandStatusFailed:
+		return true
+	}
+	return false
+}
+
+// tenantSetHash returns a stable short fingerprint of the tenant allowlist,
+// used to derive a per-subset consumer group suffix. Order and duplicates do
+// not change the hash: the same logical allowlist must map to the same group
+// across restarts and replicas.
+func tenantSetHash(tenantIDs []string) string {
+	seen := make(map[string]struct{}, len(tenantIDs))
+	normalized := make([]string, 0, len(tenantIDs))
+	for _, id := range tenantIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	sort.Strings(normalized)
+	h := sha256.New()
+	for _, id := range normalized {
+		_, _ = h.Write([]byte(id))
+		_, _ = h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))[:32]
 }
 
 func tenantAllowlist(tenantIDs []string) map[string]struct{} {
@@ -525,4 +739,48 @@ func sleepBeforeKafkaRetry(ctx context.Context) {
 	case <-ctx.Done():
 	case <-timer.C:
 	}
+}
+
+func (w *Worker) applyAck(ack CommandAckMessage) error {
+	if store, ok := w.store.(interface {
+		AckCommandContext(context.Context, string, string, string) (Command, error)
+	}); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
+		return err
+	}
+	_, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID)
+	return err
+}
+
+func (w *Worker) commandForDelivery(ctx context.Context, event Command) (bool, error) {
+	if w.store == nil {
+		return false, errors.New("command store is not configured")
+	}
+	var cmd Command
+	var err error
+	if store, ok := w.store.(interface {
+		GetCommandForDelivery(context.Context, string) (Command, error)
+	}); ok {
+		lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		cmd, err = store.GetCommandForDelivery(lookupCtx, event.ID)
+	} else {
+		var found bool
+		cmd, found = w.store.GetCommand(event.ID)
+		if !found {
+			err = ErrNotFound
+		}
+	}
+	if IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if cmd.TenantID != event.TenantID || cmd.DeviceID != event.DeviceID {
+		return false, nil
+	}
+	return cmd.Status == contracts.CommandStatusCreated || cmd.Status == contracts.CommandStatusPublished, nil
 }

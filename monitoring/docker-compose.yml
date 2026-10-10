@@ -12,49 +12,11 @@ services:
     ports:
       - "127.0.0.1:18080:18080"
 
-  k8s-forward-management-api-metrics:
-    image: rancher/kubectl:v1.34.9
-    container_name: iot-k8s-forward-management-api-metrics
-    restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/management-api", "18090:9100", "-n", "iot"]
-    volumes:
-      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
-    networks: [default, kind]
-    ports:
-      - "127.0.0.1:18090:18090"
-
-  k8s-forward-telemetry-ingestor:
-    image: rancher/kubectl:v1.34.9
-    container_name: iot-k8s-forward-telemetry-ingestor
-    restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/telemetry-ingestor", "18081:8080", "-n", "iot"]
-    volumes:
-      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
-    networks: [default, kind]
-    ports:
-      - "127.0.0.1:18081:18081"
-
-  k8s-forward-device-worker:
-    image: rancher/kubectl:v1.34.9
-    container_name: iot-k8s-forward-device-worker
-    restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/device-worker", "18082:8080", "-n", "iot"]
-    volumes:
-      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
-    networks: [default, kind]
-    ports:
-      - "127.0.0.1:18082:18082"
-
-  k8s-forward-iot-core:
-    image: rancher/kubectl:v1.34.9
-    container_name: iot-k8s-forward-iot-core
-    restart: unless-stopped
-    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/iot-core", "18091:9101", "-n", "iot"]
-    volumes:
-      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
-    networks: [default, kind]
-    ports:
-      - "127.0.0.1:18091:18091"
+  # The former per-Service metrics port-forwards are gone: Prometheus now
+  # discovers and scrapes every Pod individually through the apiserver pod
+  # proxy (see prometheus/prometheus.yml and prometheus/k8s-rbac.yaml), so a
+  # multi-replica deployment no longer monitors only the one Pod a
+  # Service-forward happened to land on.
 
   k8s-forward-emqx-listeners:
     image: rancher/kubectl:v1.34.9
@@ -90,7 +52,7 @@ services:
       retries: 12
 
   kafka:
-    image: bitnamilegacy/kafka:latest
+    image: bitnamilegacy/kafka:4.0.0@sha256:f45d5b813412e1ef7ce67b467309a84e4c6dc03d7626a0b6da867db9b69bd107
     container_name: kafka
     restart: unless-stopped
     ports:
@@ -112,7 +74,7 @@ services:
       - kafka-data:/bitnami/kafka
 
   tdengine:
-    image: tdengine/tdengine:latest
+    image: tdengine/tdengine:3.3.6.13@sha256:79d32ce8a42f64c7dbfc33946a36b3e176ea23c0cd695a1bc9e8aa889ca03b88
     container_name: tdengine
     restart: unless-stopped
     ports:
@@ -131,7 +93,8 @@ services:
       - tdengine-corefile:/corefile
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+    networks: [default, kind]
     container_name: prometheus
     restart: unless-stopped
     ports:
@@ -144,10 +107,14 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # ServiceAccount token for apiserver pod discovery/proxy scraping;
+      # provisioned by scripts/port-forward-local-monitoring.sh.
+      - ./prometheus/k8s-token:/etc/prometheus/k8s/token:ro
+      - ./prometheus/k8s-ca.crt:/etc/prometheus/k8s/ca.crt:ro
       - prometheus-data:/prometheus
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
     container_name: grafana
     restart: unless-stopped
     ports:
@@ -168,7 +135,7 @@ services:
       - prometheus
 
   demo:
-    image: iot-app:2.0
+    image: iot-app:2.41
     container_name: iot-demo
     restart: unless-stopped
     command: ["/usr/local/bin/demo"]

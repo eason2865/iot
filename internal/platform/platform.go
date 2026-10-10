@@ -66,6 +66,7 @@ func (a *App) Router() http.Handler {
 func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.healthHandler)
+	mux.HandleFunc("/readyz", a.readyHandler)
 	mux.Handle("/metrics", a.metrics.Handler())
 	if a.enableAPI {
 		mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)

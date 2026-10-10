@@ -6,13 +6,14 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
-APP_IMAGE="${APP_IMAGE:-iot-app:2.0}"
+APP_IMAGE="${APP_IMAGE:-iot-app:2.41}"
 DEPLOY_APP_IMAGE="$APP_IMAGE"
 DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
 EMQX_HOST="${EMQX_HOST:-emqx-listeners.emqx.svc.cluster.local}"
 EMQX_PORT="${EMQX_PORT:-1883}"
 MANAGEMENT_API_TOKEN="${IOT_MANAGEMENT_API_TOKEN:-local-development-token}"
+MANAGEMENT_API_TOKENS="${IOT_MANAGEMENT_API_TOKENS:-}"
 EMQX_INTERNAL_PASSWORD="${IOT_EMQX_INTERNAL_PASSWORD:-local-mqtt-service-password}"
 IOT_CORE_MQTT_AUTH_TOKEN="${IOT_CORE_MQTT_AUTH_TOKEN:-local-mqtt-auth-token}"
 POSTGRES_DSN="${IOT_POSTGRES_DSN:-postgres://iot:iot123@${DOCKER_GATEWAY_HOST}:5432/iot?sslmode=disable}"
@@ -27,7 +28,7 @@ wait_for_docker_deps() {
     --rm \
     -i \
     --restart=Never \
-    --image=busybox:1.36 \
+    --image=busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 \
     -n "$NAMESPACE" \
     --env="DOCKER_GATEWAY_HOST=$DOCKER_GATEWAY_HOST" \
     --env="DOCKER_GATEWAY_KAFKA_PORT=$DOCKER_GATEWAY_KAFKA_PORT" \
@@ -103,6 +104,7 @@ fi
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
   --from-literal=MANAGEMENT_API_TOKEN="$MANAGEMENT_API_TOKEN" \
+  --from-literal=MANAGEMENT_API_TOKENS="$MANAGEMENT_API_TOKENS" \
   --from-literal=EMQX_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=EMQX_INTERNAL_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \

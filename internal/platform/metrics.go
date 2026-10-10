@@ -267,10 +267,16 @@ func (m *Metrics) seedSeries() {
 			m.dlqPublishTotal.WithLabelValues(stage, result).Add(0)
 		}
 	}
-	for _, kind := range []string{"telemetry", "command", "ack"} {
+	for _, kind := range []string{"telemetry", "command", "ack", "telemetry_compensate"} {
 		for _, result := range results {
 			m.deviceWorkerTotal.WithLabelValues(kind, result).Add(0)
 		}
+	}
+	// Less frequent outcomes are seeded explicitly so alert expressions can
+	// reference them before the first occurrence.
+	for _, outcome := range []string{"filtered", "duplicate"} {
+		m.deviceWorkerTotal.WithLabelValues("telemetry", outcome).Add(0)
+		m.deviceWorkerTotal.WithLabelValues("command", outcome).Add(0)
 	}
 	for _, kind := range []string{"topology", "telemetry", "command", "ack"} {
 		for _, result := range results {
@@ -324,6 +330,8 @@ func routeLabel(path string) string {
 	switch {
 	case path == "/healthz":
 		return "/healthz"
+	case path == "/readyz":
+		return "/readyz"
 	case path == "/metrics":
 		return "/metrics"
 	case path == "/schemas/mqtt-envelope.json":

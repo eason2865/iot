@@ -25,6 +25,10 @@ const (
 	StageCommandTopic      = "command.topic"
 	StageCommandEncode     = "command.encode"
 	StageCommandMQTT       = "command.mqtt"
+	// StageCommandAck covers device ACK uplinks whose PostgreSQL transition
+	// failed even after retries: without a dead-letter copy the ACK would be
+	// silently lost and the command would wrongly expire as timeout.
+	StageCommandAck = "command.ack"
 )
 
 // DeadLetterStages lists every stage that can appear in iot.dlq. cmd/dlq-replay
@@ -41,6 +45,7 @@ func DeadLetterStages() []string {
 		StageCommandTopic,
 		StageCommandEncode,
 		StageCommandMQTT,
+		StageCommandAck,
 	}
 }
 

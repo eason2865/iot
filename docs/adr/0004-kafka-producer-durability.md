@@ -42,14 +42,13 @@ guarantee is again no stronger than `RequireOne`.
 - A configured `min.insync.replicas` above the replication factor is invalid at the
   broker, so it is dropped with a log line instead of failing topic creation or
   pretending the setting was applied.
-- Topic creation is idempotent (kafka-go skips `TopicAlreadyExists`), so these settings
-  only apply on first creation. Changing them on a live cluster is an operational task:
-  set `KAFKA_TOPIC_REPLICATION_FACTOR` / `KAFKA_TOPIC_MIN_INSYNC_REPLICAS` before the
-  services create the topics; afterwards `kafka-configs` can update the dynamic settings
-  (`min.insync.replicas`, `retention.ms`), but it cannot change the replication factor —
-  raising that requires `kafka-reassign-partitions` or recreating the topic. This service
-  will not detect or correct an existing topic's configuration; that is deliberate, so a
-  miscoordinated deploy cannot silently weaken a production cluster.
+- Topic creation is idempotent. Partition count (`KAFKA_TOPIC_PARTITIONS`) and
+  replication factor apply only when creating a missing topic; changing existing
+  partitions or replica assignments remains an operator action.
+- On startup, the service compares managed dynamic configuration entries
+  (`min.insync.replicas` and DLQ `retention.ms`) and reconciles drift through
+  `AlterConfigs`. Changes to the deployment's desired values therefore also affect
+  existing topics. Partition-count and replication-factor drift is logged only.
 - If telemetry throughput ever makes the round trip the bottleneck, the correct
   response is a larger `BatchSize`/`BatchTimeout`, not weaker acknowledgements.
 

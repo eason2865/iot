@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -73,7 +74,14 @@ func Run() error {
 	httpServer.Use(rest.ToMiddleware(limitRequestBodyMiddleware))
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
-	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddleware(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", ""))))
+	// MANAGEMENT_API_TOKEN is the global service token. MANAGEMENT_API_TOKENS
+	// optionally adds tenant-bound tokens as a JSON map {"token":"tenantId"};
+	// such a token may only touch requests naming its own tenant.
+	tenantTokens, err := platform.ParseTenantBoundTokens(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKENS", ""))
+	if err != nil {
+		return fmt.Errorf("invalid MANAGEMENT_API_TOKENS configuration")
+	}
+	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", ""), tenantTokens)))
 	defer httpServer.Stop()
 
 	go serveManagementAPIMetrics(metrics.Handler(), managementAPIMetricsHost(), managementAPIMetricsPort(), runtimeconfig.EnvOrDefault("MANAGEMENT_API_METRICS_PATH", "/metrics"))
@@ -121,6 +129,7 @@ func rpcClientConf() zrpc.RpcClientConf {
 func (s *Server) routes() []rest.Route {
 	return []rest.Route{
 		{Method: http.MethodGet, Path: "/healthz", Handler: s.healthHandler},
+		{Method: http.MethodGet, Path: "/readyz", Handler: s.readyHandler},
 		{Method: http.MethodGet, Path: "/schemas/mqtt-envelope.json", Handler: s.mqttEnvelopeSchemaHandler},
 		{Method: http.MethodPost, Path: "/api/v1/tenants", Handler: s.createTenantHandler},
 		{Method: http.MethodGet, Path: "/api/v1/tenants", Handler: s.listTenantsHandler},
@@ -140,6 +149,24 @@ func (s *Server) routes() []rest.Route {
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":      "ok",
+		"serviceName": "management-api",
+	})
+}
+
+// readyHandler is the deep readiness probe: management-api is useless without
+// its iot-core backend, so it verifies the gRPC path (which in turn reaches
+// PostgreSQL) with a bounded ListTenants call. A dead dependency must pull the
+// pod out of the Service endpoints instead of letting it black-hole requests
+// behind a static "ok".
+func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := s.rpc.ListTenants(ctx, &corev1.ListTenantsRequest{PageSize: 1}); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "iot-core unreachable: "+status.Convert(err).Message())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      "ready",
 		"serviceName": "management-api",
 	})
 }

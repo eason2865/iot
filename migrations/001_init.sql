@@ -74,3 +74,5 @@ CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_commands_tenant_device ON commands(tenant_id, device_id);
 CREATE INDEX IF NOT EXISTS idx_commands_dispatch ON commands(status, next_dispatch_at);
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tenant_id, device_id, received_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_unwritten ON telemetry_records(id) WHERE tdengine_written=FALSE;

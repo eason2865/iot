@@ -14,7 +14,7 @@ type CommandDispatchStore interface {
 	ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error)
 	MarkCommandPublished(id string) error
 	RescheduleCommand(id string, retryAfter time.Duration) error
-	ExpireCommands(now time.Time) (int64, error)
+	ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error)
 	RecoverStaleCommands(staleBefore time.Time, maxAttempts int) (int64, int64, error)
 }
 
@@ -59,7 +59,10 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	} else if requeued > 0 || failed > 0 {
 		log.Printf("command recovery scan requeued %d, failed %d commands", requeued, failed)
 	}
-	if expired, err := d.store.ExpireCommands(time.Now().UTC()); err != nil {
+	// The ACK timeout doubles as the grace period for legacy 'sent' rows that
+	// predate deadline_at: they are given one full timeout window from their
+	// last update before being expired.
+	if expired, err := d.store.ExpireCommands(time.Now().UTC(), d.timeout); err != nil {
 		log.Printf("command timeout scan error: %v", err)
 	} else if expired > 0 {
 		log.Printf("command timeout scan marked %d commands", expired)

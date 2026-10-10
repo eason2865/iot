@@ -1,9 +1,11 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"iot/internal/contracts"
 )
@@ -29,6 +31,32 @@ func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":      "ok",
+		"serviceName": a.serviceName,
+	})
+}
+
+// readyHandler is the deep readiness probe: unlike /healthz (process liveness
+// only) it pings the backing store when the store supports it, so a pod whose
+// PostgreSQL connection is dead leaves the Service endpoints instead of
+// black-holing traffic while reporting "ok". Stores without a PingContext
+// (the in-memory test store) are always ready.
+func (a *App) readyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if pinger, ok := a.store.(interface {
+		PingContext(context.Context) error
+	}); ok {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := pinger.PingContext(ctx); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "store unreachable: "+err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      "ready",
 		"serviceName": a.serviceName,
 	})
 }

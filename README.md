@@ -313,11 +313,11 @@ The recommended local setup is:
 - Docker: PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo, plus forwarders that reach Kubernetes services
 - Kubernetes: `management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`, plus an EMQX cluster in a separate `emqx` namespace
 
-Prometheus and Grafana are the observability layer for the whole IoT pipeline, but locally they deliberately run as standalone Docker Compose services rather than as part of the business Helm release. They scrape the four business services in Kubernetes through `k8s-forward-*` containers, so monitoring configuration and history survive business redeployments.
+Prometheus and Grafana are the observability layer for the whole IoT pipeline, but locally they deliberately run as standalone Docker Compose services rather than as part of the business Helm release. Prometheus discovers every Pod in the `iot` namespace via the Kubernetes API (`kubernetes_sd`, role `pod`) and scrapes each replica's `metrics` port through the apiserver pod proxy, so multi-replica services have no single-Pod blind spot; monitoring configuration and history survive business redeployments.
 
 Both local and production manage the EMQX cluster via the EMQX Operator in a dedicated `emqx` namespace. Production uses the licensed multi-node manifest [`deploy/emqx/cluster.yaml`](deploy/emqx/cluster.yaml); local uses the single-node manifest [`deploy/emqx/cluster.local.yaml`](deploy/emqx/cluster.local.yaml), which runs under the community license. Local Compose only port-forwards MQTT `1883` and Dashboard `18083` to that cluster; in production, MQTT should be exposed via an L4 load balancer with TLS, and the Dashboard should stay on the private network.
 
-All local IoT dependencies in Docker Desktop are grouped under the Compose project `iot`. Native services keep their original names: `postgres`, `kafka`, `tdengine`, `prometheus`, `grafana`; project-custom containers use the `iot-` prefix, e.g. `iot-demo` and `iot-k8s-forward-*`. EMQX runs in the Kubernetes `emqx` namespace.
+All local IoT dependencies in Docker Desktop are grouped under the Compose project `iot`. Native services keep their original names: `postgres`, `kafka`, `tdengine`, `prometheus`, `grafana`; project-custom containers use the `iot-` prefix, e.g. `iot-demo`, `iot-k8s-forward-management-api`, and `iot-k8s-forward-emqx-listeners`. EMQX runs in the Kubernetes `emqx` namespace.
 
 First make sure the local Docker dependencies are running, and that Kafka advertises listeners reachable from both host-side tests and k8s Pods:
 
@@ -367,7 +367,7 @@ The script enforces an apps-only deployment: it installs only `management-api`, 
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
 On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.0`.
 
-The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus scraping metrics behind k8s port-forwards.
+The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
 Create the channels for local Prometheus and demo to reach the k8s business services:
 
@@ -385,7 +385,6 @@ Verify:
 
 ```bash
 curl http://127.0.0.1:18080/healthz
-curl http://127.0.0.1:18090/metrics
 curl http://127.0.0.1:18084/healthz
 curl 'http://127.0.0.1:9090/api/v1/targets?state=active'
 docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
@@ -393,7 +392,7 @@ docker exec iot-grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'
 
 ## Local Monitoring
 
-Both Prometheus and Grafana run locally in Docker. Prometheus scrapes the k8s business services' `/metrics` through the `iot-k8s-forward-*` containers on the Docker network; the Grafana data source is preconfigured to the Compose-internal address `http://prometheus:9090`.
+Both Prometheus and Grafana run locally in Docker. Prometheus uses `kubernetes_sd` (role `pod`) with a dedicated ServiceAccount token to scrape every running Pod in the `iot` namespace that exposes a container port named `metrics`, via the apiserver pod proxy (`/api/v1/namespaces/<ns>/pods/<pod>:<port>/proxy/metrics`) — each replica of each service is scraped individually. The Grafana data source is preconfigured to the Compose-internal address `http://prometheus:9090`.
 Local monitoring now covers `management-api / iot-core / telemetry-ingestor / device-worker / demo`, with `iot-core` on its dedicated gRPC metrics port `9101`.
 
 ```bash
@@ -504,6 +503,31 @@ The `iot-core` gRPC port (9001) supports mutual TLS: when enabled, the server re
 - Enable in Helm via `grpcTLS.enabled=true`; the Secret (default `iot-grpc-tls`) must contain `ca.crt`, `server.crt`, `server.key`, `client.crt`, `client.key`, mounted at `/etc/iot/grpc-tls` in both Deployments.
 - The local script `scripts/helm-deploy-local.sh` enables mTLS by default: it automatically calls `scripts/gen-grpc-certs.sh` to generate a local self-signed CA plus server/client certificates (output to `deploy/grpc-certs/`, gitignored) and creates the Secret. Disable with `GRPC_TLS_ENABLED=0`.
 - In production, use certificates issued by a real CA or cert-manager, and note that Pods must be restarted for rotated certificates to take effect.
+
+### Reliability compensation and tenant access
+
+`MANAGEMENT_API_TOKEN` grants operator access. Optional `MANAGEMENT_API_TOKENS`
+contains a JSON object mapping token to tenant (`{"token-a":"tenant-a"}`), stored
+in the runtime Secret; the local script accepts `IOT_MANAGEMENT_API_TOKENS`.
+Tenant tokens cannot access global tenant/device lists and writes authorize the
+body tenant rather than an unrelated query parameter.
+
+Worker retries up to 500 persisted, unwritten telemetry records every 30 seconds,
+using an indexed ID cursor and excluding the last two minutes. Tenant filtering
+precedes LIMIT. `command.ack` replay requires `POSTGRES_DSN` and applies ACK state
+without sending a command. `mqtt.kafka` replay converts the MQTT envelope to a
+Kafka telemetry record; invalid MQTT records cannot be blindly replayed. Delivered
+and terminal commands skip downlink replay, but devices must still deduplicate by
+command ID. See ADR 0007 for the remaining at-least-once failure windows.
+
+`/healthz` checks liveness; `/readyz` checks PostgreSQL or the gateway's gRPC/core
+and database path. All four services have PDBs. `kafka.topicPartitions` configures
+new topics only; changing existing partitions is an operator action.
+
+Run `scripts/port-forward-local-monitoring.sh` before starting Compose monitoring
+for the first time. It provisions a namespace-scoped scraper token and CA. The
+scraper verifies TLS over the kind network, discovers every Pod, and retains the
+existing job labels. After a CA rotation rerun the script and recreate Prometheus.
 
 ## Development Guidelines
 

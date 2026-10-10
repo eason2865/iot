@@ -1,0 +1,58 @@
+# RBAC for the Compose-hosted Prometheus to discover and scrape every Pod in
+# the iot namespace individually via the apiserver pod proxy. Pod IPs are not
+# routable from the Docker network, so Prometheus scrapes
+# /api/v1/namespaces/<ns>/pods/<pod>:<port>/proxy/metrics on the apiserver
+# instead of a Service-backed port-forward (which pinned a single Pod and
+# silently blinded the other replicas).
+#
+# Apply with: kubectl apply -f monitoring/prometheus/k8s-rbac.yaml
+# Then export the token for the Compose mount:
+#   kubectl -n iot get secret prometheus-scraper-token \
+#     -o jsonpath='{.data.token}' | base64 -d > monitoring/prometheus/k8s-token
+# (scripts/port-forward-local-monitoring.sh does both.)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-scraper
+  namespace: iot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-scraper
+  namespace: iot
+rules:
+  # pods list/watch: kubernetes_sd pod discovery.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # pods/proxy get: scraping /metrics through the apiserver proxy.
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-scraper
+  namespace: iot
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-scraper
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-scraper
+    namespace: iot
+---
+# Kubernetes >= 1.24 no longer auto-creates ServiceAccount token Secrets, so
+# the long-lived token for the external (Docker-hosted) Prometheus is
+# provisioned explicitly.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-scraper-token
+  namespace: iot
+  annotations:
+    kubernetes.io/service-account.name: prometheus-scraper
+type: kubernetes.io/service-account-token

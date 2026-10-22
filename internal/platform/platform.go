@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -11,6 +12,7 @@ type Config struct {
 	Store              Repository
 	Publisher          MessagePublisher
 	Metrics            *Metrics
+	ReadinessCheck     func(context.Context) error
 	// EnableBusinessAPI registers the tenant/device/telemetry/command REST
 	// endpoints. It is opt-in and defaults to false for every service: those
 	// endpoints carry no authentication (see handlers.go), so enabling them by
@@ -22,13 +24,14 @@ type Config struct {
 }
 
 type App struct {
-	serviceName string
-	store       Repository
-	publisher   MessagePublisher
-	metrics     *Metrics
-	ttl         time.Duration
-	enableAPI   bool
-	router      http.Handler
+	serviceName    string
+	store          Repository
+	publisher      MessagePublisher
+	metrics        *Metrics
+	ttl            time.Duration
+	enableAPI      bool
+	router         http.Handler
+	readinessCheck func(context.Context) error
 }
 
 func New(cfg Config) *App {
@@ -37,10 +40,11 @@ func New(cfg Config) *App {
 		ttl = 5 * time.Minute
 	}
 	app := &App{
-		serviceName: cfg.ServiceName,
-		store:       cfg.Store,
-		publisher:   cfg.Publisher,
-		ttl:         ttl,
+		serviceName:    cfg.ServiceName,
+		store:          cfg.Store,
+		publisher:      cfg.Publisher,
+		readinessCheck: cfg.ReadinessCheck,
+		ttl:            ttl,
 		// Business REST is strictly opt-in: never inferred from ServiceName,
 		// because these routes have no auth middleware.
 		enableAPI: cfg.EnableBusinessAPI,

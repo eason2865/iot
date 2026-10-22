@@ -32,6 +32,7 @@ type runtimeResources struct {
 func Run(serviceName string) error {
 	platform.ConfigureStdLogger(serviceName)
 	platform.StartTracing(serviceName)
+	defer platform.StopTracing()
 
 	resources, err := buildRuntime(serviceName)
 	if err != nil {
@@ -43,19 +44,7 @@ func Run(serviceName string) error {
 		}
 	}
 
-	app := platform.New(platform.Config{
-		ServiceName:        serviceName,
-		DeviceHeartbeatTTL: 5 * time.Minute,
-		Store:              resources.store,
-		Publisher:          resources.publisher,
-		Metrics:            resources.metrics,
-		// EnableBusinessAPI is intentionally left false. bootstrap only launches
-		// telemetry-ingestor and device-worker, which must expose health/metrics
-		// only; their business REST routes have no auth middleware, so enabling
-		// them here would create an unauthenticated write API in-cluster.
-		// Public REST is served by management-api via internal/adminapi, which
-		// requires a bearer token.
-	})
+	app := newRuntimeApp(serviceName, resources)
 	srv := &http.Server{
 		Addr:    listenAddr(),
 		Handler: app.Router(),
@@ -113,6 +102,39 @@ func Run(serviceName string) error {
 		}
 		return err
 	}
+}
+
+func newRuntimeApp(serviceName string, resources *runtimeResources) *platform.App {
+	return platform.New(platform.Config{
+		ServiceName:        serviceName,
+		DeviceHeartbeatTTL: 5 * time.Minute,
+		Store:              resources.store,
+		Publisher:          resources.publisher,
+		Metrics:            resources.metrics,
+		ReadinessCheck: func(ctx context.Context) error {
+			if serviceName == "telemetry-ingestor" && resources.bridge == nil {
+				return fmt.Errorf("MQTT bridge is not configured")
+			}
+			if serviceName == "device-worker" && resources.worker == nil {
+				return fmt.Errorf("MQTT worker is not configured")
+			}
+			if resources.bridge != nil {
+				if err := resources.bridge.CheckReady(ctx); err != nil {
+					return err
+				}
+			}
+			if resources.worker != nil {
+				return resources.worker.CheckReady(ctx)
+			}
+			return nil
+		},
+		// EnableBusinessAPI is intentionally left false. bootstrap only launches
+		// telemetry-ingestor and device-worker, which must expose health/metrics
+		// only; their business REST routes have no auth middleware, so enabling
+		// them here would create an unauthenticated write API in-cluster.
+		// Public REST is served by management-api via internal/adminapi, which
+		// requires a bearer token.
+	})
 }
 
 func buildRuntime(serviceName string) (*runtimeResources, error) {

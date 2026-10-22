@@ -57,8 +57,8 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 ## Observability
 
 - Every service exposes `/metrics`
-- `management-api` and `iot-core` enable go-zero trace / log middleware
-- Each service starts an OpenTelemetry trace agent, writing to `/tmp/<service>-traces.log` by default. Helm mounts a writable 128Mi temporary volume for each non-root Pod; these local traces are lost when the Pod is replaced. Configure an external OTLP exporter for retained traces.
+- `management-api` uses access logs with an explicit field allowlist (method, route template, status, duration and request ID). Request/response bodies, headers, query strings and arbitrary panic values are excluded. Core RPC statistics also exclude request content.
+- Each service starts an OpenTelemetry trace agent. Default file traces use `/tmp/<service>-traces.log`, an 8 MiB active file and at most two 8 MiB backups (`.1`/`.2`), for at most 24 MiB per service. Existing oversized files at these paths are discarded when this retention policy starts. Rotation failures or individual records above the limit fail export instead of growing the file. Helm retains the writable 128Mi temporary volume; traces are lost when the Pod is replaced. Use an external OTLP exporter for retained traces. Root sampling defaults to 0.1; valid parent sampling decisions are preserved. `/healthz`, `/readyz` and `/metrics` are excluded, including the readiness RPC into core.
 - HTTP requests automatically get an `X-Request-Id`, propagated through the `management-api -> iot-core` gRPC call
 - `demo` requests to `management-api` carry a request id and trace context, making load-test/integration chains easy to follow
 - stdout logs are structured JSON, easy to search in containers and locally
@@ -66,7 +66,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
   - `OTEL_DISABLED=true`
   - `OTEL_BATCHER=file|jaeger|zipkin|otlpgrpc|otlphttp`
   - `OTEL_ENDPOINT=/tmp/iot-traces.log`
-  - `OTEL_SAMPLER=1.0`
+  - `OTEL_SAMPLER=0.1` (default; use `1.0` for full root sampling, range 0–1)
 
 ## Quick Start
 
@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.48`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.49`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -524,7 +524,10 @@ and terminal commands skip downlink replay, but devices must still deduplicate b
 command ID. See ADR 0007 for the remaining at-least-once failure windows.
 
 `/healthz` checks liveness; `/readyz` checks PostgreSQL or the gateway's gRPC/core
-and database path. All four services have PDBs. `kafka.topicPartitions` configures
+and database path. Ingestor and worker additionally require an open MQTT connection
+and confirmed QoS 1 subscriptions (every ACK filter for worker). Pending, rejected,
+reconnecting or stopping subscriptions fail readiness; a reconnect must confirm
+subscriptions again. All four services have PDBs. `kafka.topicPartitions` configures
 new topics only; changing existing partitions is an operator action.
 
 Run `scripts/port-forward-local-monitoring.sh` before starting Compose monitoring

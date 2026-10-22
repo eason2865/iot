@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -62,7 +63,17 @@ func ConfigureStdLogger(serviceName string) {
 	})
 }
 
+// Framework-managed exporters stay unchanged. File mode is initialized by
+// StartTracing so go-zero cannot replace the bounded writer with append-only I/O.
 func TraceConfig(serviceName string) trace.Config {
+	cfg := traceSettings(serviceName)
+	if cfg.Batcher == "file" {
+		cfg.Disabled = true
+	}
+	return cfg
+}
+
+func traceSettings(serviceName string) trace.Config {
 	if disabled := strings.EqualFold(os.Getenv("OTEL_DISABLED"), "true"); disabled {
 		return trace.Config{
 			Name:     serviceName,
@@ -87,10 +98,10 @@ func TraceConfig(serviceName string) trace.Config {
 		Name:     serviceName,
 		Endpoint: endpoint,
 		Batcher:  batcher,
-		Sampler:  1.0,
+		Sampler:  0.1,
 	}
 	if v := strings.TrimSpace(os.Getenv("OTEL_SAMPLER")); v != "" {
-		if sample, err := strconv.ParseFloat(v, 64); err == nil {
+		if sample, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(sample) && !math.IsInf(sample, 0) && sample >= 0 && sample <= 1 {
 			cfg.Sampler = sample
 		}
 	}
@@ -111,10 +122,6 @@ func ensureTraceEndpointDir(endpoint string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("trace endpoint directory create error: endpoint=%q error=%v", endpoint, err)
 	}
-}
-
-func StartTracing(serviceName string) {
-	trace.StartAgent(TraceConfig(serviceName))
 }
 
 type requestIDContextKey struct{}

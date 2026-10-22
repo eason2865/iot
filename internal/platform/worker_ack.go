@@ -31,6 +31,7 @@ func newWorkerAckState() *workerAckState {
 }
 
 func (w *Worker) failAck(err error) {
+	w.readiness.stop()
 	log.Print(err)
 	select {
 	case w.acks.fatal <- err:
@@ -39,6 +40,7 @@ func (w *Worker) failAck(err error) {
 }
 
 func (w *Worker) subscribeAckTopics(client mqtt.Client, topics []string) {
+	generation := w.readiness.reset()
 	ctx, cancel := context.WithTimeout(w.acks.ctx, 5*time.Second)
 	defer cancel()
 	for _, topic := range topics {
@@ -67,7 +69,9 @@ func (w *Worker) subscribeAckTopics(client mqtt.Client, topics []string) {
 			return
 		}
 	}
-	w.acks.readyOnce.Do(func() { close(w.acks.ready) })
+	if w.readiness.confirm(generation) {
+		w.acks.readyOnce.Do(func() { close(w.acks.ready) })
+	}
 }
 
 func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
@@ -155,6 +159,7 @@ func (w *Worker) applyAck(ack CommandAckMessage) error {
 // Stop admission before Wait so callbacks cannot race WaitGroup.Add. Keep MQTT
 // and the DLQ writer alive while admitted ACKs finish their persistence attempt.
 func (w *Worker) stopAckHandling() {
+	w.readiness.stop()
 	w.acks.mu.Lock()
 	w.acks.stopping = true
 	w.acks.mu.Unlock()

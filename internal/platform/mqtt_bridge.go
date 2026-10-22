@@ -46,6 +46,7 @@ type MQTTBridge struct {
 	stopping     bool
 	pending      sync.WaitGroup
 	errCh        chan error
+	readiness    mqttReadiness
 }
 
 func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Metrics) *MQTTBridge {
@@ -85,7 +86,11 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	// A callback only schedules work. Its return must never acknowledge a message
 	// still held solely in process memory.
 	opts.SetAutoAckDisabled(true)
+	// IsConnectionOpen fails readiness immediately on loss. Invalidate before
+	// reconnecting; OnConnectionLost is asynchronous and may arrive too late.
+	opts.OnReconnecting = func(mqtt.Client, *mqtt.ClientOptions) { b.readiness.reset() }
 	opts.OnConnect = func(client mqtt.Client) {
+		generation := b.readiness.reset()
 		log.Printf("mqtt bridge connected: filter=%s", filter)
 		token := client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
 			b.mu.Lock()
@@ -118,7 +123,9 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 		granted, present := sub.Result()[filter]
 		if !present || granted != 1 {
 			b.fail(fmt.Errorf("mqtt bridge subscription requires QoS 1: filter=%s SUBACK=%#x present=%t", filter, granted, present))
+			return
 		}
+		b.readiness.confirm(generation)
 	}
 	b.client = mqtt.NewClient(opts)
 	return b
@@ -181,6 +188,7 @@ func (b *MQTTBridge) deadLetter(msg mqtt.Message, stage string, cause error, dur
 }
 
 func (b *MQTTBridge) fail(err error) {
+	b.readiness.stop()
 	select {
 	case b.errCh <- err:
 	default:
@@ -216,6 +224,7 @@ func acquirePublishSlotContext(ctx context.Context, slots chan struct{}, timeout
 // stop closes admission before waiting so no callback can race WaitGroup.Add.
 // A bounded drain precedes cancellation; persisted inbox rows survive a forced stop.
 func (b *MQTTBridge) stop() {
+	b.readiness.stop()
 	b.mu.Lock()
 	b.stopping = true
 	b.mu.Unlock()
@@ -232,6 +241,13 @@ func (b *MQTTBridge) stop() {
 	if b.dlqWriter != nil {
 		_ = b.dlqWriter.Close()
 	}
+}
+
+func (b *MQTTBridge) CheckReady(context.Context) error {
+	if b == nil || b.client == nil || !b.client.IsConnectionOpen() || !b.readiness.ready() {
+		return errors.New("MQTT telemetry subscription is not ready")
+	}
+	return nil
 }
 
 func (b *MQTTBridge) Run(ctx context.Context) error {

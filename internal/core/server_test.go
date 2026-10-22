@@ -8,12 +8,31 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	corev1 "iot/proto/core/v1"
 )
 
 func TestRPCServerConfDoesNotRegisterWithEtcd(t *testing.T) {
 	conf := rpcServerConf()
 	if conf.HasEtcd() {
 		t.Fatalf("rpc server still configures etcd: %+v", conf.Etcd)
+	}
+}
+
+func TestRPCStatsNeverLogRequestContent(t *testing.T) {
+	ignored := rpcServerConf().Middlewares.StatConf.IgnoreContentMethods
+	for _, method := range corev1.CoreService_ServiceDesc.Methods {
+		name := "/" + corev1.CoreService_ServiceDesc.ServiceName + "/" + method.MethodName
+		found := false
+		for _, excluded := range ignored {
+			if name == excluded {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("RPC method can log request credentials: %s", name)
+		}
 	}
 }
 

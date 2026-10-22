@@ -135,7 +135,7 @@ services:
       - prometheus
 
   demo:
-    image: iot-app:2.48
+    image: iot-app:2.49
     container_name: iot-demo
     restart: unless-stopped
     command: ["/usr/local/bin/demo"]

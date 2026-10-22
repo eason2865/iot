@@ -80,6 +80,7 @@ type Worker struct {
 	tenantAllowlist map[string]struct{}
 	ackTimeout      time.Duration
 	acks            *workerAckState
+	readiness       mqttReadiness
 }
 
 func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, metrics *Metrics) *Worker {
@@ -170,6 +171,9 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		// Keep the worker alive while EMQX is starting or briefly unavailable.
 		opts.SetConnectRetry(true)
 		opts.SetConnectRetryInterval(2 * time.Second)
+		// Physical connection state covers loss; this synchronous callback
+		// invalidates grants before a reconnect can open the next connection.
+		opts.OnReconnecting = func(mqtt.Client, *mqtt.ClientOptions) { w.readiness.reset() }
 		ackTopics := normalizeAckTopicFilters(cfg)
 		opts.OnConnect = func(client mqtt.Client) {
 			w.subscribeAckTopics(client, ackTopics)
@@ -203,6 +207,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer func() {
+		w.readiness.stop()
 		cancel()
 		if w.telemetryReader != nil {
 			_ = w.telemetryReader.Close()
@@ -256,6 +261,13 @@ func (w *Worker) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func (w *Worker) CheckReady(context.Context) error {
+	if w == nil || w.mqtt == nil || !w.mqtt.IsConnectionOpen() || !w.readiness.ready() {
+		return errors.New("MQTT command ACK subscriptions are not ready")
+	}
+	return nil
 }
 
 func (w *Worker) consumeTelemetry(ctx context.Context) error {

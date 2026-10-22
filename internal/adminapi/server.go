@@ -54,26 +54,13 @@ func Run() error {
 	defer client.Conn().Close()
 
 	platform.ConfigureStdLogger("management-api")
+	platform.StartTracing("management-api")
+	defer platform.StopTracing()
 	metrics := platform.NewMetrics()
-	httpServer := rest.MustNewServer(rest.RestConf{
-		ServiceConf: service.ServiceConf{
-			Name:      "management-api",
-			Telemetry: platform.TraceConfig("management-api"),
-		},
-		Host:    listenHost(),
-		Port:    listenPort(),
-		Timeout: 3000,
-		Middlewares: rest.MiddlewaresConf{
-			Trace:      true,
-			Log:        true,
-			Prometheus: true,
-			Recover:    true,
-			Metrics:    true,
-			Timeout:    true,
-		},
-	})
+	httpServer := rest.MustNewServer(managementHTTPConf())
 	httpServer.Use(rest.ToMiddleware(limitRequestBodyMiddleware))
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
+	httpServer.Use(rest.ToMiddleware(platform.SafeHTTPLoggingMiddleware))
 	httpServer.Use(rest.ToMiddleware(metrics.HTTPMiddleware()))
 	// MANAGEMENT_API_TOKEN is the global service token. MANAGEMENT_API_TOKENS
 	// optionally adds tenant-bound tokens as a JSON map {"token":"tenantId"};
@@ -94,6 +81,27 @@ func Run() error {
 	httpServer.AddRoutes(api.routes())
 	httpServer.Start()
 	return nil
+}
+
+func managementHTTPConf() rest.RestConf {
+	return rest.RestConf{
+		ServiceConf: service.ServiceConf{
+			Name:      "management-api",
+			Telemetry: platform.TraceConfig("management-api"),
+		},
+		Host:    listenHost(),
+		Port:    listenPort(),
+		Timeout: 3000,
+		Middlewares: rest.MiddlewaresConf{
+			Trace:      true,
+			Log:        false,
+			Prometheus: true,
+			Recover:    false, // SafeHTTPLoggingMiddleware also handles panics.
+			Metrics:    true,
+			Timeout:    true,
+		},
+		TraceIgnorePaths: []string{"/healthz", "/readyz", "/metrics"},
+	}
 }
 
 func newRPCClient() (zrpc.Client, error) {
@@ -160,7 +168,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 // pod out of the Service endpoints instead of letting it black-hole requests
 // behind a static "ok".
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(platform.ProbeContext(r.Context()), 2*time.Second)
 	defer cancel()
 	if _, err := s.rpc.ListTenants(ctx, &corev1.ListTenantsRequest{PageSize: 1}); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "iot-core unreachable: "+status.Convert(err).Message())

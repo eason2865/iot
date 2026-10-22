@@ -2,6 +2,20 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 凭据日志、MQTT 就绪与 trace 容量修复（2026-10-22，发布版本 2.49）
+
+- 修复 2.48 三类问题：management-api 默认 5xx 请求转储泄露凭据；MQTT 连接/订阅未完成仍就绪；默认全量 file tracing 追加无上限且探针产出 trace。
+- management-api 禁用 go-zero 原生 Log/Recover 请求记录，接入 SafeHTTPLoggingMiddleware。访问日志只保留方法、路由模板、状态码、耗时和 requestId，不复制请求/响应正文、请求头、URL 查询或任意 panic 值；panic 保留堆栈并恢复为 500。原请求不改写，Bearer/设备 secret 仍可正常鉴权和传入处理层。同链路 core RPC 原生 Stat 也会记录设备 secret，本轮按生成的全部 core 方法配置 IgnoreContentMethods，保留统计和慢调用元数据，不记录请求内容。
+- bootstrap 的 newRuntimeApp 给 ingestor/worker 注入 ReadinessCheck，/readyz 在 PG 健康之外还要求物理 MQTT 连接打开、所需全部订阅实际获准 QoS 1。构造后/初始订阅/部分订阅/拒绝/重连等待/停机均为 503，全部确认才为 200；/healthz 始终是浅存活检查。PG ping 前后各检查一次运行状态，避免 ping 期间断线仍返回成功；生产所需模块缺失同样失败关闭，测试 harness 可不传回调。
+- MQTT 就绪状态由锁和连接代际管理；同步 OnReconnecting 在新连接打开前清除旧 grant，OnConnect 开始新代际，迟到 SUBACK 只能确认本代。物理连接状态覆盖断线，不用可能迟到的异步 OnConnectionLost 清空新连接状态。fatal/退出首先停止就绪；worker 首次业务启动 ready 通知同样要求代际确认成功。
+- 默认 file tracing 改为项目管理的 OpenTelemetry provider：8 MiB 活动文件 + 两个最多 8 MiB 的 .1/.2 备份，每服务最多 24 MiB；轮转/文件写入串行，轮转失败不继续追加，单条超限导出失败。初始化清理这些受管路径中的超限旧文件，以执行新保留策略；本地 traces 是会淘汰的诊断缓冲，不是审计存储。Helm 保留原 128Mi /tmp 卷，长期保存使用外部 OTLP。
+- TraceConfig 对 file 模式禁用框架自带 append-only exporter，由各服务 Run 显式 StartTracing 启动受限 exporter；外部 batcher 保留 go-zero 原实现。默认根 span 采样率从 1 改为 0.1，仍保留合法父级采样决定，OTEL_SAMPLER=1 可全量；非法、NaN/Inf 和越界采样配置回退默认值。Shutdown/flush 最多 2s。既有 stdouttrace/SDK 从间接改为直接依赖，版本与 go.sum 未变。
+- management-api 的 TraceIgnorePaths 排除 /healthz、/readyz、/metrics；readyHandler 用有效未采样父上下文，并覆盖 outgoing traceparent，使未启用客户端 tracing 的 RPC 同样不会在 core 另起根 span，避免只过滤 HTTP 后就绪 RPC 继续增长文件。
+- 回归先红后绿：真实 go-zero LogHandler 的 5xx 输出出现四种虚构 Bearer/secret/query/cookie 值；生产 HTTP 装配中的两种 MQTT 服务初始 /readyz 返回 200；SDK 压力写 512 个大属性 span 时仅出现一个未轮转文件。修复后成功/失败/401/panic/超过 500ms 慢请求均不输出这些凭据，正文与 Authorization 原值仍到达处理器；core 配置覆盖所有当前生成 RPC 方法。
+- MQTT 协议 peer 覆盖两种服务的初始等待、worker 两个 ACK 订阅部分成功、确认后 200、断线 503、重连重新确认、停止 503；旧代际 SUBACK 不能放开 ready 或首次业务启动门控。全量采样下各 128 次 /healthz 和 /readyz 导出 0 span，业务 HTTP 仍导出 span。文件压力/并发写入/超限单条/轮转故障/旧文件清理验证每文件和备份数量受限；未做真实 Pod 存储耗尽或滚动替换测试，不声称覆盖这些实测。
+- 验证通过：go test -count=1 ./...（独立 PG、真实 Kafka/TDengine）、go test -race ./internal/... ./cmd/dlq-replay、最终慢请求/探针/文件和 MQTT 代际门控定向 race、go vet ./...、格式/差异检查、7 个 Linux arm64 二进制构建、Helm 双 profile lint/template、Compose config、部署脚本语法及 protobuf 重生零漂移。
+- 默认镜像 iot-app:2.49、Chart 0.2.6；镜像已构建，manifest list sha256:f5df3b2f69ef10d7aa71e8a11a882b21437b48148db216b0b64731e89aca8788。双语 README 与新增 ADR 0009 同步。无产品 SQL/DDL 变更。按仓库规则在 main 提交、打 2.49 tag 并一起推送；本轮不部署业务服务，上次实际部署记录仍为 2.43。验证仅使用虚构凭据、临时 trace 目录、独立 PG 容器/schema 和私有 Kafka/TDengine 资源，完成后清理，不改运行服务数据或配置。
+
 ## 死信容量与遥测接收时间修复（2026-10-22，发布版本 2.48）
 
 - 修复 2.47 三类复现：约 800 KiB 原文包装 Base64 后超过 DLQ 默认上限；历史 Kafka 遥测首次入 PG 丢失 ReceivedAt 导致假在线；并发事务晚提交覆盖较新设备状态。

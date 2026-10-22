@@ -25,6 +25,7 @@ import (
 func Run() error {
 	platform.ConfigureStdLogger("demo")
 	platform.StartTracing("demo")
+	defer platform.StopTracing()
 
 	metrics := platform.NewMetrics()
 	cfg := Config{

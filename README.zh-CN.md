@@ -57,8 +57,8 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 ## 观测
 
 - 每个服务都暴露 `/metrics`
-- `management-api` 和 `iot-core` 已启用 go-zero 的 trace / log middleware
-- 服务启动时会开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`。Helm 为非 root Pod 挂载可写的 128Mi 临时卷；Pod 重建后本地 trace 丢失，需要保留时配置外部 OTLP exporter。
+- `management-api` 的访问日志仅记录方法、路由模板、状态码、耗时和请求 ID，不记录请求/响应正文、请求头、查询参数或任意 panic 内容；核心 RPC 统计日志也不记录请求正文。
+- 服务启动时开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`。单文件最多 8 MiB，保留 `.1`/`.2` 两个备份，每个服务合计最多 24 MiB；启用轮转时丢弃这些路径中原有的超限文件。轮转失败或单条 trace 超限时导出失败，不继续追加突破上限。Helm 保留可写的 128Mi 临时卷，Pod 重建后本地 trace 丢失；长期保留请配置外部 OTLP exporter。根 span 默认采样率为 0.1，子 span 保留父级采样决定；`/healthz`、`/readyz`、`/metrics` 及就绪检查到核心的 RPC 不产生 trace。
 - HTTP 请求会自动补 `X-Request-Id`，并透传到 `management-api -> iot-core` 的 gRPC 调用
 - `demo` 发往 `management-api` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
 - 标准输出日志已切换为结构化 JSON，便于在容器和本地直接检索
@@ -66,7 +66,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
   - `OTEL_DISABLED=true`
   - `OTEL_BATCHER=file|jaeger|zipkin|otlpgrpc|otlphttp`
   - `OTEL_ENDPOINT=/tmp/iot-traces.log`
-  - `OTEL_SAMPLER=1.0`
+  - `OTEL_SAMPLER=0.1`（默认，设为 `1.0` 全量采样根 span，合法范围 0–1）
 
 ## 快速开始
 
@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.48`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.49`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -513,7 +513,7 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 
 worker 每 30 秒按 ID 游标扫描最多 500 条、接收时间超过两分钟的未完成遥测，补写 TDengine 并更新标记。租户过滤在 LIMIT 前完成。`command.ack` 死信重放需要 `POSTGRES_DSN`，直接补写 ACK；`mqtt.kafka` 重放转换为 Kafka 遥测记录，非法 MQTT 消息不可直接重放。已 sent 或进入终态的命令重放跳过 MQTT 下发，设备仍需按 commandId 去重，详细语义见 ADR 0007。
 
-`/healthz` 用于存活检查；`/readyz` 检查 PostgreSQL，management-api 则检查 gRPC 到核心及 PostgreSQL 的完整路径。四个服务均配置 PDB。Kafka 分区数可通过 `kafka.topicPartitions` 设置，只对新 topic 生效；现存 topic 扩分区须人工执行。
+`/healthz` 用于存活检查；`/readyz` 检查 PostgreSQL，management-api 则检查 gRPC 到核心及 PostgreSQL 的完整路径。ingestor 和 worker 还必须有已连接的 MQTT 且所有所需订阅实际获准 QoS 1；未订阅、部分订阅、拒绝、断线、重连待确认和停机时不就绪，重连后重新确认全部订阅。四个服务均配置 PDB。Kafka 分区数可通过 `kafka.topicPartitions` 设置，只对新 topic 生效；现存 topic 扩分区须人工执行。
 
 本地监控首次启动前执行 `scripts/port-forward-local-monitoring.sh`，生成专用只读 token 和 CA 文件。Prometheus 通过 kind 网络访问 apiserver，校验证书并逐 Pod 抓取，保留原有 job 标签以兼容看板。CA 轮换后需重新运行脚本并重建 Prometheus 容器。
 

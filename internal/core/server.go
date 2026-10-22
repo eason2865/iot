@@ -29,6 +29,8 @@ const auxShutdownTimeout = 2 * time.Second
 
 func Run() error {
 	platform.ConfigureStdLogger("iot-core")
+	platform.StartTracing("iot-core")
+	defer platform.StopTracing()
 	metrics := platform.NewMetrics()
 
 	// Background workers, not request handlers, are tied to SIGINT/SIGTERM so
@@ -199,6 +201,10 @@ func mqttAuthMux(authenticator platform.DeviceAuthenticator, internalPassword, c
 }
 
 func rpcServerConf() zrpc.RpcServerConf {
+	ignored := make([]string, 0, len(corev1.CoreService_ServiceDesc.Methods))
+	for _, method := range corev1.CoreService_ServiceDesc.Methods {
+		ignored = append(ignored, "/"+corev1.CoreService_ServiceDesc.ServiceName+"/"+method.MethodName)
+	}
 	return zrpc.RpcServerConf{
 		ServiceConf: service.ServiceConf{
 			Name:      "iot-core",
@@ -209,6 +215,7 @@ func rpcServerConf() zrpc.RpcServerConf {
 			Trace:      true,
 			Recover:    true,
 			Stat:       true,
+			StatConf:   zrpc.StatConf{IgnoreContentMethods: ignored},
 			Prometheus: true,
 			Breaker:    true,
 		},

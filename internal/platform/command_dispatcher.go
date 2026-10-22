@@ -38,10 +38,29 @@ func (d *CommandDispatcher) Run(ctx context.Context) {
 	if d == nil || d.store == nil || d.publisher == nil {
 		return
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	scansDone := make(chan struct{})
+	go func() {
+		defer close(scansDone)
+		ticker := time.NewTicker(d.pollEvery)
+		defer ticker.Stop()
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			d.scanCommands(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	defer func() { cancel(); <-scansDone }()
 	ticker := time.NewTicker(d.pollEvery)
 	defer ticker.Stop()
 	for {
-		d.dispatchOnce(ctx)
+		d.dispatchPending(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -51,6 +70,11 @@ func (d *CommandDispatcher) Run(ctx context.Context) {
 }
 
 func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
+	d.scanCommands(ctx)
+	d.dispatchPending(ctx)
+}
+
+func (d *CommandDispatcher) scanCommands(ctx context.Context) {
 	// Requeue commands stranded in 'published' (Kafka event never confirmed by
 	// the worker) and fail commands that exhausted dispatch attempts.
 	staleBefore := time.Now().UTC().Add(-d.timeout)
@@ -67,6 +91,9 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	} else if expired > 0 {
 		log.Printf("command timeout scan marked %d commands", expired)
 	}
+}
+
+func (d *CommandDispatcher) dispatchPending(ctx context.Context) {
 	// Claim immediately before publishing, so queued commands do not spend
 	// their lease waiting for earlier Kafka calls in the batch.
 	for i := 0; i < d.batchSize && ctx.Err() == nil; i++ {

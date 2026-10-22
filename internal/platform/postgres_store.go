@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"golang.org/x/crypto/bcrypt"
 
 	"iot/internal/contracts"
 	"iot/migrations"
@@ -128,7 +127,7 @@ func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
 			if err != nil {
 				return fmt.Errorf("legacy device credential is invalid: %w", err)
 			}
-		} else if _, err := bcrypt.Cost([]byte(hash)); err != nil {
+		} else if !validBcryptEncoding(hash) {
 			return fmt.Errorf("legacy device hash is invalid; migration rolled back")
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE devices SET secret_hash=$1,secret=NULL WHERE tenant_id=$2 AND device_id=$3`, hash, c.tenant, c.device); err != nil {
@@ -143,6 +142,9 @@ func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
 }
 
 func (s *PostgresStore) CreateTenantContext(ctx context.Context, t Tenant) (Tenant, error) {
+	if err := contracts.ValidateMetadataText(t.Name); err != nil {
+		return Tenant{}, err
+	}
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
 	if !contracts.IsValidTenantID(t.ID) {
@@ -205,21 +207,27 @@ func (s *PostgresStore) ListTenantsPageContext(ctx context.Context, page PageReq
 		return nil, "", err
 	}
 	defer rows.Close()
+	next := ""
+	var budget responsePageBudget
 	var out []Tenant
 	for rows.Next() {
 		var item Tenant
 		if err := rows.Scan(&item.ID, &item.Name); err != nil {
 			return nil, "", err
 		}
+		accepted, err := budget.accept(tenantListBytes(item), len(out), page.Size)
+		if err != nil {
+			return nil, "", err
+		}
+		if !accepted {
+			last := out[len(out)-1]
+			next = encodeCursor(last.ID)
+			break
+		}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
-	}
-	next := ""
-	if len(out) > page.Size {
-		next = encodeCursor(out[page.Size-1].ID)
-		out = out[:page.Size]
 	}
 	return out, next, nil
 }
@@ -246,21 +254,27 @@ func (s *PostgresStore) ListDevicesPageContext(ctx context.Context, page PageReq
 		return nil, "", err
 	}
 	defer rows.Close()
+	next := ""
+	var budget responsePageBudget
 	var out []Device
 	for rows.Next() {
 		var item Device
 		if err := rows.Scan(&item.TenantID, &item.DeviceID, &item.ProductID, &item.CreatedAt); err != nil {
 			return nil, "", err
 		}
+		accepted, err := budget.accept(deviceListBytes(item), len(out), page.Size)
+		if err != nil {
+			return nil, "", err
+		}
+		if !accepted {
+			last := out[len(out)-1]
+			next = encodeDeviceCursor(last.TenantID, last.DeviceID)
+			break
+		}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
-	}
-	next := ""
-	if len(out) > page.Size {
-		next = encodeDeviceCursor(out[page.Size-1].TenantID, out[page.Size-1].DeviceID)
-		out = out[:page.Size]
 	}
 	return out, next, nil
 }
@@ -270,6 +284,9 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 }
 
 func (s *PostgresStore) CreateDeviceContext(ctx context.Context, d Device) (Device, error) {
+	if err := contracts.ValidateMetadataText(d.ProductID); err != nil {
+		return Device{}, err
+	}
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
 	if !contracts.IsValidTenantID(d.TenantID) || !contracts.IsValidTopicPart(d.DeviceID) {
@@ -401,6 +418,15 @@ func (s *PostgresStore) RestoreTelemetryContext(ctx context.Context, rec Telemet
 	}
 	defer tx.Rollback()
 	if err := requireDevice(ctx, tx, rec.TenantID, rec.DeviceID); err != nil {
+		return TelemetryRecord{}, err
+	}
+	// Recheck the actual normalized bytes as a defense against differences in
+	// PostgreSQL representation; the preflight estimate already bounds DB work.
+	var normalized []byte
+	if err := tx.QueryRowContext(ctx, `SELECT $1::jsonb`, []byte(rec.Payload)).Scan(&normalized); err != nil {
+		return TelemetryRecord{}, err
+	}
+	if err := contracts.ValidateTelemetryPayload(normalized); err != nil {
 		return TelemetryRecord{}, err
 	}
 	payloadBytes, err := json.Marshal(rec.Payload)
@@ -565,6 +591,8 @@ func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageR
 		return nil, "", err
 	}
 	defer rows.Close()
+	next := ""
+	var budget responsePageBudget
 	var out []TelemetryRecord
 	for rows.Next() {
 		var rec TelemetryRecord
@@ -573,15 +601,19 @@ func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageR
 			return nil, "", err
 		}
 		rec.Payload = json.RawMessage(payload)
+		accepted, err := budget.accept(telemetryListBytes(rec), len(out), page.Size)
+		if err != nil {
+			return nil, "", err
+		}
+		if !accepted {
+			last := out[len(out)-1]
+			next = encodeTelemetryCursor(last.ReceivedAt, last.MsgID)
+			break
+		}
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
-	}
-	next := ""
-	if len(out) > page.Size {
-		next = encodeTelemetryCursor(out[page.Size-1].ReceivedAt, out[page.Size-1].MsgID)
-		out = out[:page.Size]
 	}
 	return out, next, nil
 }
@@ -967,15 +999,27 @@ ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt),
 		return nil, "", err
 	}
 	defer rows.Close()
-	out, err := scanCommands(rows)
-	if err != nil {
-		return nil, "", err
-	}
+	var out []Command
 	next := ""
-	if len(out) > page.Size {
-		last := out[page.Size-1]
-		next = encodeCommandCursor(last.CreatedAt, last.ID)
-		out = out[:page.Size]
+	var budget responsePageBudget
+	for rows.Next() {
+		cmd, err := scanCommandRow(rows)
+		if err != nil {
+			return nil, "", err
+		}
+		accepted, err := budget.accept(commandListBytes(cmd), len(out), page.Size)
+		if err != nil {
+			return nil, "", err
+		}
+		if !accepted {
+			last := out[len(out)-1]
+			next = encodeCommandCursor(last.CreatedAt, last.ID)
+			break
+		}
+		out = append(out, cmd)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
 	}
 	return out, next, nil
 }
@@ -1001,15 +1045,9 @@ type commandRows interface {
 func scanCommands(rows commandRows) ([]Command, error) {
 	var out []Command
 	for rows.Next() {
-		var cmd Command
-		var payload []byte
-		var deadline sql.NullTime
-		if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err != nil {
+		cmd, err := scanCommandRow(rows)
+		if err != nil {
 			return nil, err
-		}
-		cmd.Payload = json.RawMessage(payload)
-		if deadline.Valid {
-			cmd.DeadlineAt = deadline.Time
 		}
 		out = append(out, cmd)
 	}
@@ -1043,6 +1081,20 @@ func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Comma
 		return Command{}, ErrNotFound
 	}
 	if err != nil {
+		return Command{}, err
+	}
+	cmd.Payload = json.RawMessage(payload)
+	if deadline.Valid {
+		cmd.DeadlineAt = deadline.Time
+	}
+	return cmd, nil
+}
+
+func scanCommandRow(rows interface{ Scan(...any) error }) (Command, error) {
+	var cmd Command
+	var payload []byte
+	var deadline sql.NullTime
+	if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err != nil {
 		return Command{}, err
 	}
 	cmd.Payload = json.RawMessage(payload)

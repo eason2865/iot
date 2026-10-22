@@ -94,3 +94,9 @@ guarantee is again no stronger than `RequireOne`.
 - Deployments that raise only the environment variables but leave the topics at
   replication factor 1 gain nothing. The prerequisites above are part of the decision,
   not optional guidance.
+
+Bootstrap discovery tries every configured address within the shared attempt
+budget, reserving time for controller operations. Each failed or unresponsive
+address has a bounded share; successful discovery closes its probe before the
+controller connection is opened. This handles bootstrap endpoint loss without
+weakening the existing topic verification or total startup timeout.

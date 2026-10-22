@@ -3,6 +3,8 @@ package platform
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -77,5 +79,38 @@ func TestKafkaInitializationRejectsReplicaAndPartitionDrift(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "operational change required") {
 			t.Fatalf("drift did not block startup: cfg=%+v err=%v", cfg, err)
 		}
+	}
+}
+
+func TestKafkaBootstrapFallback(t *testing.T) {
+	for _, stalled := range []bool{false, true} {
+		t.Run(fmt.Sprint(stalled), func(t *testing.T) {
+			brokers, topic := regressionKafkaTopic(t)
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			address := listener.Addr().String()
+			defer listener.Close()
+			if stalled {
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					c, e := listener.Accept()
+					if e == nil {
+						defer c.Close()
+						_, _ = io.Copy(io.Discard, c)
+					}
+				}()
+				defer func() { listener.Close(); <-done }()
+			} else {
+				listener.Close()
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+			defer cancel()
+			if err = ensureKafkaTopics(ctx, append([]string{address}, brokers...), KafkaTopicConfig{}, topic); err != nil {
+				t.Fatalf("healthy second bootstrap was ignored: %v", err)
+			}
+		})
 	}
 }

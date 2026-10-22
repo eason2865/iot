@@ -47,6 +47,9 @@ func deviceKey(tenantID, deviceID string) string {
 }
 
 func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
+	if err := contracts.ValidateMetadataText(t.Name); err != nil {
+		return Tenant{}, err
+	}
 	if !contracts.IsValidTenantID(t.ID) {
 		return Tenant{}, contracts.ErrInvalidTopicPart
 	}
@@ -70,6 +73,9 @@ func (s *memoryStore) ListTenants() []Tenant {
 }
 
 func (s *memoryStore) CreateDevice(d Device) (Device, error) {
+	if err := contracts.ValidateMetadataText(d.ProductID); err != nil {
+		return Device{}, err
+	}
 	if err := contracts.ValidateDeviceSecret(d.Secret); err != nil {
 		return Device{}, err
 	}

@@ -87,7 +87,7 @@ func ValidateTelemetryPayload(raw json.RawMessage) error {
 	if len(value) == 0 || value[0] != '{' || !utf8.Valid(raw) || !json.Valid(raw) {
 		return fmt.Errorf("%w: payload is required and must be a JSON object", ErrInvalidEnvelope)
 	}
-	if err := ValidateJSONB(raw); err != nil {
+	if err := validateJSONBBudget(raw, MaxTelemetryPayloadBytes); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidEnvelope, err)
 	}
 	return nil

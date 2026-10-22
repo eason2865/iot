@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -151,12 +152,7 @@ func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConf
 		return nil
 	}
 
-	conn, closeConn, err := dialKafkaSetup(ctx, brokers[0])
-	if err != nil {
-		return err
-	}
-	controller, err := conn.Controller()
-	closeConn()
+	controller, err := discoverKafkaController(ctx, brokers)
 	if err != nil {
 		return err
 	}
@@ -311,4 +307,34 @@ func driftedConfigEntries(live []kafka.DescribeConfigResponseConfigEntry, desire
 		}
 	}
 	return drift
+}
+
+// Share the attempt deadline between bootstrap addresses and reserve time for
+// controller operations. One unresponsive address cannot consume every retry.
+func discoverKafkaController(ctx context.Context, brokers []string) (kafka.Broker, error) {
+	var failures []error
+	for i, address := range brokers {
+		if err := ctx.Err(); err != nil {
+			return kafka.Broker{}, err
+		}
+		timeout := time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			timeout = time.Until(deadline) / time.Duration(len(brokers)-i+1)
+		}
+		probe, cancel := context.WithTimeout(ctx, timeout)
+		conn, closeConn, err := dialKafkaSetup(probe, address)
+		if err == nil {
+			controller, lookupErr := conn.Controller()
+			closeConn()
+			cancel()
+			if lookupErr == nil {
+				return controller, nil
+			}
+			err = lookupErr
+		} else {
+			cancel()
+		}
+		failures = append(failures, fmt.Errorf("bootstrap %s: %w", address, err))
+	}
+	return kafka.Broker{}, errors.Join(failures...)
 }

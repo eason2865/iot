@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.51`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.52`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -611,3 +611,24 @@ plaintext even when a hash already exists, preserves valid hashes, and removes t
 legacy plaintext column default. Invalid legacy credentials roll the migration back.
 TDengine writes integer milliseconds, independent of connection timezone; existing
 shifted history is not repaired automatically.
+
+
+Device credentials cannot use MQTT ClientIDs reserved for worker, ingestor or demo
+services (base names and hyphen-suffixed forms). Existing other device ClientIDs
+remain compatible; strict per-device ClientID binding requires a device migration.
+Legacy mixed-secret migration verifies full canonical bcrypt encoding before
+clearing plaintext and rolls back malformed credentials.
+
+JSONB preflight budgets the expanded numeric/text representation without building
+giant decimal strings. Telemetry payloads have a conservative 1 MiB minus 4096
+bytes budget; other JSONB inputs and individual metadata fields are limited to
+1 MiB. PostgreSQL normalization is checked again before telemetry INSERT. Inputs
+that exceed the budget return HTTP 400. Existing oversized rows are not rewritten.
+Tenant/device/command/telemetry lists use count and a 2 MiB response budget, with
+keyset cursors pointing to the last returned record; pages may be shorter than
+pageSize. The default 4 MiB gRPC receive limit is unchanged. An oversized historical
+single record fails with an explicit precondition error and needs operator repair.
+
+Kafka setup attempts other configured bootstrap endpoints after a failure within
+the shared deadline. Timeout/recovery scans run independently of command publishes.
+The gateway explicitly enables gRPC client tracing; readiness probes stay unsampled.

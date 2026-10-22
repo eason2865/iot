@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -79,6 +80,10 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 				writeJSON(w, http.StatusOK, MQTTAuthResponse{Result: "allow", ClientAttrs: map[string]string{"role": role}, ACL: acl})
 				return
 			}
+		}
+		if isReservedMQTTClientID(req.ClientID) {
+			writeJSON(w, http.StatusOK, MQTTAuthResponse{Result: "deny"})
+			return
 		}
 		tenantID, deviceID, ok := contracts.ParseDeviceUsername(req.Username)
 		authenticated := false
@@ -181,4 +186,47 @@ func HashDeviceSecret(secret string) (string, error) {
 
 func VerifyDeviceSecret(hash, secret string) bool {
 	return hash != "" && secret != "" && bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)) == nil
+}
+
+// Service identity is authorized before this check. Ordinary device credentials
+// must never claim a service connection, including the unsuffixed base names.
+func isReservedMQTTClientID(id string) bool {
+	for _, prefix := range []string{"iot-device-worker", "iot-telemetry-ingestor", "iot-demo"} {
+		if id == prefix || strings.HasPrefix(id, prefix+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+// Cost parses the header without decoding the salt. Check the complete canonical
+// bcrypt encoding without running an attacker-controlled (possibly huge) cost.
+func validBcryptEncoding(hash string) bool {
+	offset := 7
+	switch {
+	case strings.HasPrefix(hash, "$2a$"), strings.HasPrefix(hash, "$2b$"), strings.HasPrefix(hash, "$2y$"):
+	case strings.HasPrefix(hash, "$2$"):
+		offset = 6
+	default:
+		return false
+	}
+	if len(hash) != offset+53 || hash[offset-1] != '$' {
+		return false
+	}
+	if _, err := bcrypt.Cost([]byte(hash)); err != nil {
+		return false
+	}
+	const alphabet = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	for _, c := range hash[offset:] {
+		if !strings.ContainsRune(alphabet, c) {
+			return false
+		}
+	}
+	encoding := base64.NewEncoding(alphabet).WithPadding(base64.NoPadding).Strict()
+	salt, err := encoding.DecodeString(hash[offset : offset+22])
+	if err != nil || len(salt) != 16 {
+		return false
+	}
+	digest, err := encoding.DecodeString(hash[offset+22:])
+	return err == nil && len(digest) == 23
 }

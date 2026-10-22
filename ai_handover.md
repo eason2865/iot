@@ -2,6 +2,20 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 连接身份、展开预算、分页与并行扫描修复（2026-10-22，发布版本 2.52）
+
+- 针对 main / 2.51 / b79dc68 的7项缺口修复；当前实际运行已是2.51（Helm iot revision 3、Chart0.2.8、4个服务各2/2 Ready，部署证据 outputs/deployment-20261022-251/）。本轮只构建/验证/发布，不替换运行服务，不抢占运行中的MQTT服务ClientID。
+- MQTTAuthenticationHandler在内部服务凭据/role分支后、设备凭据查询前，拒绝设备使用iot-device-worker、iot-telemetry-ingestor、iot-demo基础ClientID及所有带短横线后缀的保留形式。真实handler回归复现旧版允许、修复后拒绝；既有服务认证/设备冒号身份及ACL测试保持。普通设备既有ClientID继续兼容，未强制全设备身份绑定；强制绑定需协调设备端ClientID迁移，不能宣称已防所有设备之间的ClientID碰撞。
+- JSONB校验新增原文及展开后的保守字节估算，逐token累计JSON转义/分隔符、按指数计算十进制长度，不构造巨大十进制字符串。一般JSONB预算1MiB；遥测payload为1MiB减4096字节，给业务记录metadata留空间。超过预算在统一入口/存储前返回InvalidArgument/HTTP400；PG事务中SELECT payload::jsonb后再验证实际表示再INSERT。复现约数百字节的40个合法大指数变成约5.2MB，修复后拒绝且PG无记录；MQTT/两条gRPC摄入入口共享校验。预算是保守上界，极端前导零/重复键等压缩后可能较小的表示仍可能被拒绝，不自动修历史大行。
+- 租户/设备/命令/遥测四类PG分页逐行扫描，按内容长度+每行512字节metadata预留、整页4096字节cursor/外层预留，将响应限制在2MiB；原pageSize和keyset排序不变。遇到预算/数量边界只保留已返回行，nextCursor指向最后实际返回行，下一页不会跳过lookahead。保持gRPC默认4MiB接收上限；历史单行超过预算返回明确ErrListItemTooLarge→FailedPrecondition/HTTP400，留待运维修复，不死循环、不跳过或删数据。元数据name/productId入口/存储限制1MiB且无NUL，防新建单条过大对象。SQL仍最多pageSize+1条，应用流式保留预算内记录及一次lookahead，不声称SQL按网络字节做服务端截断。
+- 真实REST→gRPC→隔离PG验证6条各约900KB命令、6条遥测和大租户/设备元数据：四种列表默认分页全部成功，proto.Size每页小于2MiB，多页遍历无重复无遗漏；HTTP命令列表200。历史5MiB单行显式失败。旧版5.4MB命令页复现日志保留。
+- Kafka bootstrap发现不再固定brokers[0]，按共享attempt剩余deadline分配各地址探测时间并给Controller后续操作预留，失败/无响应后继续其他地址，关闭每次探测连接。既有60s总预算、topic严格对账及关闭自动建topic保持。真实Kafka私有topic回归覆盖第一个地址connection refused/接收TCP后不响应、第二个健康，两者初始化成功；旧版分别失败/超时，原Controller/CreateTopics取消与预算测试仍通过。未做三broker容灾演练。
+- dispatcher Run把超时/恢复扫描与发布拆成独立循环，发布仍即时领取单条、最多占半个lease，SQLattempt/租约校验保持；两个循环共用取消，退出等待扫描结束。保留dispatchOnce供原有单轮测试。协议stub以及真实PG测试都在发布未返回时确认后续Expire继续执行，真实sent命令在阻塞期间变timeout；取消、锁跳过、审计原子性回归保持。
+- 旧密钥迁移改用完整bcrypt规范编码校验：版本/长度/Cost、salt16字节和checksum23字节的专用base64字母表、规范padding位；不只检查Cost，也不运行不可信高cost的密码计算。损坏salt、checksum、padding或多余字节均拒绝；实际PG中旧版Cost通过却清空明文，新版整体迁移回滚且原明文/hash保留。有效hash依然优先保留，不因旧明文过期而覆盖。
+- management-api rpcClientConf显式启用Middlewares.Trace，其他中间件保持原值。真实HTTP→生产newRPCClient→gRPC server接收到同一trace ID、采样标志和request ID；readyz通过ProbeContext仍发送有效未采样上下文且导出0span。旧版真实RPC缺traceparent，修复后通过；未开启请求正文日志。
+- 验证通过：独立PG容器iot-fix252-pg及每测试schema、真实Kafka私有topic/TDengine临时库下go test -count=1 ./...，go test -race ./internal/... ./cmd/dlq-replay，最终扫描/历史行/编码定向race，go vet ./...，fmt/diff，7个Linux arm64构建，本地/生产Helm lint/template、Compose config、shell语法，protobuf用固定已安装插件重生零漂移，正式镜像连续迁移2次及公共CA根118检查。测试资源完成后清理，不改运行服务数据；完整红/绿日志见 outputs/fixes-252/。
+- 默认镜像iot-app:2.52、Chart0.2.9；已构建manifest list sha256:3ff24e66c686b3b485d1f17e8435f5a0c0f8351b16e1b28575708bad073827fc。无新增DDL/迁移SQL文件修改，运行DML/校验行为有调整。双语README、ADR0004/0007/0008/0009与本交接同步。按仓库规则在main提交、打2.52 tag并一起推送；本轮不部署，既有历史数据修复及外部HA/容量演练仍另行处理。
+
 ## 时区、容量、输入与启动可靠性修复（2026-10-22，发布版本 2.51）
 
 - 针对 main / 2.50 / 1ea1c23 的8类问题逐项修复，本轮只构建、验证和发布，不替换运行服务。当前实际部署仍为2.50（Helm iot revision 2、4个服务各2/2 Ready），部署证据见 outputs/deployment-20261022-250/。

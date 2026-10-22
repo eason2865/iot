@@ -55,3 +55,8 @@ to a 128Mi temporary volume and includes health probes.
   volume. Old traces are intentionally evicted; optional telemetry can be dropped
   on export failure. This does not bound unrelated temporary files or external
   exporter storage. No real Pod storage-exhaustion test is claimed.
+
+The management API explicitly enables client tracing on its programmatically
+created direct gRPC client. Configuration-file defaults do not initialize that
+struct's switches. Real HTTP -> gRPC tests check trace ID, sampling and request
+ID, and verify readiness remains unsampled with no exported client span.

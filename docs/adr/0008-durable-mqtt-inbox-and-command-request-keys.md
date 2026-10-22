@@ -65,3 +65,15 @@ command-ID deduplication could not prevent two actions after a lost HTTP respons
   creation, while devices still deduplicate deliveries by command ID.
 - TDengine measurement columns, same-timestamp collisions, data retention, HA
   infrastructure and throughput targets retain the business decisions in ADR 0007.
+
+Device authentication rejects the reserved MQTT ClientID namespaces
+`iot-device-worker`, `iot-telemetry-ingestor` and `iot-demo`, including every
+hyphen-suffixed variant, before checking device credentials. Trusted internal
+service credentials still pass their role-specific branch. Existing ordinary
+device ClientIDs remain compatible; mandatory device identity binding requires
+a coordinated device-side ClientID migration and is not silently enabled.
+
+Legacy mixed plaintext/hash migration validates the full bcrypt header, cost,
+length and canonical salt/checksum base64 encoding before erasing plaintext.
+Cost() alone does not validate the salt. Invalid encodings roll back the whole
+migration; valid hashes are preserved even if legacy plaintext is stale.

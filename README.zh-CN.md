@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.51`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.52`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -587,3 +587,19 @@ JSONB 存储范围的数字，这些输入返回 HTTP 400。分页必须完整�
 旧密钥迁移会清理已有 hash 旁的明文，保留有效 hash，移除旧明文列默认值；非法
 旧凭据导致整个迁移回滚。TDengine 改写整数毫秒时间戳，不受连接时区影响；已有
 偏移历史不会自动修正。
+
+
+设备凭据禁止使用 worker、ingestor、demo 的保留 MQTT ClientID（基础名称及其带短横线
+后缀的形式）。其他既有设备 ClientID 继续兼容；强制绑定设备身份需要协调设备端迁移，
+本轮不直接启用。旧明文/hash混合迁移会完整检查 bcrypt 的规范编码，异常时回滚，
+有效hash保持原值。
+
+JSONB 校验在构造大十进制字符串前，用字节预算保守估算数字及文本展开成本。遥测
+payload预算为1MiB减4096字节，其他JSONB输入和单个元数据字段限制为1MiB；遥测
+写库前再次检查PG规范化结果。超预算返回HTTP400，已有超大历史行不自动改写。
+租户、设备、命令和遥测列表同时受条数及2MiB响应预算约束，游标指向最后实际返回
+的记录，因此单页可能少于pageSize。gRPC默认4MiB接收上限不变；单条历史记录仍
+超过预算时返回明确的前置条件错误，需要运维修复。
+
+Kafka初始化会在共享deadline内尝试其他bootstrap地址；超时/恢复扫描独立于命令
+发布循环。网关显式启用gRPC客户端tracing，健康探针继续保持未采样。

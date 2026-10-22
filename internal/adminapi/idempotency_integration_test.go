@@ -17,6 +17,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
+	"iot/internal/contracts"
 	"iot/internal/core"
 	"iot/internal/platform"
 	corev1 "iot/proto/core/v1"
@@ -69,7 +71,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	server := &Server{rpc: corev1.NewCoreServiceClient(conn)}
-	for _, payload := range []string{"", "null", "[]", "42", `"text"`} {
+	for _, payload := range []string{"", "null", "[]", "42", `"text"`, `{"values":[` + strings.TrimSuffix(strings.Repeat("1e131071,", 40), ",") + `]}`} {
 		for _, recordRPC := range []bool{false, true} {
 			var err error
 			if recordRPC {
@@ -205,11 +207,98 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			}
 		}
 	}
+	testByteBoundedRPCPages(t, store, server)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
 	response, err := server.rpc.GetDevice(t.Context(), &corev1.GetDeviceRequest{TenantId: "t", DeviceId: "d"})
 	if response != nil || httpStatusFromGRPC(err) != 500 {
 		t.Fatalf("database failure should not become 404: %+v %v", response, err)
+	}
+}
+
+func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server *Server) {
+	large := strings.Repeat("x", 900000)
+	for i := 0; i < 6; i++ {
+		if _, err := store.CreateCommand("t", "d", json.RawMessage(`{"x":"`+large+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.RecordTelemetry(contracts.Envelope{MsgID: fmt.Sprintf("large-%d", i), TenantID: "t", DeviceID: "d", Ts: time.Now().UnixMilli(), Type: "temp", Version: "v1", Payload: json.RawMessage(`{"x":"` + large + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateTenant(platform.Tenant{ID: fmt.Sprintf("page-%d", i), Name: large}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateDevice(platform.Device{TenantID: "t", DeviceID: fmt.Sprintf("large-%d", i), ProductID: large, Secret: "secret"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(name string, want int, list func(string) ([]string, string, proto.Message, error)) {
+		t.Helper()
+		cursor := ""
+		seen := map[string]bool{}
+		for page := 0; page < 20; page++ {
+			ids, next, message, err := list(cursor)
+			if err != nil {
+				t.Fatalf("%s RPC failed: %v", name, err)
+			}
+			if proto.Size(message) > platform.MaxListResponseBytes {
+				t.Fatalf("%s response exceeds byte budget: %d", name, proto.Size(message))
+			}
+			for _, id := range ids {
+				if seen[id] {
+					t.Fatalf("%s duplicate ID", name)
+				}
+				seen[id] = true
+			}
+			if next == "" {
+				if len(seen) != want {
+					t.Fatalf("%s lost rows: %d want %d", name, len(seen), want)
+				}
+				return
+			}
+			if len(ids) == 0 || next == cursor {
+				t.Fatal("pagination cannot advance")
+			}
+			cursor = next
+		}
+		t.Fatal("pagination never finished")
+	}
+	check("commands", 7, func(c string) ([]string, string, proto.Message, error) {
+		r, e := server.rpc.ListCommands(t.Context(), &corev1.ListCommandsRequest{TenantId: "t", Cursor: c})
+		var ids []string
+		for _, v := range r.GetCommands() {
+			ids = append(ids, v.GetId())
+		}
+		return ids, r.GetNextCursor(), r, e
+	})
+	check("telemetry", 6, func(c string) ([]string, string, proto.Message, error) {
+		r, e := server.rpc.ListTelemetry(t.Context(), &corev1.ListTelemetryRequest{TenantId: "t", DeviceId: "d", Cursor: c})
+		var ids []string
+		for _, v := range r.GetRecords() {
+			ids = append(ids, v.GetMsgId())
+		}
+		return ids, r.GetNextCursor(), r, e
+	})
+	check("tenants", 7, func(c string) ([]string, string, proto.Message, error) {
+		r, e := server.rpc.ListTenants(t.Context(), &corev1.ListTenantsRequest{Cursor: c})
+		var ids []string
+		for _, v := range r.GetTenants() {
+			ids = append(ids, v.GetId())
+		}
+		return ids, r.GetNextCursor(), r, e
+	})
+	check("devices", 7, func(c string) ([]string, string, proto.Message, error) {
+		r, e := server.rpc.ListDevices(t.Context(), &corev1.ListDevicesRequest{Cursor: c})
+		var ids []string
+		for _, v := range r.GetDevices() {
+			ids = append(ids, v.GetDeviceId())
+		}
+		return ids, r.GetNextCursor(), r, e
+	})
+	rec := httptest.NewRecorder()
+	server.listCommandsHandler(rec, httptest.NewRequest("GET", "/api/v1/commands?tenantId=t", nil))
+	if rec.Code != 200 {
+		t.Fatalf("large command HTTP list status %d", rec.Code)
 	}
 }

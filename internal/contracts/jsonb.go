@@ -23,7 +23,20 @@ func ValidateDeviceSecret(secret string) error {
 
 // ValidateJSONB preserves JSON numbers without float64 conversion, while enforcing
 // PostgreSQL's numeric and Unicode representation limits before any database write.
-func ValidateJSONB(raw json.RawMessage) error {
+const MaxJSONBBytes = 1 << 20
+const MaxTelemetryPayloadBytes = MaxJSONBBytes - 4096
+
+func ValidateJSONB(raw json.RawMessage) error { return validateJSONBBudget(raw, MaxJSONBBytes) }
+
+// Budget the eventual textual JSONB form before PostgreSQL expands exponents.
+// Separators and JSON string escaping are conservatively included. No giant
+// decimal string is constructed to estimate the numeric expansion cost.
+func validateJSONBBudget(raw json.RawMessage, limit int) error {
+	if len(raw) > limit {
+		return fmt.Errorf("%w: JSONB payload exceeds %d bytes", ErrInvalidPayload, limit)
+	}
+	used := 0
+
 	if !utf8.Valid(raw) || !json.Valid(raw) {
 		return ErrInvalidPayload
 	}
@@ -67,8 +80,11 @@ func ValidateJSONB(raw json.RawMessage) error {
 		if err != nil {
 			return ErrInvalidPayload
 		}
+		used += 2 // colon/comma plus whitespace in PostgreSQL output
 		switch v := token.(type) {
 		case string:
+			encoded, _ := json.Marshal(v)
+			used += len(encoded)
 			if strings.ContainsRune(v, 0) {
 				return ErrInvalidPayload
 			}
@@ -88,6 +104,24 @@ func ValidateJSONB(raw json.RawMessage) error {
 			if int64(len(integer)-leading)+exp > 131072 || int64(len(fraction))-exp > 16383 || exp > 131072 || exp < -16383-int64(len(integer)) {
 				return fmt.Errorf("%w: numeric range exceeded", ErrInvalidPayload)
 			}
+			integerBytes := max(int64(1), int64(len(integer))+exp)
+			fractionBytes := max(int64(0), int64(len(fraction))-exp)
+			expanded := integerBytes + fractionBytes
+			if fractionBytes > 0 {
+				expanded++
+			}
+			if strings.HasPrefix(string(v), "-") {
+				expanded++
+			}
+			used += int(expanded)
+		case json.Delim:
+			used++
+		default:
+			used += 5
+
+		}
+		if used > limit {
+			return fmt.Errorf("%w: expanded JSONB payload exceeds %d bytes", ErrInvalidPayload, limit)
 		}
 	}
 }

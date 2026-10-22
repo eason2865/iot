@@ -32,6 +32,9 @@ func (s *Service) CreateTenant(ctx context.Context, req *corev1.CreateTenantRequ
 	if !contracts.IsValidTenantID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId contains invalid MQTT topic characters")
 	}
+	if err := contracts.ValidateMetadataText(req.GetName()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	var tenant platform.Tenant
 	var err error
 	if repo, ok := s.repo.(interface {
@@ -84,6 +87,9 @@ func (s *Service) CreateDevice(ctx context.Context, req *corev1.CreateDeviceRequ
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
 	if err := contracts.ValidateDeviceSecret(req.GetSecret()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := contracts.ValidateMetadataText(req.GetProductId()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	var device platform.Device
@@ -461,6 +467,8 @@ func mapRepoError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, platform.ErrListItemTooLarge):
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, platform.ErrInvalidPage):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, contracts.ErrInvalidEnvelope):

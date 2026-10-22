@@ -130,11 +130,13 @@ func newRPCClient() (zrpc.Client, error) {
 }
 
 func rpcClientConf() zrpc.RpcClientConf {
-	return zrpc.NewDirectClientConf(
+	conf := zrpc.NewDirectClientConf(
 		runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("IOT_CORE_ENDPOINTS", "127.0.0.1:9001")),
 		"management-api",
 		"",
 	)
+	conf.Middlewares.Trace = true
+	return conf
 }
 
 func (s *Server) routes() []rest.Route {

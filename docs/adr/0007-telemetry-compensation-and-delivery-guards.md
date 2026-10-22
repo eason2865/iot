@@ -91,3 +91,8 @@ can also present a command whose device has already acknowledged it.
   boundaries.
 - Broad production changes (HA data services, HPA/topology, device measurements in
   TDengine and lifecycle retention) require capacity and business decisions.
+
+The command dispatcher runs timeout/recovery scans in a separate bounded loop
+from publishing. Slow Kafka calls consume their own lease-bounded contexts and
+do not delay the next scan. Both loops share cancellation and Run waits for the
+scan loop to stop. State transitions and lease/attempt fencing stay in SQL.

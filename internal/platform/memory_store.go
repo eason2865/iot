@@ -47,6 +47,9 @@ func deviceKey(tenantID, deviceID string) string {
 }
 
 func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
+	if !contracts.IsValidTenantID(t.ID) {
+		return Tenant{}, contracts.ErrInvalidTopicPart
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
@@ -67,6 +70,9 @@ func (s *memoryStore) ListTenants() []Tenant {
 }
 
 func (s *memoryStore) CreateDevice(d Device) (Device, error) {
+	if !contracts.IsValidTenantID(d.TenantID) || !contracts.IsValidTopicPart(d.DeviceID) {
+		return Device{}, contracts.ErrInvalidTopicPart
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[d.TenantID]; !exists {

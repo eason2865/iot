@@ -86,3 +86,33 @@ func TestTopicBuildersPreserveCanonicalIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestTenantIDAndDeviceUsernameHaveUnambiguousEncoding(t *testing.T) {
+	if contracts.IsValidTenantID("factory:line1") {
+		t.Fatal("tenant contains reserved username separator")
+	}
+	if _, err := contracts.BuildDeviceUsername("factory:line1", "d"); err == nil {
+		t.Fatal("ambiguous username accepted")
+	}
+	if _, err := contracts.BuildTelemetryTopic("factory:line1", "d"); err == nil {
+		t.Fatal("ambiguous topic identity accepted")
+	}
+	if _, _, _, ok := contracts.ParseDeviceTopic("tenant/factory:line1/device/d/ack"); ok {
+		t.Fatal("ambiguous tenant parsed")
+	}
+	for _, device := range []string{"d", "line1:d"} {
+		username, err := contracts.BuildDeviceUsername("factory", device)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tenant, parsed, ok := contracts.ParseDeviceUsername(username)
+		if !ok || tenant != "factory" || parsed != device {
+			t.Fatalf("username roundtrip: %s -> %s/%s", username, tenant, parsed)
+		}
+	}
+	for _, username := range []string{"factory", ":d", "factory:", " factory:d", "factory:d/1"} {
+		if _, _, ok := contracts.ParseDeviceUsername(username); ok {
+			t.Errorf("invalid username accepted: %q", username)
+		}
+	}
+}

@@ -35,7 +35,13 @@ command-ID deduplication could not prevent two actions after a lost HTTP respons
   advisory lock, run the legacy column upgrade (002) before the current initial
   schema (001), then hash legacy credentials in the same transaction. Deployment
   tooling uses the migrate binary. POSTGRES_AUTO_MIGRATE=false keeps DDL out of
-  application startup; local development defaults to true.
+  application startup and ACK DLQ replay; local development defaults to true.
+  The replay CLI validates the flag before opening PostgreSQL, opens the store
+  lazily only for actual command.ack replay, and needs no database in dry-run.
+- Reserve colon in tenant identifiers across API, stores, envelopes, topic
+  builders and authentication. MQTT device usernames use a validated first-colon
+  split; device IDs may still contain colons. Existing colon-containing tenant
+  IDs require a coordinated identity migration, not silent normalization.
 
 ## Consequences
 

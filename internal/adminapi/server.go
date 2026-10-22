@@ -362,7 +362,7 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tenantId is required")
 		return
 	}
-	if !contracts.IsValidTopicPart(tenantID) {
+	if !contracts.IsValidTenantID(tenantID) {
 		writeError(w, http.StatusBadRequest, "tenantId contains invalid MQTT topic characters")
 		return
 	}

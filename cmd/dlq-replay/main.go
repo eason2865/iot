@@ -10,12 +10,14 @@ import (
 	"iot/internal/contracts"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 
 	"iot/internal/platform"
+	"iot/internal/runtimeconfig"
 )
 
 // dlq-replay republishes dead-letter records to their original topic, after the
@@ -117,7 +119,7 @@ func main() {
 				if dsn == "" {
 					log.Fatal("command.ack replay requires POSTGRES_DSN")
 				}
-				ackStore, err = platform.NewPostgresStore(dsn, 5*time.Minute)
+				ackStore, err = openAckReplayStore(dsn)
 				if err != nil {
 					log.Fatal("cannot open ACK replay store")
 				}
@@ -143,6 +145,14 @@ func main() {
 
 	log.Printf("dlq-replay done: group=%s stage=%q scanned=%d replayed=%d skipped=%d dryRun=%t",
 		groupID, *stage, scanned, replayed, skipped, *dryRun)
+}
+
+func openAckReplayStore(dsn string) (*platform.PostgresStore, error) {
+	autoMigrate, err := strconv.ParseBool(runtimeconfig.EnvOrDefault("POSTGRES_AUTO_MIGRATE", "true"))
+	if err != nil {
+		return nil, fmt.Errorf("POSTGRES_AUTO_MIGRATE must be true or false")
+	}
+	return platform.OpenPostgresStore(dsn, 5*time.Minute, autoMigrate)
 }
 
 // replayGroupID keeps one consumer group per stage. A single shared group loses

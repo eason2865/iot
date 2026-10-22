@@ -29,7 +29,7 @@ func (s *Service) CreateTenant(_ context.Context, req *corev1.CreateTenantReques
 	if req.GetId() == "" || req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id and name are required")
 	}
-	if !contracts.IsValidTopicPart(req.GetId()) {
+	if !contracts.IsValidTenantID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId contains invalid MQTT topic characters")
 	}
 	tenant, err := s.repo.CreateTenant(platform.Tenant{ID: req.GetId(), Name: req.GetName()})
@@ -64,7 +64,7 @@ func (s *Service) CreateDevice(_ context.Context, req *corev1.CreateDeviceReques
 	if req.GetTenantId() == "" || req.GetDeviceId() == "" || req.GetProductId() == "" || req.GetSecret() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenantId, deviceId, productId and secret are required")
 	}
-	if !contracts.IsValidTopicPart(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
+	if !contracts.IsValidTenantID(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
 	device, err := s.repo.CreateDevice(platform.Device{
@@ -209,7 +209,7 @@ func (s *Service) CreateCommand(ctx context.Context, req *corev1.CreateCommandRe
 	if req.GetTenantId() == "" || req.GetDeviceId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenantId and deviceId are required")
 	}
-	if !contracts.IsValidTopicPart(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
+	if !contracts.IsValidTenantID(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
 	if len(req.GetPayload()) > 0 && !json.Valid(req.GetPayload()) {
@@ -245,7 +245,7 @@ func (s *Service) ListCommands(_ context.Context, req *corev1.ListCommandsReques
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenantId is required")
 	}
-	if !contracts.IsValidTopicPart(req.GetTenantId()) {
+	if !contracts.IsValidTenantID(req.GetTenantId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId contains invalid MQTT topic characters")
 	}
 	var commands []platform.Command

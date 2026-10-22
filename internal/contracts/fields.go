@@ -41,7 +41,7 @@ func ValidateTelemetryFields(env Envelope) error {
 			return err
 		}
 	}
-	if !IsValidTopicPart(env.TenantID) || !IsValidTopicPart(env.DeviceID) {
+	if !IsValidTenantID(env.TenantID) || !IsValidTopicPart(env.DeviceID) {
 		return ErrInvalidEnvelope
 	}
 	return nil

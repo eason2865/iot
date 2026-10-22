@@ -95,3 +95,8 @@
 先以迁移角色注入 POSTGRES_DSN 执行镜像中的 `/usr/local/bin/migrate`，然后发布配置 `postgres.autoMigrate=false` 的业务服务；业务数据库角色不需 DDL 权限。迁移与启动使用同一份嵌入 SQL，并以事务锁串行执行。迁移前按数据平台要求完成备份。
 
 命令重试使用 Idempotency-Key，遥测使用 PostgreSQL inbox 后确认 MQTT。完整语义和 broker 离线投递边界见 ADR 0008；TDengine 数值列、同时间戳冲突、数据生命周期与外部 HA 容量仍需按业务规划。
+
+使用仅具备业务读写权限的账号实际重放 `command.ack` 时，需同时注入
+`POSTGRES_AUTO_MIGRATE=false` 和 `POSTGRES_DSN`；CLI 为兼容本地环境默认开启迁移。
+worker 对合法 ACK 仅在 PostgreSQL 或 DLQ 保存成功后确认，双失败时保留未确认状态并报错退出。
+断连或副本替换后的重投依赖 EMQX 会话及共享订阅投递策略，应用手动确认本身不提供 broker 持久化。

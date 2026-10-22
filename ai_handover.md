@@ -2,6 +2,20 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## ACK 确认与身份契约修复（2026-10-22，发布版本 2.45）
+
+- 修复本轮确认的三项问题：worker ACK 双写失败后仍自动 PUBACK、dlq-replay 忽略生产禁 DDL 配置、租户冒号与 MQTT 用户名首冒号拆分冲突。
+- worker 设置 SetAutoAckDisabled(true)，合法 ACK 仅在 PG 状态提交或 command.ack DLQ 写入成功后手动确认；PG 仍是 2s/次、最多 3 次，DLQ 调用上限 5s。双失败不确认，缓冲 fatal 通知传给 Run（无 Kafka reader 的 MQTT-only worker 同样有效），不再只记录日志并返回假成功。
+- ACK 单独收敛到 worker_ack.go，保留 SetOrderMatters(false)，慢 ACK 不阻塞其他下发的 PUBACK。非法 JSON、身份/后缀不符、缺 commandId、未知/外租户命令显式拒绝并确认，避免永久输入重投；无 store 的合法 ACK 也必须走 DLQ 或报错，不能空确认。
+- Run 统一取消消费者与补偿上下文；退出先关闭 ACK admission、给已接收回调 3s 排空，再取消未完成调用并断开 MQTT，最后关闭 DLQ writer。PG 调用、重试退避及 DLQ 使用 ACK 生命周期 ctx，避免共享资源先关闭。双故障消息没有应用持久化副本，断连/替换后的重投仍依赖 EMQX 会话/共享订阅策略，本次不宣称 broker 端无损或变更其配置。
+- dlq-replay 懒加载 openAckReplayStore，严格解析 POSTGRES_AUTO_MIGRATE（默认 true，非法值在连接前失败），传给 OpenPostgresStore。生产 DML-only 账号设 false 可直接补 ACK；dry-run 和其他 stage 不初始化 PG。
+- 新增 IsValidTenantID、MQTT username 构造/解析契约：只在租户 ID 禁冒号，设备 ID 保持允许冒号；API、Token 租户配置、存储新建、Envelope、topic 构造/解析使用同一租户规则。认证按校验后的首冒号拆分，factory:line1:d 明确为租户 factory / 设备 line1:d。已有含冒号租户需要另行协调身份迁移，不自动改名或修改历史数据。
+- 回归先红后绿：真实 MQTT QoS1 观察到旧版本双失败仍发 PUBACK；旧重放在 DML-only 角色上报 must be owner of table devices；原 API 接受 factory:line1。修复后协议验证双失败无 PUBACK 且 Run 报错、PG 完成前不确认、关闭先排空；Kafka transport 验证 DLQ 完成前不确认、成功确认一次、配置 writer 失败仍不确认。另覆盖慢 ACK 不阻塞下发、非法 ACK 拒绝、设备冒号身份及 ACL 保持。
+- 使用独立 PostgreSQL 容器创建仅有 schema USAGE、表 DML 和 sequence USAGE/SELECT 权限的角色：开启迁移失败，禁迁移启动成功，两次 ACK 重放后状态 acked、审计 1 条，CREATE TABLE 被拒绝。测试角色/schema/容器完成后清理，不改运行服务的数据和配置。
+- 验证通过：go test -count=1 ./...（启用隔离 PG、Kafka、TDengine 回归），go test -race ./internal/... ./cmd/dlq-replay，go vet ./...，格式检查、7 个 Linux 二进制构建、Helm 本地/生产双 profile lint/template、Compose config、脚本语法、protobuf 重生无漂移及 git diff --check。
+- 发布配置统一 iot-app:2.45、Chart 0.2.2；镜像已构建（manifest list sha256:6fecd2cf1a452304702f68ea11daa48a8058cded585b1cdc8f68a34552defa42），scratch 镜像 migrate 在独立 PG 连续执行两次通过。本轮无新增产品 SQL 迁移，Schema/双语 README/生产指南/ADR 0007 与 0008 已同步。
+- 按项目规则在 main 提交、打 2.45 tag 并一起推送；本轮不部署业务服务。上一次实际部署仍为 2.43（运行版本记录及证据见下方和 outputs/deployment-20261022-243/），2.44/2.45 均为已构建待升级版本。
+
 ## 代码审查问题修复（2026-10-22，发布版本 2.44）
 
 - 修复上一轮审查确认的五项问题：末次命令派发被提前失败、Kafka 对账覆盖其他配置、超长遥测阻塞补偿、命令状态和审计分离提交、标识校验与 topic 构造不一致。
@@ -83,7 +97,7 @@
 
 - Go：`go 1.27.0`，toolchain `go1.27.1`。
 - MQTT topic：`tenant/{tenantId}/device/{deviceId}/{telemetry|command|ack}`；消息体里的 tenantId/deviceId 必须与真实 topic 一致，否则进 DLQ（身份伪造防护）。
-- MQTT 设备用户名：`tenantId:deviceId`；设备密码在 PostgreSQL 中保存为 bcrypt 哈希。
+- MQTT 设备用户名：`tenantId:deviceId`；租户 ID 禁冒号，设备 ID 允许冒号；构造/解析由 contracts 统一校验。设备密码在 PostgreSQL 中保存为 bcrypt 哈希。
 - MQTT 服务账号：`iot-service`，由 `EMQX_INTERNAL_PASSWORD` 注入。
 - MQTT 认证回调：`iot-core:9090/internal/mqtt/authenticate`，fail-closed——必须配置 `IOT_CORE_MQTT_AUTH_TOKEN`，EMQX 通过 `X_Iot_Auth_Token` 头携带（下划线命名，原因见下）；本地脚本在 `iot` 和 `emqx` 两个 namespace 各建一份同名 Secret；ACL 按角色授予（全部经 `withACLGuard` 追加 `{deny, all, #}` 兜底）：telemetry-ingestor 订阅 `tenant/+/device/+/telemetry`、device-worker 订阅 `tenant/+/device/+/ack` + 发布 `tenant/+/device/+/command`、设备账号 `eq` 本设备三条 topic、demo 账号（`iot-demo-<tenant>-<ts>` clientID）收敛到单租户通配（由 clientID 提取租户，提取失败拒绝）。
 - EMQX 6.3.1 回调 token 注入（三个坑，均已验证）：① authn HTTP 模板**不解析** `${VAR}` 环境变量占位符（`auth_template_invalid` 告警后原样传递字面量）；② env 覆盖名只允许 `[A-Z0-9_]`，`EMQX_AUTHENTICATION__1__HEADERS__x-iot-auth-token`（连字符）被**静默丢弃**，`...__x_iot_auth_token`/`...__X_IOT_AUTH_TOKEN`（小写/大写 key）报 `unknown_env_vars` 被拒——**按 key 覆盖 headers 不可行**；③ 唯一可行方案：`EMQX_AUTHENTICATION__1__HEADERS` 整体 JSON 覆盖 headers map，值存 emqx namespace `iot-runtime-secrets` 的 `EMQX_AUTHN_HEADERS_JSON`（`helm-deploy-local.sh` 生成）。清单里 config.data 的 headers 字面值只是必定被 iot-core 拒绝的 fallback。

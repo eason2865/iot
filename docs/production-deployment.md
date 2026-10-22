@@ -115,3 +115,11 @@ Use Idempotency-Key for command retries. MQTT telemetry acknowledges after a
 PostgreSQL inbox write. ADR 0008 describes guarantees and broker offline-delivery
 boundaries. TDengine measurement columns, timestamp collisions, lifecycle and
 external HA capacity remain business planning decisions.
+
+For actual `command.ack` DLQ replay with a DML-only account, inject
+`POSTGRES_AUTO_MIGRATE=false` together with `POSTGRES_DSN`. The CLI defaults to
+automatic migration for local compatibility. MQTT ACK consumers now confirm
+valid ACKs only after PostgreSQL or DLQ persistence; simultaneous failures leave
+them unacknowledged and fail the worker. Configure EMQX session/shared-delivery
+policy for redelivery after disconnect or replacement; application manual ACK
+alone does not supply broker persistence.

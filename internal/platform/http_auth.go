@@ -33,7 +33,7 @@ func ParseTenantBoundTokens(raw string) (map[string]string, error) {
 		return nil, err
 	}
 	for token, tenantID := range tokens {
-		if strings.TrimSpace(token) == "" || !contracts.IsValidTopicPart(tenantID) {
+		if strings.TrimSpace(token) == "" || !contracts.IsValidTenantID(tenantID) {
 			return nil, errInvalidTenantTokenEntry
 		}
 	}

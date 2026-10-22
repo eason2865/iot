@@ -125,6 +125,9 @@ func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
 }
 
 func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
+	if !contracts.IsValidTenantID(t.ID) {
+		return Tenant{}, contracts.ErrInvalidTopicPart
+	}
 	_, err := s.db.Exec(`INSERT INTO tenants (id, name) VALUES ($1, $2)`, t.ID, t.Name)
 	if err != nil {
 		return Tenant{}, translateSQLError(err, "tenant")
@@ -221,6 +224,9 @@ func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, err
 }
 
 func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
+	if !contracts.IsValidTenantID(d.TenantID) || !contracts.IsValidTopicPart(d.DeviceID) {
+		return Device{}, contracts.ErrInvalidTopicPart
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Device{}, err

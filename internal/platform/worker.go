@@ -79,6 +79,7 @@ type Worker struct {
 	metrics         *Metrics
 	tenantAllowlist map[string]struct{}
 	ackTimeout      time.Duration
+	acks            *workerAckState
 }
 
 func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, metrics *Metrics) *Worker {
@@ -92,6 +93,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		metrics:         metrics,
 		tenantAllowlist: tenantAllowlist(cfg.TenantIDs),
 		ackTimeout:      ackTimeout,
+		acks:            newWorkerAckState(),
 	}
 	if len(cfg.KafkaBrokers) > 0 {
 		telemetryTopic := cfg.TelemetryTopic
@@ -164,6 +166,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		// router from processing PUBACKs for unrelated command downlinks.
 		// PostgreSQL row locks serialize duplicate ACK transitions.
 		opts.SetOrderMatters(false)
+		opts.SetAutoAckDisabled(true)
 		// Keep the worker alive while EMQX is starting or briefly unavailable.
 		opts.SetConnectRetry(true)
 		opts.SetConnectRetryInterval(2 * time.Second)
@@ -200,127 +203,57 @@ func normalizeAckTopicFilters(cfg WorkerConfig) []string {
 	return []string{contracts.AckTopicFilter}
 }
 
-func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
-	var ack CommandAckMessage
-	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
-		log.Printf("command ack unmarshal error: %v", err)
-		if w.metrics != nil {
-			w.metrics.IncDeviceWorker("ack", "error")
-		}
-		return
-	}
-	// Reject identity spoofing: the ACK tenant/device must match the topic.
-	topicTenant, topicDevice, _, ok := contracts.ParseDeviceTopic(msg.Topic())
-	if !ok || topicTenant != ack.TenantID || topicDevice != ack.DeviceID {
-		log.Printf("command ack identity mismatch: topic=%s ack tenant=%s device=%s", msg.Topic(), ack.TenantID, ack.DeviceID)
-		if w.metrics != nil {
-			w.metrics.IncDeviceWorker("ack", "error")
-		}
-		return
-	}
-	if ack.CommandID == "" {
-		ack.CommandID = string(msg.Payload())
-	}
-	if w.store != nil {
-		// A failed AckCommand must not silently drop the ACK: without the
-		// transition the command expires as a false timeout. Retry the store
-		// write, then dead-letter the uplink so nothing is lost even if
-		// PostgreSQL stays down.
-		var err error
-		for attempt := 0; attempt < ackStoreAttempts; attempt++ {
-			if err = w.applyAck(ack); err == nil {
-				break
-			}
-			if IsNotFound(err) {
-				// Unknown or foreign command: retrying cannot help, and
-				// dead-lettering another tenant's probe adds noise. This is
-				// already the dominant benign case (late/duplicate ACKs).
-				break
-			}
-			if attempt+1 < ackStoreAttempts {
-				time.Sleep(ackStoreBackoff * time.Duration(attempt+1))
-			}
-		}
-		if err != nil {
-			if IsNotFound(err) {
-				log.Printf("command ack for unknown command: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("ack", "error")
-				}
-				return
-			}
-			log.Printf("command ack store error after retries: %v", err)
-			if w.metrics != nil {
-				w.metrics.IncDeviceWorker("ack", "error")
-			}
-			dlqMsg := kafka.Message{Topic: msg.Topic(), Key: []byte(ack.CommandID), Value: msg.Payload()}
-			dlqCtx, cancelDLQ := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancelDLQ()
-			if dlqErr := publishDeadLetter(dlqCtx, w.dlqWriter, dlqMsg, StageCommandAck, err, w.metrics); dlqErr != nil {
-				log.Printf("command ack dead-letter error: %v", dlqErr)
-			}
-			return
-		}
-		log.Printf("command ack consumed: tenant=%s device=%s id=%s", ack.TenantID, ack.DeviceID, ack.CommandID)
-		if w.metrics != nil {
-			w.metrics.IncDeviceWorker("ack", "ok")
-		}
-	}
-}
-
 func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return nil
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		if w.telemetryReader != nil {
+			_ = w.telemetryReader.Close()
+		}
+		if w.commandReader != nil {
+			_ = w.commandReader.Close()
+		}
+		w.stopAckHandling()
+		if w.dlqWriter != nil {
+			_ = w.dlqWriter.Close()
+		}
+	}()
 	log.Printf("device-worker starting: telemetryReader=%t commandReader=%t mqtt=%t tenantAllowlist=%d", w.telemetryReader != nil, w.commandReader != nil, w.mqtt != nil, len(w.tenantAllowlist))
 	if w.mqtt != nil {
 		token := w.mqtt.Connect()
-		token.Wait()
+		for !token.WaitTimeout(100 * time.Millisecond) {
+			select {
+			case <-ctx.Done():
+				return nil
+			case err := <-w.acks.fatal:
+				return err
+			default:
+			}
+		}
 		if err := token.Error(); err != nil {
 			return err
 		}
-		defer w.mqtt.Disconnect(250)
-	}
-	if w.dlqWriter != nil {
-		defer w.dlqWriter.Close()
 	}
 	errCh := make(chan error, 2)
 	if w.telemetryReader != nil {
-		go func() { errCh <- w.consumeTelemetry(ctx) }()
-	}
-	if w.tdengine != nil {
-		go w.compensateUnwrittenTelemetry(ctx)
+		go func() { errCh <- w.consumeTelemetry(runCtx) }()
 	}
 	if w.commandReader != nil {
-		go func() { errCh <- w.consumeCommands(ctx) }()
+		go func() { errCh <- w.consumeCommands(runCtx) }()
 	}
-	if w.telemetryReader == nil && w.commandReader == nil {
-		<-ctx.Done()
-		return nil
+	if w.tdengine != nil {
+		go w.compensateUnwrittenTelemetry(runCtx)
 	}
 	select {
 	case <-ctx.Done():
-		if w.telemetryReader != nil {
-			_ = w.telemetryReader.Close()
-		}
-		if w.commandReader != nil {
-			_ = w.commandReader.Close()
-		}
 		return nil
+	case err := <-w.acks.fatal:
+		return err
 	case err := <-errCh:
-		// One consumer failed: close both readers so the other consumer's
-		// FetchMessage unblocks instead of leaking its goroutine (Close is
-		// idempotent here, duplicate-close errors are ignored).
-		if w.telemetryReader != nil {
-			_ = w.telemetryReader.Close()
-		}
-		if w.commandReader != nil {
-			_ = w.commandReader.Close()
-		}
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}
 }
 
@@ -749,19 +682,6 @@ func sleepBeforeKafkaRetry(ctx context.Context) {
 	case <-ctx.Done():
 	case <-timer.C:
 	}
-}
-
-func (w *Worker) applyAck(ack CommandAckMessage) error {
-	if store, ok := w.store.(interface {
-		AckCommandContext(context.Context, string, string, string) (Command, error)
-	}); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, err := store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
-		return err
-	}
-	_, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID)
-	return err
 }
 
 func (w *Worker) commandForDelivery(ctx context.Context, event Command) (bool, error) {

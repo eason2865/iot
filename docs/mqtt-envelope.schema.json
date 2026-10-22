@@ -16,7 +16,7 @@
       "$ref": "#/$defs/label64"
     },
     "tenantId": {
-      "$ref": "#/$defs/identifier"
+      "$ref": "#/$defs/tenantIdentifier"
     },
     "deviceId": {
       "$ref": "#/$defs/identifier"
@@ -68,6 +68,17 @@
         }
       ],
       "description": "Canonical identifier: no leading/trailing whitespace, controls, slash or MQTT wildcards; at most 64 UTF-8 bytes."
+    },
+    "tenantIdentifier": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifier"
+        },
+        {
+          "pattern": "^[^:]+$"
+        }
+      ],
+      "description": "Tenant identifiers also reserve colon for the tenantId:deviceId MQTT username separator. Device identifiers may contain colons."
     }
   }
 }

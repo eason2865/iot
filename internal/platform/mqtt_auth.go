@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"iot/internal/contracts"
+
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -77,7 +79,7 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 				return
 			}
 		}
-		tenantID, deviceID, ok := strings.Cut(req.Username, ":")
+		tenantID, deviceID, ok := contracts.ParseDeviceUsername(req.Username)
 		if !ok || tenantID == "" || deviceID == "" || authenticator == nil || !authenticator.AuthenticateDevice(tenantID, deviceID, req.Password) {
 			writeJSON(w, http.StatusOK, MQTTAuthResponse{Result: "deny"})
 			return

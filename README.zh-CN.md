@@ -232,7 +232,7 @@ tenant/{tenantId}/device/{deviceId}/...
 
 平台默认使用 JSON Envelope，便于设备联调、日志排查和协议演进。
 
-`msgId`、`tenantId`、`deviceId`、`type` 限 1–64 个 UTF-8 字节，`version` 限 1–32 字节，均拒绝控制字符。租户/设备标识还拒绝首尾空白、`/`、`#` 和 `+`，topic 构造时原样保留标识。非法输入在 REST 返回 HTTP 400，在 MQTT 接入进入 DLQ。历史非法字段仍保留在 PostgreSQL 且不标记写入完成，但不会阻塞后续合法遥测的补偿。JSON Schema 的 `maxLength` 按字符计数，服务端另外强制校验字节上限。
+`msgId`、`tenantId`、`deviceId`、`type` 限 1–64 个 UTF-8 字节，`version` 限 1–32 字节，均拒绝控制字符。租户/设备标识还拒绝首尾空白、`/`、`#` 和 `+`，topic 构造时原样保留标识。租户 ID 额外禁用 `:`，用于分隔 MQTT 用户名 `tenantId:deviceId`；设备 ID 仍允许冒号。已有含冒号的租户需单独迁移标识，本次不自动改名。非法输入在 REST 返回 HTTP 400，在 MQTT 接入进入 DLQ。历史非法字段仍保留在 PostgreSQL 且不标记写入完成，但不会阻塞后续合法遥测的补偿。JSON Schema 的 `maxLength` 按字符计数，服务端另外强制校验字节上限。
 
 必备字段：
 
@@ -367,7 +367,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.44`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.45`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 

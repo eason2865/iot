@@ -55,6 +55,16 @@ func TestServiceRejectsNoncanonicalIdentifiers(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsColonInTenantID(t *testing.T) {
+	svc := NewService(fakeRepo{}, nil)
+	if _, err := svc.CreateTenant(t.Context(), &corev1.CreateTenantRequest{Id: "factory:line1", Name: "factory"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ambiguous MQTT tenant accepted: %v", err)
+	}
+	if _, err := svc.CreateDevice(t.Context(), &corev1.CreateDeviceRequest{TenantId: "factory:line1", DeviceId: "d", ProductId: "p", Secret: "s"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ambiguous device tenant accepted: %v", err)
+	}
+}
+
 func TestListCommandsScopesToTenant(t *testing.T) {
 	svc := NewService(pagedFakeRepo{}, nil)
 	resp, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{

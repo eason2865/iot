@@ -24,7 +24,7 @@ const (
 )
 
 func BuildDeviceTopic(tenantID, deviceID, suffix string) (string, error) {
-	if !IsValidTopicPart(tenantID) || !IsValidTopicPart(deviceID) || !IsValidTopicPart(suffix) {
+	if !IsValidTenantID(tenantID) || !IsValidTopicPart(deviceID) || !IsValidTopicPart(suffix) {
 		return "", ErrInvalidTopicPart
 	}
 
@@ -34,6 +34,27 @@ func BuildDeviceTopic(tenantID, deviceID, suffix string) (string, error) {
 func IsValidTopicPart(part string) bool {
 	return part == strings.TrimSpace(part) && !strings.ContainsAny(part, "/#+") &&
 		ValidateStorageField("topic part", part, TelemetryFieldMaxBytes) == nil
+}
+
+// The first colon separates tenantId from deviceId in MQTT usernames. Device
+// IDs may contain further colons, but tenant IDs must never contain one.
+func IsValidTenantID(id string) bool {
+	return IsValidTopicPart(id) && !strings.Contains(id, ":")
+}
+
+func BuildDeviceUsername(tenantID, deviceID string) (string, error) {
+	if !IsValidTenantID(tenantID) || !IsValidTopicPart(deviceID) {
+		return "", ErrInvalidTopicPart
+	}
+	return tenantID + ":" + deviceID, nil
+}
+
+func ParseDeviceUsername(username string) (tenantID, deviceID string, ok bool) {
+	tenantID, deviceID, ok = strings.Cut(username, ":")
+	if !ok || !IsValidTenantID(tenantID) || !IsValidTopicPart(deviceID) {
+		return "", "", false
+	}
+	return tenantID, deviceID, true
 }
 
 func BuildTelemetryTopic(tenantID, deviceID string) (string, error) {
@@ -49,7 +70,7 @@ func BuildAckTopic(tenantID, deviceID string) (string, error) {
 }
 
 func BuildTenantCommandTopicFilter(tenantID string) (string, error) {
-	if !IsValidTopicPart(tenantID) {
+	if !IsValidTenantID(tenantID) {
 		return "", ErrInvalidTopicPart
 	}
 	return fmt.Sprintf("tenant/%s/device/+/%s", tenantID, TopicSuffixCommand), nil
@@ -63,7 +84,7 @@ func ParseDeviceTopic(topic string) (tenantID, deviceID, suffix string, ok bool)
 	if len(parts) != 5 || parts[0] != "tenant" || parts[2] != "device" {
 		return "", "", "", false
 	}
-	if !IsValidTopicPart(parts[1]) || !IsValidTopicPart(parts[3]) || !IsValidTopicPart(parts[4]) {
+	if !IsValidTenantID(parts[1]) || !IsValidTopicPart(parts[3]) || !IsValidTopicPart(parts[4]) {
 		return "", "", "", false
 	}
 	return parts[1], parts[3], parts[4], true

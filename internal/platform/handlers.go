@@ -85,7 +85,7 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "id and name are required")
 			return
 		}
-		if !contracts.IsValidTopicPart(req.ID) {
+		if !contracts.IsValidTenantID(req.ID) {
 			if a.metrics != nil {
 				a.metrics.IncTenant("error")
 			}
@@ -131,7 +131,7 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId, deviceId, productId and secret are required")
 			return
 		}
-		if !contracts.IsValidTopicPart(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
+		if !contracts.IsValidTenantID(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
 			if a.metrics != nil {
 				a.metrics.IncDevice("error")
 			}
@@ -215,7 +215,7 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId and deviceId are required")
 			return
 		}
-		if !contracts.IsValidTopicPart(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
+		if !contracts.IsValidTenantID(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
 			if a.metrics != nil {
 				a.metrics.IncCommand("created", "error")
 			}

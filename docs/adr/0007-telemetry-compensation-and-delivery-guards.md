@@ -33,7 +33,13 @@ can also present a command whose device has already acknowledged it.
   Database errors stop the consumer without committing the message. Failed status
   writes and offset commits are surfaced instead of silently declaring success.
 - MQTT ACK writes retry three times with bounded database calls; exhausted
-  failures are retained in DLQ as `command.ack`. Manual replay applies the ACK
+  failures are retained in DLQ as `command.ack`. Worker MQTT automatic ACK is
+  disabled: a valid ACK gets PUBACK only after PostgreSQL or DLQ persistence.
+  If both fail, leave it unacknowledged and surface a fatal error to Run.
+  Invalid/foreign/unknown ACKs are explicitly rejected and acknowledged to avoid
+  permanent redelivery loops. On shutdown, stop callback admission and drain
+  admitted ACKs for up to three seconds before cancellation, MQTT disconnect and
+  DLQ writer closure. Manual replay applies the ACK
   transition directly. Terminal command states retain their existing semantics.
 - ACK callbacks run independently of the MQTT packet router. Database retry
   latency must not block other commands' PUBACKs; PostgreSQL row locks serialize
@@ -53,8 +59,10 @@ can also present a command whose device has already acknowledged it.
 - Delivery is at least once. A crash between MQTT publish and the state write, or
   a publish queued across a reconnect, can still cause duplicate actuation. Devices
   must deduplicate by command ID; server guards do not provide exactly-once execution.
-- MQTT ACK durability still depends on preserving the ACK successfully in PostgreSQL
-  or Kafka. Simultaneous failures of both are observable through DLQ failure metrics
-  but do not constitute a lossless durable MQTT inbox.
+- When PostgreSQL and Kafka both fail, the worker reports failure without PUBACK.
+  Redelivery after disconnect/replacement still depends on broker session and
+  shared-subscription policy; forced termination and unavailable durable sinks
+  are not covered by a durable application inbox. See ADR 0008 for MQTT hop
+  boundaries.
 - Broad production changes (HA data services, HPA/topology, device measurements in
   TDengine and lifecycle retention) require capacity and business decisions.

@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"strconv"
@@ -47,7 +48,7 @@ func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
 // buildTopicConfigs is pure so the replication and in-sync-replica rules can be
 // unit tested without a broker. CreateTopics is idempotent for an existing
 // topic (kafka-go skips TopicAlreadyExists); ensureKafkaTopics follows it with
-// a reconciliation pass that AlterConfigs any drifted config entries. Partition
+// a reconciliation pass that incrementally SETs drifted config entries. Partition
 // count and replication factor still only take effect on first creation —
 // changing them on a live topic is an operational task, not something this
 // service can do, so drift there is logged instead.
@@ -132,7 +133,7 @@ func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConf
 
 // reconcileKafkaTopics brings pre-existing topics (broker auto.create, or a
 // previous deployment with different settings) in line with the desired
-// config. Config entries are compared and corrected via AlterConfigs; drift in
+// config. Config entries are compared and corrected via IncrementalAlterConfigs; drift in
 // partition count or replication factor cannot be fixed safely here, so it is
 // logged loudly instead of staying silent.
 func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.TopicConfig) error {
@@ -154,7 +155,10 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 	for _, tc := range desired {
 		live, ok := topics[tc.Topic]
 		if !ok {
-			continue
+			return fmt.Errorf("kafka topic %s: missing metadata", tc.Topic)
+		}
+		if live.Error != nil {
+			return fmt.Errorf("kafka topic %s: metadata: %w", tc.Topic, live.Error)
 		}
 		if len(live.Partitions) != tc.NumPartitions {
 			log.Printf("kafka topic %s: partition count is %d, desired %d; not auto-correcting, this needs an operational change",
@@ -182,23 +186,24 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 			return err
 		}
 		if len(desc.Resources) == 0 {
-			continue
+			return fmt.Errorf("kafka topic %s: missing config response", tc.Topic)
 		}
 		resource := desc.Resources[0]
 		if resource.Error != nil {
-			log.Printf("kafka topic %s: describe configs failed: %v", tc.Topic, resource.Error)
-			continue
+			return fmt.Errorf("kafka topic %s: describe configs: %w", tc.Topic, resource.Error)
 		}
 		drift := driftedConfigEntries(resource.ConfigEntries, tc.ConfigEntries)
 		if len(drift) == 0 {
 			continue
 		}
-		configs := make([]kafka.AlterConfigRequestConfig, 0, len(drift))
+		configs := make([]kafka.IncrementalAlterConfigsRequestConfig, 0, len(drift))
 		for _, entry := range drift {
-			configs = append(configs, kafka.AlterConfigRequestConfig{Name: entry.ConfigName, Value: entry.ConfigValue})
+			configs = append(configs, kafka.IncrementalAlterConfigsRequestConfig{Name: entry.ConfigName, Value: entry.ConfigValue, ConfigOperation: kafka.ConfigOperationSet})
 		}
-		alter, err := client.AlterConfigs(ctx, &kafka.AlterConfigsRequest{
-			Resources: []kafka.AlterConfigRequestResource{{
+		// AlterConfigs replaces ALL topic overrides, including operator-managed
+		// settings. Incremental SET preserves every unrelated override.
+		alter, err := client.IncrementalAlterConfigs(ctx, &kafka.IncrementalAlterConfigsRequest{
+			Resources: []kafka.IncrementalAlterConfigsRequestResource{{
 				ResourceType: kafka.ResourceTypeTopic,
 				ResourceName: tc.Topic,
 				Configs:      configs,
@@ -207,9 +212,11 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 		if err != nil {
 			return err
 		}
-		if failure := alter.Errors[kafka.AlterConfigsResponseResource{Type: int8(kafka.ResourceTypeTopic), Name: tc.Topic}]; failure != nil {
-			log.Printf("kafka topic %s: alter configs failed: %v", tc.Topic, failure)
-			continue
+		if len(alter.Resources) != 1 {
+			return fmt.Errorf("kafka topic %s: missing incremental config response", tc.Topic)
+		}
+		if failure := alter.Resources[0].Error; failure != nil {
+			return fmt.Errorf("kafka topic %s: incremental alter configs: %w", tc.Topic, failure)
 		}
 		for _, entry := range drift {
 			log.Printf("kafka topic %s: reconciled %s=%s", tc.Topic, entry.ConfigName, entry.ConfigValue)
@@ -219,7 +226,7 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 }
 
 // driftedConfigEntries returns the desired entries whose live value differs or
-// is absent — exactly the set AlterConfigs must apply. Pure so the comparison
+// is absent — exactly the set IncrementalAlterConfigs must apply. Pure so the comparison
 // rules are unit-testable without a broker.
 func driftedConfigEntries(live []kafka.DescribeConfigResponseConfigEntry, desired []kafka.ConfigEntry) []kafka.ConfigEntry {
 	values := make(map[string]string, len(live))

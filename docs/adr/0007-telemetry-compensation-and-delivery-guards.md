@@ -17,9 +17,17 @@ can also present a command whose device has already acknowledged it.
   advances through the backlog and resets at its end. Tenant filtering happens
   before LIMIT, so foreign tenants cannot starve a scoped worker.
 - A successful TDengine write is followed by the completion marker. Write or
-  marker failures leave the row pending for another sweep. Control-character
-  validation failures do not stop the remaining batch. PostgreSQL retains the
+  marker failures leave the row pending for another sweep. Permanent field
+  validation failures (UTF-8, controls, canonical IDs and VARCHAR byte bounds)
+  do not stop the remaining batch and are never marked written. Ingress uses
+  the same field contract. PostgreSQL retains the
   original payload; the scan neither consumes DLQ offsets nor emits commands.
+- Dispatcher claims one command immediately before each publish. The publish
+  context expires at half the 30-second lease; completions and reschedules are
+  fenced by the claimed attempt and an active lease. Exhausted created commands
+  become failed only after their lease/backoff expires. Claims never exceed the
+  attempt cap. Command state changes and their audit events use one atomic SQL
+  statement, including recovery, delivery and expiry.
 - Before command MQTT publishing, worker reads persisted state and verifies the
   tenant/device identity. Missing, foreign, sent and terminal commands are skipped.
   Database errors stop the consumer without committing the message. Failed status

@@ -63,11 +63,11 @@ func ValidateEnvelope(env Envelope) error {
 // validateEnvelopeAt is ValidateEnvelope with an explicit clock, so the
 // timestamp bounds can be exercised without depending on wall-clock time.
 func validateEnvelopeAt(env Envelope, now time.Time) error {
-	if env.MsgID == "" || env.TenantID == "" || env.DeviceID == "" || env.Type == "" || env.Version == "" || env.Ts <= 0 {
+	if env.Ts <= 0 {
 		return ErrInvalidEnvelope
 	}
-	if !IsValidTopicPart(env.TenantID) || !IsValidTopicPart(env.DeviceID) {
-		return ErrInvalidEnvelope
+	if err := ValidateTelemetryFields(env); err != nil {
+		return err
 	}
 	if env.Ts < minEnvelopeTsMillis || env.Ts > now.Add(maxEnvelopeClockSkew).UnixMilli() {
 		return ErrEnvelopeTimestampOutOfRange

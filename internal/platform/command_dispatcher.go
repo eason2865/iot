@@ -12,8 +12,8 @@ const maxDispatchAttempts = 10
 
 type CommandDispatchStore interface {
 	ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error)
-	MarkCommandPublished(id string) error
-	RescheduleCommand(id string, retryAfter time.Duration) error
+	MarkCommandPublished(id string, attempt int) error
+	RescheduleCommand(id string, attempt int, retryAfter time.Duration) error
 	ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error)
 	RecoverStaleCommands(staleBefore time.Time, maxAttempts int) (int64, int64, error)
 }
@@ -67,21 +67,30 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	} else if expired > 0 {
 		log.Printf("command timeout scan marked %d commands", expired)
 	}
-	commands, err := d.store.ClaimCommandsForDispatch(d.batchSize, d.lease)
-	if err != nil {
-		log.Printf("command dispatch claim error: %v", err)
-		return
-	}
-	for _, command := range commands {
-		if err := d.publisher.PublishCommand(ctx, command); err != nil {
+	// Claim immediately before publishing, so queued commands do not spend
+	// their lease waiting for earlier Kafka calls in the batch.
+	for i := 0; i < d.batchSize && ctx.Err() == nil; i++ {
+		commands, err := d.store.ClaimCommandsForDispatch(1, d.lease)
+		if err != nil {
+			log.Printf("command dispatch claim error: %v", err)
+			return
+		}
+		if len(commands) == 0 {
+			return
+		}
+		command := commands[0]
+		publishCtx, cancel := context.WithTimeout(ctx, d.lease/2)
+		err = d.publisher.PublishCommand(publishCtx, command)
+		cancel()
+		if err != nil {
 			backoff := time.Second * time.Duration(1<<min(command.DispatchAttempts, 6))
 			log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
-			if retryErr := d.store.RescheduleCommand(command.ID, backoff); retryErr != nil {
+			if retryErr := d.store.RescheduleCommand(command.ID, command.DispatchAttempts, backoff); retryErr != nil {
 				log.Printf("command reschedule error: id=%s err=%v", command.ID, retryErr)
 			}
 			continue
 		}
-		if err := d.store.MarkCommandPublished(command.ID); err != nil {
+		if err := d.store.MarkCommandPublished(command.ID, command.DispatchAttempts); err != nil {
 			log.Printf("command mark published error: id=%s err=%v", command.ID, err)
 		}
 	}

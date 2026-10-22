@@ -13,6 +13,25 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      kafka:
+        image: bitnamilegacy/kafka:4.0.0@sha256:f45d5b813412e1ef7ce67b467309a84e4c6dc03d7626a0b6da867db9b69bd107
+        env:
+          KAFKA_CFG_NODE_ID: "1"
+          KAFKA_CFG_PROCESS_ROLES: broker,controller
+          KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_CFG_LISTENERS: HOST://:9092,CONTROLLER://:9093
+          KAFKA_CFG_ADVERTISED_LISTENERS: HOST://localhost:9092
+          KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,HOST:PLAINTEXT
+          KAFKA_CFG_INTER_BROKER_LISTENER_NAME: HOST
+          ALLOW_PLAINTEXT_LISTENER: "yes"
+        ports:
+          - 9092:9092
+        options: >-
+          --health-cmd "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 20
       postgres:
         image: postgres:16-alpine
         env:
@@ -27,6 +46,7 @@ jobs:
           --health-retries 10
     env:
       IOT_POSTGRES_TEST_DSN: postgres://postgres:regression-only@localhost:5432/iot?sslmode=disable
+      IOT_KAFKA_TEST_BROKERS: localhost:9092
 
     steps:
       - name: Checkout

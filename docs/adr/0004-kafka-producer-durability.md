@@ -47,8 +47,11 @@ guarantee is again no stronger than `RequireOne`.
   partitions or replica assignments remains an operator action.
 - On startup, the service compares managed dynamic configuration entries
   (`min.insync.replicas` and DLQ `retention.ms`) and reconciles drift through
-  `AlterConfigs`. Changes to the deployment's desired values therefore also affect
-  existing topics. Partition-count and replication-factor drift is logged only.
+  `IncrementalAlterConfigs` SET operations, preserving unrelated operator-managed
+  overrides. Configuration errors propagate to the startup retry loop; there is no
+  replacement-style fallback for brokers without this API. Changes to desired
+  values therefore also affect existing topics. Partition-count and
+  replication-factor drift is logged only.
 - If telemetry throughput ever makes the round trip the bottleneck, the correct
   response is a larger `BatchSize`/`BatchTimeout`, not weaker acknowledgements.
 

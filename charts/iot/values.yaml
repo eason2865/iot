@@ -1,5 +1,5 @@
 images:
-  app: iot-app:2.43
+  app: iot-app:2.44
 
 replicas:
   managementAPI: 2

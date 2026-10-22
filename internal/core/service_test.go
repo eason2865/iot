@@ -40,6 +40,21 @@ func TestServiceRejectsInvalidMQTTTopicIdentifiers(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsNoncanonicalIdentifiers(t *testing.T) {
+	svc := NewService(fakeRepo{}, nil)
+	for _, id := range []string{" tenant-a", "tenant-a ", "tenant\x00a", strings.Repeat("x", 65)} {
+		if _, err := svc.CreateTenant(t.Context(), &corev1.CreateTenantRequest{Id: id, Name: "test"}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("tenant %q: %v", id, err)
+		}
+		if _, err := svc.CreateDevice(t.Context(), &corev1.CreateDeviceRequest{TenantId: "t", DeviceId: id, ProductId: "p", Secret: "s"}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("device %q: %v", id, err)
+		}
+		if _, err := svc.CreateCommand(t.Context(), &corev1.CreateCommandRequest{TenantId: "t", DeviceId: id}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("command device %q: %v", id, err)
+		}
+	}
+}
+
 func TestListCommandsScopesToTenant(t *testing.T) {
 	svc := NewService(pagedFakeRepo{}, nil)
 	resp, err := svc.ListCommands(t.Context(), &corev1.ListCommandsRequest{

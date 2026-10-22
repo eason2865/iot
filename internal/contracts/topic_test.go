@@ -61,12 +61,28 @@ func TestTopicFilters(t *testing.T) {
 }
 
 func TestTopicPartValidationRejectsMQTTWildcardsAndSeparators(t *testing.T) {
-	for _, value := range []string{"", " ", "tenant/a", "tenant+a", "tenant#a"} {
+	for _, value := range []string{"", " ", " tenant-a", "tenant-a ", "tenant/a", "tenant+a", "tenant#a", "tenant\x00a", "tenant\na", string([]byte{0xff})} {
 		if contracts.IsValidTopicPart(value) {
 			t.Fatalf("IsValidTopicPart(%q) = true, want false", value)
 		}
 		if _, err := contracts.BuildTelemetryTopic(value, "device-42"); err == nil {
 			t.Fatalf("BuildTelemetryTopic(%q, device-42) error = nil, want error", value)
+		}
+	}
+}
+
+func TestTopicBuildersPreserveCanonicalIdentity(t *testing.T) {
+	for _, value := range []string{" tenant-a", "tenant-a "} {
+		if _, err := contracts.BuildCommandTopic("t", value); err == nil {
+			t.Errorf("device %q was silently normalized", value)
+		}
+		if _, err := contracts.BuildTenantCommandTopicFilter(value); err == nil {
+			t.Errorf("tenant %q was silently normalized", value)
+		}
+	}
+	for _, topic := range []string{"/tenant/t/device/d/telemetry", "tenant/t/device/d/telemetry/", "tenant/ t/device/d/telemetry"} {
+		if _, _, _, ok := contracts.ParseDeviceTopic(topic); ok {
+			t.Errorf("noncanonical topic accepted: %q", topic)
 		}
 	}
 }

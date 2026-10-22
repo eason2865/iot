@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -645,11 +646,11 @@ func (s *PostgresStore) ClaimCommandsForDispatch(limit int, lease time.Duration)
 		return nil, nil
 	}
 	rows, err := s.db.Query(`WITH claimed AS (
-  SELECT id FROM commands WHERE status = 'created' AND next_dispatch_at <= NOW()
+  SELECT id FROM commands WHERE status = 'created' AND next_dispatch_at <= NOW() AND dispatch_attempts < $3
   ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1
 ) UPDATE commands c SET dispatch_attempts = c.dispatch_attempts + 1, next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
 FROM claimed WHERE c.id = claimed.id
-RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at`, limit, lease.String())
+RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at`, limit, lease.String(), maxDispatchAttempts)
 	if err != nil {
 		return nil, err
 	}
@@ -660,14 +661,10 @@ RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.u
 // MarkCommandPublished transitions a command from created to published once the
 // dispatcher wrote it to Kafka. The deadline is NOT started here; it begins
 // only when device-worker confirms the MQTT downlink via MarkCommandSent.
-func (s *PostgresStore) MarkCommandPublished(id string) error {
-	result, err := s.db.Exec(`UPDATE commands SET status = 'published', updated_at = NOW() WHERE id = $1 AND status = 'created'`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n == 1 {
-		_, err = s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'published')`, id)
-	}
+// The claimed attempt and lease fence a delayed completion from an older owner.
+func (s *PostgresStore) MarkCommandPublished(id string, attempt int) error {
+	_, err := s.updateCommandsWithEvent(`UPDATE commands SET status = 'published', updated_at = NOW()
+ WHERE id = $1 AND status = 'created' AND dispatch_attempts = $2 AND next_dispatch_at > NOW() RETURNING id`, "published", id, attempt)
 	return err
 }
 
@@ -678,18 +675,14 @@ func (s *PostgresStore) MarkCommandPublished(id string) error {
 // Kafka first, then updates the row), so requiring strictly 'published' would
 // race and leave the command stuck in published with no deadline.
 func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
-	result, err := s.db.Exec(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW() WHERE id = $1 AND status IN ('created', 'published')`, id, deadline)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n == 1 {
-		_, err = s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'delivered')`, id)
-	}
+	_, err := s.updateCommandsWithEvent(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW()
+ WHERE id = $1 AND status IN ('created', 'published') RETURNING id`, "delivered", id, deadline)
 	return err
 }
 
-func (s *PostgresStore) RescheduleCommand(id string, retryAfter time.Duration) error {
-	_, err := s.db.Exec(`UPDATE commands SET next_dispatch_at = NOW() + $2::interval, updated_at = NOW() WHERE id = $1 AND status = 'created'`, id, retryAfter.String())
+func (s *PostgresStore) RescheduleCommand(id string, attempt int, retryAfter time.Duration) error {
+	_, err := s.db.Exec(`UPDATE commands SET next_dispatch_at = NOW() + $3::interval, updated_at = NOW()
+ WHERE id = $1 AND status = 'created' AND dispatch_attempts = $2 AND next_dispatch_at > NOW()`, id, attempt, retryAfter.String())
 	return err
 }
 
@@ -723,23 +716,7 @@ func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Dur
 		query = `UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND (deadline_at <= $1 OR (deadline_at IS NULL AND updated_at + $2::interval <= $1)) RETURNING id`
 		args = append(args, nullDeadlineGrace.String())
 	}
-	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	var count int64
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		if _, err := s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'timeout')`, id); err != nil {
-			return 0, err
-		}
-		count++
-	}
-	return count, rows.Err()
+	return s.updateCommandsWithEvent(query, "timeout", args...)
 }
 
 // RecoverStaleCommands repairs commands stranded by dispatcher/worker outages:
@@ -748,7 +725,7 @@ func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Dur
 //     'created' for redelivery while attempts remain, or marked 'failed' once
 //     dispatch attempts are exhausted.
 //   - 'created' commands that exhausted dispatch attempts (persistent Kafka
-//     publish failures) are marked 'failed'.
+//     publish failures) are marked 'failed' after the active lease/backoff ends.
 //
 // Redelivery is safe: MarkCommandSent and AckCommand state guards keep
 // duplicate MQTT downlinks and ACKs idempotent.
@@ -762,7 +739,7 @@ func (s *PostgresStore) RecoverStaleCommands(staleBefore time.Time, maxAttempts 
 	}
 	failed, err := s.updateCommandsWithEvent(
 		`UPDATE commands SET status = 'failed', updated_at = NOW()
-		 WHERE dispatch_attempts >= $2 AND (status = 'created' OR (status = 'published' AND updated_at <= $1)) RETURNING id`,
+		 WHERE dispatch_attempts >= $2 AND ((status = 'created' AND next_dispatch_at <= NOW()) OR (status = 'published' AND updated_at <= $1)) RETURNING id`,
 		"failed", staleBefore, maxAttempts)
 	if err != nil {
 		return 0, 0, err
@@ -771,23 +748,14 @@ func (s *PostgresStore) RecoverStaleCommands(staleBefore time.Time, maxAttempts 
 }
 
 func (s *PostgresStore) updateCommandsWithEvent(query, event string, args ...any) (int64, error) {
-	rows, err := s.db.Query(query, args...)
+	// One statement makes both writes atomic and uses just one pool connection.
+	args = append(args, event)
+	result, err := s.db.Exec(`WITH changed AS (`+query+`)
+ INSERT INTO command_events (command_id, event_type) SELECT id, $`+strconv.Itoa(len(args))+` FROM changed`, args...)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-	var count int64
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		if _, err := s.db.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, $2)`, id, event); err != nil {
-			return 0, err
-		}
-		count++
-	}
-	return count, rows.Err()
+	return result.RowsAffected()
 }
 
 func (s *PostgresStore) ListCommands() []Command {

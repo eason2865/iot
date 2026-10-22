@@ -2,18 +2,72 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MQTT Telemetry Envelope",
   "type": "object",
-  "required": ["msgId", "tenantId", "deviceId", "ts", "type", "version", "payload"],
+  "required": [
+    "msgId",
+    "tenantId",
+    "deviceId",
+    "ts",
+    "type",
+    "version",
+    "payload"
+  ],
   "properties": {
-    "msgId": { "type": "string" },
-    "tenantId": { "type": "string" },
-    "deviceId": { "type": "string" },
-    "ts": { "type": "integer" },
-    "type": { "type": "string" },
-    "version": { "type": "string" },
-    "traceId": { "type": "string" },
-    "productId": { "type": "string" },
-    "region": { "type": "string" },
-    "seq": { "type": "integer" },
-    "payload": { "type": "object" }
+    "msgId": {
+      "$ref": "#/$defs/label64"
+    },
+    "tenantId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "deviceId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "ts": {
+      "type": "integer"
+    },
+    "type": {
+      "$ref": "#/$defs/label64"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+      "description": "1..32 UTF-8 bytes, enforced by the server in addition to the character limit."
+    },
+    "traceId": {
+      "type": "string"
+    },
+    "productId": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "label64": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+      "description": "1..64 UTF-8 bytes; maxLength counts characters, the server additionally enforces the byte limit."
+    },
+    "identifier": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/label64"
+        },
+        {
+          "pattern": "^(?!\\s)(?!.*\\s$)[^/#+]+$"
+        }
+      ],
+      "description": "Canonical identifier: no leading/trailing whitespace, controls, slash or MQTT wildcards; at most 64 UTF-8 bytes."
+    }
   }
 }

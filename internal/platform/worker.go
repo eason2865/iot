@@ -639,41 +639,46 @@ func (w *Worker) compensateUnwrittenTelemetry(ctx context.Context) {
 			afterID = 0
 			continue
 		}
-		failedRound := false
-		for _, rec := range rows {
-			if ctx.Err() != nil {
-				return
-			}
-			if !w.tenantAllowed(rec.TenantID) {
-				continue
-			}
-			if err := w.tdengine.WriteTelemetry(rec); err != nil {
-				// Stop the round on the first write error: during a TDengine
-				// outage every row fails, and continuing only spams logs. The
-				// next tick resumes from the same oldest row.
-				log.Printf("tdengine compensation write error: msg=%s err=%v", rec.MsgID, err)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("telemetry_compensate", "error")
-				}
-				if errors.Is(err, errTDFieldRejected) {
-					continue
-				}
-				failedRound = true
-				break
-			}
-			if err := marker.MarkTelemetryTDengineWritten(rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
-				log.Printf("tdengine compensation mark error: msg=%s err=%v", rec.MsgID, err)
-				continue
-			}
-			log.Printf("tdengine compensation wrote: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-			if w.metrics != nil {
-				w.metrics.IncDeviceWorker("telemetry_compensate", "ok")
-			}
-		}
-		if !failedRound {
+		if w.compensateTelemetryRows(ctx, rows, marker) {
 			afterID = nextID
 		}
 	}
+}
+
+type telemetryCompletionMarker interface {
+	MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
+}
+
+// False preserves the scan cursor for transient sink failures. Permanent field
+// violations remain pending in PostgreSQL but cannot block healthy later rows.
+func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRecord, marker telemetryCompletionMarker) bool {
+	for _, rec := range rows {
+		if ctx.Err() != nil {
+			return false
+		}
+		if !w.tenantAllowed(rec.TenantID) {
+			continue
+		}
+		if err := w.tdengine.WriteTelemetry(rec); err != nil {
+			log.Printf("tdengine compensation write error: msg=%s err=%v", rec.MsgID, err)
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("telemetry_compensate", "error")
+			}
+			if errors.Is(err, errTDFieldRejected) {
+				continue
+			}
+			return false
+		}
+		if err := marker.MarkTelemetryTDengineWritten(rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
+			log.Printf("tdengine compensation mark error: msg=%s err=%v", rec.MsgID, err)
+			continue
+		}
+		log.Printf("tdengine compensation wrote: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("telemetry_compensate", "ok")
+		}
+	}
+	return true
 }
 
 // commandAlreadyDelivered reports whether the stored command status proves the

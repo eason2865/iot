@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
 func TestTDengineWriterWriteAfterCloseDoesNotPanic(t *testing.T) {
-	db, err := sql.Open("taosRestful", "")
+	db, err := sql.Open("taosRestful", "root:unused@http(127.0.0.1:1)/")
 	if err != nil {
 		t.Fatalf("open db handle: %v", err)
 	}
@@ -22,23 +23,37 @@ func TestTDengineWriterWriteAfterCloseDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestValidateTDField(t *testing.T) {
-	for _, bad := range []string{"a\nb", "a\rb", "a\x00b", "\x7f", "tab\there"} {
-		if err := validateTDField(bad); !errors.Is(err, errTDFieldRejected) {
-			t.Fatalf("validateTDField(%q) = %v, want errTDFieldRejected", bad, err)
-		}
+func TestWriteRecordRejectsOversizedFieldsBeforeExec(t *testing.T) {
+	db, err := sql.Open("taosRestful", "root:unused@http(127.0.0.1:1)/")
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Quotes and backslashes stay legal: escapeTD neutralizes them.
-	for _, ok := range []string{"tenant-1", "msg'id", `back\slash`, "unicode ✓"} {
-		if err := validateTDField(ok); err != nil {
-			t.Fatalf("validateTDField(%q) = %v, want nil", ok, err)
+	defer db.Close()
+	w := &TDengineWriter{db: db}
+	for _, field := range []string{"tenant", "device", "message", "type", "version"} {
+		rec := TelemetryRecord{TenantID: "t", DeviceID: "d", MsgID: "m", Type: "temp", Version: "v1"}
+		value := strings.Repeat("界", 22) // 66 bytes, although only 22 characters.
+		switch field {
+		case "tenant":
+			rec.TenantID = value
+		case "device":
+			rec.DeviceID = value
+		case "message":
+			rec.MsgID = value
+		case "type":
+			rec.Type = value
+		case "version":
+			rec.Version = value
+		}
+		if err = w.writeRecord(rec); !errors.Is(err, errTDFieldRejected) {
+			t.Errorf("%s: got %v, want permanent field rejection", field, err)
 		}
 	}
 }
 
 // The db handle is never dialed here: validation must reject before Exec.
 func TestWriteRecordRejectsControlCharactersBeforeExec(t *testing.T) {
-	db, err := sql.Open("taosRestful", "")
+	db, err := sql.Open("taosRestful", "root:unused@http(127.0.0.1:1)/")
 	if err != nil {
 		t.Fatalf("open db handle: %v", err)
 	}

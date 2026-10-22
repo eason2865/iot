@@ -49,6 +49,149 @@ func isolatedPostgresStore(t *testing.T) *PostgresStore {
 	return s
 }
 
+func TestFinalDispatchAttemptKeepsActiveLease(t *testing.T) {
+	s := isolatedPostgresStore(t)
+	cmd, err := s.CreateCommand("t", "d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE commands SET dispatch_attempts=9, next_dispatch_at=NOW()-INTERVAL '1 second' WHERE id=$1`, cmd.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimCommandsForDispatch(1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].DispatchAttempts != 10 {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
+	_, failed, err := s.RecoverStaleCommands(time.Now().Add(-time.Minute), 10)
+	if err != nil || failed != 0 {
+		t.Fatalf("active last attempt failed: count=%d err=%v", failed, err)
+	}
+	if _, err = s.db.Exec(`UPDATE commands SET next_dispatch_at=NOW()-INTERVAL '1 second' WHERE id=$1`, cmd.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = s.ClaimCommandsForDispatch(1, time.Minute)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("exhausted attempt reclaimed: %v %v", claimed, err)
+	}
+	_, failed, err = s.RecoverStaleCommands(time.Now().Add(-time.Minute), 10)
+	if err != nil || failed != 1 {
+		t.Fatalf("expired final lease not failed: %d %v", failed, err)
+	}
+}
+
+func TestStaleDispatcherCannotOverwriteNewLease(t *testing.T) {
+	s := isolatedPostgresStore(t)
+	cmd, err := s.CreateCommand("t", "d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE commands SET dispatch_attempts=2,next_dispatch_at=NOW()+INTERVAL '1 minute' WHERE id=$1`, cmd.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.MarkCommandPublished(cmd.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RescheduleCommand(cmd.ID, 1, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var untouched bool
+	if err = s.db.QueryRow(`SELECT status='created' AND next_dispatch_at < NOW()+INTERVAL '2 minutes' AND NOT EXISTS(SELECT 1 FROM command_events WHERE command_id=$1 AND event_type='published') FROM commands WHERE id=$1`, cmd.ID).Scan(&untouched); err != nil || !untouched {
+		t.Fatalf("stale dispatcher changed current claim: %v %v", untouched, err)
+	}
+	if err = s.MarkCommandPublished(cmd.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := s.GetCommand(cmd.ID)
+	if !ok || stored.Status != contracts.CommandStatusPublished {
+		t.Fatalf("current claim not published: %+v", stored)
+	}
+}
+
+func TestCommandTransitionAuditAtomicity(t *testing.T) {
+	for _, event := range []string{"published", "delivered", "timeout", "requeued", "failed"} {
+		t.Run(event, func(t *testing.T) {
+			s := isolatedPostgresStore(t)
+			cmd, err := s.CreateCommand("t", "d", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior, want := "created", event
+			switch event {
+			case "delivered":
+				want = "sent"
+			case "timeout":
+				prior = "sent"
+			case "requeued":
+				prior = "published"
+				want = "created"
+			}
+			if _, err = s.db.Exec(`UPDATE commands SET status=$2, dispatch_attempts=10, next_dispatch_at=NOW()-INTERVAL '1 minute', updated_at=NOW()-INTERVAL '1 hour', deadline_at=NOW()-INTERVAL '1 minute' WHERE id=$1`, cmd.ID, prior); err != nil {
+				t.Fatal(err)
+			}
+			// Force the audit insert to fail after the state update has run.
+			if _, err = s.db.Exec(`ALTER TABLE command_events ADD CONSTRAINT reject_event CHECK(event_type <> '` + event + `')`); err != nil {
+				t.Fatal(err)
+			}
+			if event == "published" {
+				if _, err = s.db.Exec(`UPDATE commands SET next_dispatch_at=NOW()+INTERVAL '1 hour' WHERE id=$1`, cmd.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			transition := func() error {
+				switch event {
+				case "published":
+					return s.MarkCommandPublished(cmd.ID, 10)
+				case "delivered":
+					return s.MarkCommandSent(cmd.ID, time.Now().Add(time.Minute))
+				case "timeout":
+					_, err = s.ExpireCommands(time.Now(), time.Minute)
+				case "requeued":
+					err = s.RequeueCommand(cmd.ID, time.Second)
+				case "failed":
+					_, _, err = s.RecoverStaleCommands(time.Now().Add(-time.Minute), 10)
+				}
+				return err
+			}
+			if err = transition(); err == nil {
+				t.Fatal("expected audit failure")
+			}
+			var status string
+			if err = s.db.QueryRow(`SELECT status FROM commands WHERE id=$1`, cmd.ID).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != prior {
+				t.Fatalf("state committed without audit: got %s want %s", status, prior)
+			}
+			if _, err = s.db.Exec(`ALTER TABLE command_events DROP CONSTRAINT reject_event`); err != nil {
+				t.Fatal(err)
+			}
+			s.db.SetMaxOpenConns(1)
+			done := make(chan error, 1)
+			go func() { done <- transition() }()
+			select {
+			case err = <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				s.db.SetMaxOpenConns(2)
+				<-done
+				t.Fatal("transition needs a second pool connection")
+			}
+			if err = s.db.QueryRow(`SELECT status FROM commands WHERE id=$1`, cmd.ID).Scan(&status); err != nil || status != want {
+				t.Fatalf("status=%s want=%s err=%v", status, want, err)
+			}
+			if err = transition(); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err = s.db.QueryRow(`SELECT COUNT(*) FROM command_events WHERE command_id=$1 AND event_type=$2`, cmd.ID, event).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("audit count=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
 func TestPostgresWritesWithOneConnection(t *testing.T) {
 	for _, op := range []string{"telemetry", "command", "duplicate"} {
 		t.Run(op, func(t *testing.T) {

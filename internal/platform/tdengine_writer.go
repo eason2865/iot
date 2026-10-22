@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"iot/internal/contracts"
+
 	_ "github.com/taosdata/driver-go/v3/taosRestful"
 )
 
@@ -128,31 +130,13 @@ func escapeTD(s string) string {
 	return strings.ReplaceAll(s, `'`, `''`)
 }
 
-// errTDFieldRejected marks an interpolated field containing control bytes.
-var errTDFieldRejected = errors.New("tdengine field contains control characters")
-
-// validateTDField is the second layer under escapeTD. escapeTD neutralizes
-// quote/backslash breakout; this rejects control bytes (NUL, \n, \r, DEL, ...)
-// that have no business in an identifier or label. The taosRestful driver has
-// no server-side parameters (Prepare returns "restful does not support stmt",
-// and its client-side InterpolateParams writes strings RAW — switching to '?'
-// placeholders would be less safe than escapeTD), so string interpolation
-// stays; rejection surfaces as a write error, which the worker dead-letters
-// (StageTelemetryTDengine) instead of silently storing garbage.
-func validateTDField(s string) error {
-	for i := 0; i < len(s); i++ {
-		if s[i] < 0x20 || s[i] == 0x7f {
-			return errTDFieldRejected
-		}
-	}
-	return nil
-}
+// errTDFieldRejected marks a permanent input violation; retrying the same row
+// cannot help, so compensation must continue with other records.
+var errTDFieldRejected = errors.New("tdengine field rejected")
 
 func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
-	for _, field := range []string{rec.TenantID, rec.DeviceID, rec.MsgID, rec.Type, rec.Version} {
-		if err := validateTDField(field); err != nil {
-			return err
-		}
+	if err := contracts.ValidateTelemetryFields(contracts.Envelope{TenantID: rec.TenantID, DeviceID: rec.DeviceID, MsgID: rec.MsgID, Type: rec.Type, Version: rec.Version}); err != nil {
+		return fmt.Errorf("%w: %v", errTDFieldRejected, err)
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(rec.Payload))
 	// One subtable per device makes tenant/device dimensions TDengine tags.

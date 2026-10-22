@@ -110,7 +110,7 @@ func (d *CommandDispatcher) dispatchPending(ctx context.Context) {
 		err = d.publisher.PublishCommand(publishCtx, command)
 		cancel()
 		if err != nil {
-			backoff := time.Second * time.Duration(1<<min(command.DispatchAttempts, 6))
+			backoff := commandRetryBackoff(command.DispatchAttempts)
 			log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
 			if retryErr := d.store.RescheduleCommandContext(ctx, command.ID, command.DispatchAttempts, backoff); retryErr != nil {
 				log.Printf("command reschedule error: id=%s err=%v", command.ID, retryErr)

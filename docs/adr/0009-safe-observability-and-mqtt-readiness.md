@@ -60,3 +60,15 @@ The management API explicitly enables client tracing on its programmatically
 created direct gRPC client. Configuration-file defaults do not initialize that
 struct's switches. Real HTTP -> gRPC tests check trace ID, sampling and request
 ID, and verify readiness remains unsampled with no exported client span.
+
+HTTP tracing uses a shared attribute allowlist: method, route template and status.
+The compatibility `http.target` attribute also contains only the route template;
+unknown paths become `other`. Raw queries, path identifiers, URL credentials,
+headers, bodies, addresses and user agents never become span attributes. This
+applies before authentication and to both file and external exporters. The
+request is unchanged for handlers and trace context still propagates to gRPC.
+Native go-zero HTTP tracing is disabled. A custom router supplies the same safe
+404 tracing, because the framework's default 404 handler enables raw-URL tracing
+even when its regular Trace middleware switch is false. Health/ready/metrics
+requests remain span-free. Real middleware/file-exporter regressions cover
+unauthorized, authorized and unknown routes, plus normal RPC propagation.

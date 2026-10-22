@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeromicro/go-zero/core/service"
 	"github.com/zeromicro/go-zero/rest"
+	"github.com/zeromicro/go-zero/rest/router"
 	"github.com/zeromicro/go-zero/zrpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -59,7 +60,7 @@ func Run() error {
 	platform.StartTracing("management-api")
 	defer platform.StopTracing()
 	metrics := platform.NewMetrics()
-	httpServer := rest.MustNewServer(managementHTTPConf())
+	httpServer := newManagementHTTPServer()
 	httpServer.Use(rest.ToMiddleware(limitRequestBodyMiddleware))
 	httpServer.Use(rest.ToMiddleware(platform.RequestIDHTTPMiddleware))
 	httpServer.Use(rest.ToMiddleware(platform.SafeHTTPLoggingMiddleware))
@@ -85,6 +86,17 @@ func Run() error {
 	return nil
 }
 
+func newManagementHTTPServer() *rest.Server {
+	// The framework installs its raw-URL trace handler on 404 independently of
+	// Middlewares.Trace. Supply a router with a safe fallback as well as the
+	// normal middleware, so unknown paths cannot leak through that second path.
+	routes := router.NewRouter()
+	routes.SetNotFoundHandler(platform.SafeHTTPTracingMiddleware("management-api")(http.NotFoundHandler()))
+	server := rest.MustNewServer(managementHTTPConf(), rest.WithRouter(routes))
+	server.Use(rest.ToMiddleware(platform.SafeHTTPTracingMiddleware("management-api")))
+	return server
+}
+
 func managementHTTPConf() rest.RestConf {
 	return rest.RestConf{
 		ServiceConf: service.ServiceConf{
@@ -95,7 +107,7 @@ func managementHTTPConf() rest.RestConf {
 		Port:    listenPort(),
 		Timeout: 3000,
 		Middlewares: rest.MiddlewaresConf{
-			Trace:      true,
+			Trace:      false, // SafeHTTPTracingMiddleware uses an attribute allowlist.
 			Log:        false,
 			Prometheus: true,
 			Recover:    false, // SafeHTTPLoggingMiddleware also handles panics.

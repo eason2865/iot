@@ -239,25 +239,25 @@ func TestCommandDeliveryFailsClosed(t *testing.T) {
 	base := newMemoryStore(0)
 	cmd := mustSeedCommand(t, base, "tenant-a", "device-1")
 	worker := NewWorker(WorkerConfig{}, unavailableDeliveryStore{base}, nil, nil)
-	if deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err == nil {
+	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err == nil {
 		t.Fatalf("unavailable database allowed publish: %t %v", deliver, err)
 	}
 	worker = NewWorker(WorkerConfig{}, base, nil, nil)
 	foreign := cmd
 	foreign.TenantID = "tenant-b"
-	if deliver, err := worker.commandForDelivery(context.Background(), foreign); deliver || err != nil {
+	if _, deliver, err := worker.commandForDelivery(context.Background(), foreign); deliver || err != nil {
 		t.Fatalf("foreign identity: %t %v", deliver, err)
 	}
-	if deliver, err := worker.commandForDelivery(context.Background(), Command{ID: "missing"}); deliver || err != nil {
+	if _, deliver, err := worker.commandForDelivery(context.Background(), Command{ID: "missing"}); deliver || err != nil {
 		t.Fatalf("missing command: %t %v", deliver, err)
 	}
-	if deliver, err := worker.commandForDelivery(context.Background(), cmd); !deliver || err != nil {
+	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); !deliver || err != nil {
 		t.Fatalf("created command: %t %v", deliver, err)
 	}
 	if _, err := base.AckCommand(cmd.ID, cmd.TenantID, cmd.DeviceID); err != nil {
 		t.Fatal(err)
 	}
-	if deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err != nil {
+	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err != nil {
 		t.Fatalf("acked replay: %t %v", deliver, err)
 	}
 }

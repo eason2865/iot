@@ -40,6 +40,9 @@ func regressionKafkaTopic(t *testing.T) ([]string, string) {
 			t.Error(err)
 		}
 	})
+	if err := waitForKafkaTopicMetadata(ctx, client, topic); err != nil {
+		t.Fatal(err)
+	}
 	return brokers, topic
 }
 

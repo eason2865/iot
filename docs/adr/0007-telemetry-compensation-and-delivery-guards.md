@@ -23,7 +23,12 @@ can also present a command whose device has already acknowledged it.
 - A successful TDengine write is followed by the completion marker. Write or
   marker failures leave the row pending for another sweep. Permanent field
   validation failures (UTF-8, controls, canonical IDs and VARCHAR byte bounds)
-  do not stop the remaining batch and are never marked written. Ingress uses
+  and structured TDengine timestamp-range rejections (driver code `0x060b`)
+  do not stop the remaining batch or pin the scan cursor and are never marked
+  written. These rows retain their payload and pending marker for repair; a
+  later sweep can revisit them after retention/configuration changes. Network,
+  timeout, permission and unrecognized sink errors remain retryable and preserve
+  the cursor. Ingress uses
   the same field contract. PostgreSQL retains the
   original payload; the scan neither consumes DLQ offsets nor emits commands.
 - Dispatcher claims one command immediately before each publish. The publish
@@ -96,3 +101,15 @@ The command dispatcher runs timeout/recovery scans in a separate bounded loop
 from publishing. Slow Kafka calls consume their own lease-bounded contexts and
 do not delay the next scan. Both loops share cancellation and Run waits for the
 scan loop to stop. State transitions and lease/attempt fencing stay in SQL.
+
+TDengine databases must use millisecond precision (`ms`). Initialization explicitly
+creates new databases with `PRECISION 'ms'`, then reads the quoted `precision`
+column in `information_schema.ins_databases` under the existing startup deadline.
+Existing `us`/`ns` databases fail startup before stable creation or business
+consumption; the worker does not alter their precision or reinterpret stored rows.
+
+Kafka command notifications with negative `dispatchAttempts` go to `command.decode`
+DLQ before any device publish; commit follows successful DLQ persistence. Once
+the persisted identity/state check passes, PostgreSQL supplies the command body
+and retry attempt. Both dispatcher and worker bound the backoff exponent to 0–6
+so corrupted negative counters cannot panic during a shift.

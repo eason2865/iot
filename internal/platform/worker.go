@@ -419,6 +419,15 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			}
 			continue
 		}
+		if cmd.DispatchAttempts < 0 {
+			if w.metrics != nil {
+				w.metrics.IncDeviceWorker("command", "error")
+			}
+			if err := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandDecode, errors.New("negative command dispatchAttempts"), w.metrics); err != nil {
+				return err
+			}
+			continue
+		}
 		if !w.tenantAllowed(cmd.TenantID) {
 			// See the telemetry path: an allowlisted worker still receives other
 			// tenants' commands on a wildcard subscription.
@@ -438,7 +447,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		// device would execute it twice. 'created'/'published' still publish:
 		// a requeue resets to 'created' on purpose, and a 'published' row
 		// means the first downlink never completed.
-		deliver, lookupErr := w.commandForDelivery(ctx, cmd)
+		storedCommand, deliver, lookupErr := w.commandForDelivery(ctx, cmd)
 		if lookupErr != nil {
 			return fmt.Errorf("command delivery lookup: %w", lookupErr)
 		}
@@ -451,6 +460,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			}
 			continue
 		}
+		// Kafka is a delivery notification, not the authoritative command body or
+		// retry counter. Use the persisted fields after identity/state checks.
+		cmd = storedCommand
 
 		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
 		if w.mqtt == nil {
@@ -522,7 +534,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				if requeuer, ok := w.store.(interface {
 					RequeueCommand(id string, retryAfter time.Duration) error
 				}); ok {
-					backoff := time.Second * time.Duration(1<<min(cmd.DispatchAttempts, 6))
+					backoff := commandRetryBackoff(cmd.DispatchAttempts)
 					if rqErr := requeueStoredCommand(ctx, requeuer, cmd.ID, backoff); rqErr != nil {
 						log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
 					}
@@ -603,7 +615,7 @@ type telemetryCompletionMarker interface {
 	MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
 }
 
-// False preserves the scan cursor for transient sink failures. Permanent field
+// False preserves the scan cursor for transient sink failures. Permanent input
 // violations remain pending in PostgreSQL but cannot block healthy later rows.
 func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRecord, marker telemetryCompletionMarker) bool {
 	for _, rec := range rows {
@@ -618,7 +630,7 @@ func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRe
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry_compensate", "error")
 			}
-			if errors.Is(err, errTDFieldRejected) {
+			if isPermanentTDengineWriteError(err) {
 				continue
 			}
 			return false
@@ -705,9 +717,9 @@ func sleepBeforeKafkaRetry(ctx context.Context) {
 	}
 }
 
-func (w *Worker) commandForDelivery(ctx context.Context, event Command) (bool, error) {
+func (w *Worker) commandForDelivery(ctx context.Context, event Command) (Command, bool, error) {
 	if w.store == nil {
-		return false, errors.New("command store is not configured")
+		return Command{}, false, errors.New("command store is not configured")
 	}
 	var cmd Command
 	var err error
@@ -725,13 +737,13 @@ func (w *Worker) commandForDelivery(ctx context.Context, event Command) (bool, e
 		}
 	}
 	if IsNotFound(err) {
-		return false, nil
+		return Command{}, false, nil
 	}
 	if err != nil {
-		return false, err
+		return Command{}, false, err
 	}
 	if cmd.TenantID != event.TenantID || cmd.DeviceID != event.DeviceID {
-		return false, nil
+		return Command{}, false, nil
 	}
-	return cmd.Status == contracts.CommandStatusCreated || cmd.Status == contracts.CommandStatusPublished, nil
+	return cmd, cmd.Status == contracts.CommandStatusCreated || cmd.Status == contracts.CommandStatusPublished, nil
 }

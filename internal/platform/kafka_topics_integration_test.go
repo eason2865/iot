@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	metadataAPI "github.com/segmentio/kafka-go/protocol/metadata"
 )
 
 func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
@@ -46,6 +47,9 @@ func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
 	if err = created.Errors[topic]; err != nil {
 		t.Fatal(err)
 	}
+	if err = waitForKafkaTopicMetadata(ctx, client, topic); err != nil {
+		t.Fatal(err)
+	}
 	desired := []kafka.TopicConfig{{Topic: topic, NumPartitions: 1, ReplicationFactor: 1, ConfigEntries: []kafka.ConfigEntry{{ConfigName: "retention.ms", ConfigValue: "200000"}, {ConfigName: "min.insync.replicas", ConfigValue: "1"}}}}
 	for i := 0; i < 2; i++ {
 		if err = reconcileKafkaTopics(ctx, client.Addr, desired); err != nil {
@@ -67,6 +71,75 @@ func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
 				t.Errorf("%s=%s want=%s", name, values[name], want)
 			}
 		}
+	}
+}
+
+// CreateTopics success does not imply topic/leader metadata has reached every
+// broker. Establish that prerequisite before testing one-shot reconciliation.
+func waitForKafkaTopicMetadata(ctx context.Context, client *kafka.Client, topic string) error {
+	var last error
+	for {
+		metadata, err := client.Metadata(ctx, &kafka.MetadataRequest{Topics: []string{topic}})
+		if err == nil {
+			err = fmt.Errorf("topic %s metadata is not ready", topic)
+			for _, item := range metadata.Topics {
+				if item.Name != topic {
+					continue
+				}
+				if item.Error != nil {
+					err = item.Error
+					break
+				}
+				ready := len(item.Partitions) > 0
+				for _, partition := range item.Partitions {
+					ready = ready && partition.Error == nil && partition.Leader.Host != "" && len(partition.Replicas) > 0 && len(partition.Isr) > 0
+				}
+				if ready {
+					return nil
+				}
+			}
+		}
+		last = err
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for %s metadata (%v): %w", topic, last, ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+type delayedTopicMetadata struct {
+	calls       int
+	unavailable bool
+}
+
+func (d *delayedTopicMetadata) RoundTrip(_ context.Context, _ net.Addr, _ kafka.Request) (kafka.Response, error) {
+	d.calls++
+	topic := metadataAPI.ResponseTopic{Name: "new-topic", ErrorCode: int16(kafka.UnknownTopicOrPartition)}
+	if !d.unavailable && d.calls > 1 {
+		topic.ErrorCode = 0
+		topic.Partitions = []metadataAPI.ResponsePartition{{LeaderID: 1, ReplicaNodes: []int32{1}}}
+		if d.calls > 2 {
+			topic.Partitions[0].IsrNodes = []int32{1}
+		}
+	}
+	return &metadataAPI.Response{Brokers: []metadataAPI.ResponseBroker{{NodeID: 1, Host: "broker", Port: 9092}}, Topics: []metadataAPI.ResponseTopic{topic}}, nil
+}
+
+func TestKafkaMetadataSetupWaitsForTopicAndLeaderReadiness(t *testing.T) {
+	transport := &delayedTopicMetadata{}
+	client := &kafka.Client{Addr: kafka.TCP("broker:9092"), Transport: transport}
+	if err := waitForKafkaTopicMetadata(t.Context(), client, "new-topic"); err != nil {
+		t.Fatal(err)
+	}
+	if transport.calls != 3 {
+		t.Fatalf("metadata checked %d times, want unknown topic -> no ISR -> ready", transport.calls)
+	}
+	transport.unavailable = true
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	if err := waitForKafkaTopicMetadata(ctx, client, "new-topic"); err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("missing setup deadline: %v", err)
 	}
 }
 

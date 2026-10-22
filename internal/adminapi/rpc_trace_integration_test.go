@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/zeromicro/go-zero/rest/handler"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -61,7 +60,6 @@ func TestHTTPTracePropagatesThroughProductionRPCClient(t *testing.T) {
 	}
 	defer client.Conn().Close()
 	api := &Server{rpc: corev1.NewCoreServiceClient(client.Conn())}
-	conf := managementHTTPConf()
 	for _, probe := range []bool{false, true} {
 		path := "/api/v1/tenants"
 		endpoint := http.HandlerFunc(api.listTenantsHandler)
@@ -70,7 +68,7 @@ func TestHTTPTracePropagatesThroughProductionRPCClient(t *testing.T) {
 			endpoint = api.readyHandler
 			exporter.Reset()
 		}
-		h := platform.RequestIDHTTPMiddleware(handler.TraceHandler(conf.Name, path, handler.WithTraceIgnorePaths(conf.TraceIgnorePaths))(endpoint))
+		h := platform.RequestIDHTTPMiddleware(platform.SafeHTTPTracingMiddleware("management-api")(endpoint))
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("X-Request-Id", "trace-regression")
 		req.Header.Set("traceparent", "00-11111111111111111111111111111111-2222222222222222-01")

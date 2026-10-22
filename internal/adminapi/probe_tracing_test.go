@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/zeromicro/go-zero/rest/handler"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"iot/internal/platform"
 	corev1 "iot/proto/core/v1"
 )
 
@@ -40,10 +40,9 @@ func TestProbesDoNotProduceTraces(t *testing.T) {
 	otel.SetTracerProvider(provider)
 	defer otel.SetTracerProvider(old)
 	defer provider.Shutdown(t.Context())
-	conf := managementHTTPConf()
 	api := &Server{rpc: probeRPC{}}
 	for path, endpoint := range map[string]http.HandlerFunc{"/healthz": api.healthHandler, "/readyz": api.readyHandler} {
-		h := handler.TraceHandler(conf.Name, path, handler.WithTraceIgnorePaths(conf.TraceIgnorePaths))(endpoint)
+		h := platform.SafeHTTPTracingMiddleware("management-api")(endpoint)
 		for i := 0; i < 128; i++ {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Header.Set("traceparent", "00-11111111111111111111111111111111-1111111111111111-01")
@@ -57,7 +56,7 @@ func TestProbesDoNotProduceTraces(t *testing.T) {
 	if spans := exporter.GetSpans(); len(spans) != 0 {
 		t.Fatalf("probes exported %d spans", len(spans))
 	}
-	h := handler.TraceHandler(conf.Name, "/business", handler.WithTraceIgnorePaths(conf.TraceIgnorePaths))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h := platform.SafeHTTPTracingMiddleware("management-api")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/business", nil))
 	if len(exporter.GetSpans()) != 1 {
 		t.Fatal("business tracing was disabled")

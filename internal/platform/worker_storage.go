@@ -7,6 +7,12 @@ import (
 	"iot/internal/contracts"
 )
 
+// Defensive bounds also protect maintenance callers from a manually corrupted
+// database counter; untrusted Kafka counters are rejected before lookup.
+func commandRetryBackoff(attempt int) time.Duration {
+	return time.Second * time.Duration(1<<min(max(attempt, 0), 6))
+}
+
 func restoreStoredTelemetry(ctx context.Context, store Repository, rec TelemetryRecord) (TelemetryRecord, error) {
 	if restorer, ok := store.(interface {
 		RestoreTelemetryContext(context.Context, TelemetryRecord) (TelemetryRecord, error)

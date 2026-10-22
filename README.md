@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.52`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.53`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -632,3 +632,11 @@ single record fails with an explicit precondition error and needs operator repai
 Kafka setup attempts other configured bootstrap endpoints after a failure within
 the shared deadline. Timeout/recovery scans run independently of command publishes.
 The gateway explicitly enables gRPC client tracing; readiness probes stay unsampled.
+
+TDengine databases must use `ms` precision. Startup checks existing databases and
+rejects `us`/`ns` before consumption; create a separate millisecond database rather
+than changing units underneath stored data. Compensation skips structured
+timestamp-range rejections while retaining the PostgreSQL row pending for repair
+and later sweeps, so an out-of-retention record cannot starve healthy later rows.
+HTTP traces record only method, route template and status, including 401/404;
+raw queries, identifiers and headers are excluded for every exporter.

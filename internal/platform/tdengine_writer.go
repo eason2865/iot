@@ -12,6 +12,7 @@ import (
 
 	"iot/internal/contracts"
 
+	taoserrors "github.com/taosdata/driver-go/v3/errors"
 	_ "github.com/taosdata/driver-go/v3/taosRestful"
 )
 
@@ -97,9 +98,20 @@ func (w *TDengineWriter) Close() error {
 }
 
 func (w *TDengineWriter) ensureSchema(ctx context.Context) error {
-	stmts := []string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", w.database),
-		fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s.%s (
+	if _, err := w.db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s PRECISION 'ms'", w.database)); err != nil {
+		return err
+	}
+	// IF NOT EXISTS preserves an existing database's precision. Integer device
+	// timestamps are milliseconds; fail before creating tables or consuming data
+	// when an externally provisioned database uses another unit.
+	var precision string
+	if err := w.db.QueryRowContext(ctx, "SELECT `precision` FROM information_schema.ins_databases WHERE name = '"+escapeTD(w.database)+"'").Scan(&precision); err != nil {
+		return fmt.Errorf("tdengine database precision check: %w", err)
+	}
+	if precision != "ms" {
+		return fmt.Errorf("tdengine database %s has unsupported precision %q: require ms", w.database, precision)
+	}
+	_, err := w.db.ExecContext(ctx, fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s.%s (
   ts TIMESTAMP,
   msg_id VARCHAR(64),
   type VARCHAR(64),
@@ -109,14 +121,8 @@ func (w *TDengineWriter) ensureSchema(ctx context.Context) error {
 ) TAGS (
   tenant_id VARCHAR(64),
   device_id VARCHAR(64)
-)`, w.database, w.table),
-	}
-	for _, stmt := range stmts {
-		if _, err := w.db.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
+)`, w.database, w.table))
+	return err
 }
 
 func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
@@ -155,6 +161,18 @@ func escapeTD(s string) string {
 // errTDFieldRejected marks a permanent input violation; retrying the same row
 // cannot help, so compensation must continue with other records.
 var errTDFieldRejected = errors.New("tdengine field rejected")
+
+// Range rejection is permanent for this write under the current retention
+// configuration. Keep the PostgreSQL row pending for operator repair and later
+// sweeps, but do not let it pin the cursor ahead of healthy records. Match the
+// driver's structured code, never error text that can also describe an outage.
+func isPermanentTDengineWriteError(err error) bool {
+	if errors.Is(err, errTDFieldRejected) {
+		return true
+	}
+	var rejected *taoserrors.TaosError
+	return errors.As(err, &rejected) && rejected.Code&0xffff == 0x060b
+}
 
 func (w *TDengineWriter) writeRecord(ctx context.Context, rec TelemetryRecord) error {
 	if err := contracts.ValidateTelemetryFields(contracts.Envelope{TenantID: rec.TenantID, DeviceID: rec.DeviceID, MsgID: rec.MsgID, Type: rec.Type, Version: rec.Version}); err != nil {

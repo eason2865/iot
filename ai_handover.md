@@ -2,6 +2,18 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## TDengine 补偿、精度与事件/Trace 防护（2026-10-22，发布版本 2.53）
+
+- 针对用户报告的5项缺口：前4项通过真实PG/Kafka/TDengine及实际go-zero中间件/file exporter复现。旧版2000-01-01范围拒绝阻止补偿游标前进；us/ns数据库初始化被接受；负数attempt在MQTT失败后panic；事件attempt=99把DB attempt=2应有的4秒退避改成64秒；401/404的trace写入虚构查询/路径/User-Agent敏感值。基线日志见outputs/fixes-253/。
+- TDengine补偿按driver结构化TaosError的0x060b识别当前保留配置下的时间范围拒绝，和已有字段永久校验错误一样跳过失败行并推进扫描；原始PG记录、payload和tdengine_written=false保持，后续扫描可在修复后重试。网络、取消、超时、权限及其他未知错误仍保留游标等待恢复。没有把失败写成成功，也不删除业务数据或扩大保留范围。真实私有库以DURATION1/KEEP3固定保留配置，坏记录与后续健康记录跨两个扫描批次验证，健康记录完成、坏记录保持未完成。
+- 新库显式PRECISION ms；CREATE DATABASE IF NOT EXISTS后，在同一启动限时内读取information_schema.ins_databases的加引号precision列。已有us/ns库明确报unsupported precision并关闭连接，在stable创建和消费前失败；不自动换算/修改已有库。真实ms库在UTC/Asia/Shanghai的时间戳读回保持正确，us/ns准确拒绝。
+- Kafka负dispatchAttempts指令进入command.decode DLQ，成功持久化后才提交位点，不调用设备publish。合法事件通过数据库身份/状态校验后，使用数据库中的指令及attempt做下发和退避；共享退避函数把指数约束在0..6，worker/dispatcher均不会因负计数移位panic。真实Kafka+隔离PG+MQTT故障模拟验证负事件保全原文、不下发、不panic，事件99/数据库2时退避精确4秒。
+- management-api关闭go-zero原生HTTP tracing，接入SafeHTTPTracingMiddleware属性白名单：方法、路由模板、状态；兼容http.target仅为模板，未知路径为other。不读取查询、路径变量、URL用户信息、请求头、正文、客户端地址/User-Agent作为span属性；原请求保持可用于鉴权/RPC。另提供安全404 router，因为框架默认404无视普通Trace开关仍会采集原URL。真实配置绑定的HTTP中间件+生产文件exporter覆盖401、200及404无虚构敏感值；既有真实HTTP→生产gRPC client上下文传播及探针零span保持，外部exporter同样从安全属性入口获得span。
+- Kafka集成测试在CreateTopics后等待topic/partition/leader/ISR元数据就绪，再运行单次对账/故障地址断言；生产启动逻辑未因测试竞态修改。本机基线3轮未出现竞态，不宣称本轮复现了生产地址切换失败；新增受控UnknownTopic→缺ISR→Ready响应测试及等待超时，相关真实Kafka测试连续10轮通过。
+- 完整验证：启用独立PG容器iot-fix253-pg、真实Kafka私有topic和TDengine私有库的go test -count=1 ./...、go test -race ./internal/... ./cmd/dlq-replay通过；go vet、fmt/diff、7个Linux arm64构建、双profile Helm lint/template、Compose config、shell语法、固定插件protobuf重生零漂移及正式镜像在隔离PG连续迁移两次通过。新增用例及红绿日志在outputs/fixes-253/（Git忽略，敏感配置600）。所有本轮临时资源清理，未改运行服务业务数据。
+- 发布默认镜像iot-app:2.53、Chart0.2.10；已构建manifest list sha256:bfb73fb37eaacd07ad35057279348523fe25e58bc3a0454be25f423c836d3308。无新增迁移SQL文件，TD初始化运行DDL增加ms声明/精度检查；双语README、ADR0007/0009和交接同步。按仓库规则在main提交、打2.53 tag并一起推送。
+- 当前实际部署保持2.52 / c78afb8（Helm iot revision4、Chart0.2.9，四服务各2/2 Ready）。上一轮按用户要求删除重建PG/Kafka/TD业务卷和EMQX PVC，空库检查通过后重新部署；当前运行数据来自重新生成的Demo和隔离验证，凭据/证书保留，监控9/9 up。部署证据outputs/deployment-20261022-252/；本轮构建修复版本，不替换运行服务，不再次清空数据。
+
 ## 连接身份、展开预算、分页与并行扫描修复（2026-10-22，发布版本 2.52）
 
 - 针对 main / 2.51 / b79dc68 的7项缺口修复；当前实际运行已是2.51（Helm iot revision 3、Chart0.2.8、4个服务各2/2 Ready，部署证据 outputs/deployment-20261022-251/）。本轮只构建/验证/发布，不替换运行服务，不抢占运行中的MQTT服务ClientID。

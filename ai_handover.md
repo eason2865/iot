@@ -2,6 +2,18 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 死信容量与遥测接收时间修复（2026-10-22，发布版本 2.48）
+
+- 修复 2.47 三类复现：约 800 KiB 原文包装 Base64 后超过 DLQ 默认上限；历史 Kafka 遥测首次入 PG 丢失 ReceivedAt 导致假在线；并发事务晚提交覆盖较新设备状态。
+- ingestor/worker 共用 newDeadLetterWriter，BatchBytes 为 2 MiB，RequiredAcks=all、BatchSize=1 和 JSON/valueBase64 格式保持不变，不截断原文。DLQ topic 配置新增 max.message.bytes 至少 2 MiB，创建及存量增量对账均生效；保留运维设置的更大值，普通业务 topic 的大小仍不受管。dlq-replay 的 MaxBytes=10 MB 已覆盖读取。容量按现有约 1 MiB 业务记录的 Base64/元数据膨胀预留，包装后超过 2 MiB 仍会失败且不确认，不宣称任意大小无上限保全。
+- PG 新增内部 RestoreTelemetryContext，接受受信 Kafka TelemetryRecord 并保留原 ReceivedAt；worker 透传运行 ctx，缺失该字段的旧 Kafka 记录使用原 Kafka message.Time，不用消费时间。公开 RecordTelemetryContext 仍由服务端生成接收时间，不信任外部传入的 receivedAt。恢复入口拒绝零接收时间，保持 payload 校验、单连接事务及重复记录不刷新状态的语义；TDengineWritten 仅使用数据库的真实标记。
+- dlq-replay 同步修复 mqtt.kafka 转换时重置时间：优先保留已有 TelemetryRecord.receivedAt，缺失时以 DLQ occurredAt 恢复，历史死信两者均缺失时以设备 ts 估算；无有效时间返回错误，不自动移动该记录位点。MQTT 非法内容仍不能盲目重放，时间来源的估算边界已记录在 README/ADR。
+- device_state 的 INSERT/ON CONFLICT 在同一 SQL 内仅接受 last_seen_at 为 NULL 或严格更新的接收时间，last_seen_at/last_msg_id 配对更新；updated_at 用 GREATEST 保持单调。较旧或相同时间的历史记录正常入 telemetry_records，但不刷新设备状态；在线判断继续使用接收时间和 TTL。内存测试仓储保持相同的时间行为。本轮改变运行 DML，没有新增 DDL 迁移或自动修正已存历史时间。
+- 回归先红后绿：真实 Kafka 中 800 KiB 随机原文先成功写入，旧 ingestor/worker DLQ 均报 Message Size Too Large；真实 worker→PG 将一天前的首次记录改成当天时间；用独立 PG 的触发器/advisory lock 暂停旧事务，新事务提交后再放行，旧版本 last_seen_at/last_msg_id 实际倒退。DLQ CLI 的时间回归也先复现再修复。
+- 修复后真实 Kafka 验证两个 DLQ 构造入口自动升级已有 topic，完整 Base64 解码回原文字节及来源元数据；实际非法 MQTT processMessage 路径在无 PG 副本时完成 DLQ、只确认一次且无 fatal。受管容量只增不减、普通 topic 未管理配置保护通过。真实 worker 同时消费显式旧 ReceivedAt 与缺失字段/旧 Kafka 时间戳两条记录，PG 时间保持原值、设备仍离线；并发延迟旧事务不覆盖较新状态，锁检查按测试独占 key 隔离且定向 race 重复 3 次通过。
+- 验证通过：go test -count=1 ./...（启用独立 PG、真实 Kafka/TDengine）、go test -race ./internal/... ./cmd/dlq-replay、并发 PG 定向 race 3 次、go vet ./...、make fmt-check、git diff --check、7 个 Linux arm64 二进制构建、Helm 本地/生产双 profile lint/template、Compose config、部署脚本语法及 protobuf 重生零漂移。
+- 默认镜像 iot-app:2.48、Chart 0.2.5；镜像已构建，manifest list sha256:6ac66b0baeec6e7adef0a752337af9f005a5a79daf597ed983c5126f290f4b9f。README 中英文及 ADR 0004/0007 同步。按项目规则在 main 提交、打 2.48 tag 并一起推送。本轮不部署业务服务，上次实际部署记录仍为 2.43；仅使用独立 PG 容器/schema 和私有 Kafka topic/group、TDengine database 验证并清理，不修改运行服务数据或配置。
+
 ## PostgreSQL 取消、遥测契约与订阅可靠性修复（2026-10-22，发布版本 2.47）
 
 - 修复 2.46 三类复现：列表/命令扫描等 PostgreSQL 操作不响应取消、遥测 payload 与公开 Schema 不一致、ingestor 接受 QoS 0 降级。

@@ -71,8 +71,8 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, concurrency), publisher: publisher, inbox: cfg.Inbox, ctx: ctx, cancel: cancel, errCh: make(chan error, 1)}
 	if len(cfg.KafkaBrokers) > 0 {
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, topic)
-		b.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: topic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), topic)
+		b.dlqWriter = newDeadLetterWriter(cfg.KafkaBrokers, topic)
 	}
 	opts := mqtt.NewClientOptions().AddBroker(cfg.BrokerURL).SetClientID(cfg.ClientID)
 	if cfg.Username != "" {

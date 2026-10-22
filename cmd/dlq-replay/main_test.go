@@ -55,6 +55,31 @@ func TestMQTTDeadLetterReplayTargetsKafkaTelemetry(t *testing.T) {
 	}
 }
 
+func TestTelemetryReplayPreservesOriginalReceiveTime(t *testing.T) {
+	received := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	for _, stage := range []string{platform.StageMQTTKafka, platform.StageTelemetryPostgres, platform.StageTelemetryTDengine} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy=%t", stage, legacy), func(t *testing.T) {
+				item := platform.DeadLetter{Stage: stage, SourceTopic: "tenant/t/device/d/telemetry", OccurredAt: received.Format(time.RFC3339Nano)}
+				value := []byte(fmt.Sprintf(`{"msgId":"m","tenantId":"t","deviceId":"d","ts":%d,"type":"telemetry","version":"v1","payload":{}}`, received.UnixMilli()))
+				want := received
+				if legacy {
+					item.OccurredAt = ""
+					want = time.UnixMilli(received.UnixMilli())
+				}
+				_, payload, err := replayKafkaPayload(item, value)
+				var rec platform.TelemetryRecord
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = json.Unmarshal(payload, &rec); err != nil || !rec.ReceivedAt.Equal(want) {
+					t.Fatalf("replay replaced receive time: got %s want %s err=%v", rec.ReceivedAt, want, err)
+				}
+			})
+		}
+	}
+}
+
 type replayAckRecorder struct{ id, tenant, device string }
 
 func (s *replayAckRecorder) AckCommandContext(_ context.Context, id, tenant, device string) (platform.Command, error) {

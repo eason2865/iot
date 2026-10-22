@@ -38,6 +38,17 @@ can also present a command whose device has already acknowledged it.
   Expiry/recovery sweeps select at most 500 rows per transition using
   `FOR UPDATE SKIP LOCKED`; a locked row is retried later without blocking other
   commands. State and audit still commit in one statement.
+- Live ingress stamps server receive time; trusted worker restoration preserves
+  `receivedAt` from the Kafka record and uses the original Kafka message timestamp
+  only for older records without that field. DLQ replay uses existing receive
+  time, then DLQ `occurredAt`, then device event time for legacy metadata. It
+  never labels replay processing as a fresh receive. Device liveness still uses
+  receive time and the configured TTL, not device event time for normal ingress.
+  PostgreSQL updates `last_seen_at` and `last_msg_id` together only when receive
+  time strictly advances (NULL accepts the first sample); equal/older arrivals
+  cannot regress state. `updated_at` is also monotonic. Duplicate storage keeps
+  its original receive time and never refreshes liveness. Historical rows still
+  commit even if their liveness update is skipped.
 - Before command MQTT publishing, worker reads persisted state and verifies the
   tenant/device identity. Missing, foreign, sent and terminal commands are skipped.
   Database errors stop the consumer without committing the message. Failed status

@@ -371,9 +371,22 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 }
 
 func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contracts.Envelope) (TelemetryRecord, error) {
-	if err := contracts.ValidateTelemetryPayload(env.Payload); err != nil {
+	return s.RestoreTelemetryContext(ctx, TelemetryRecord{
+		MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts,
+		Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: time.Now().UTC(),
+	})
+}
+
+// RestoreTelemetryContext preserves the server receive time from a trusted
+// Kafka record. Public ingress stamps its own time via RecordTelemetryContext.
+func (s *PostgresStore) RestoreTelemetryContext(ctx context.Context, rec TelemetryRecord) (TelemetryRecord, error) {
+	if err := contracts.ValidateTelemetryPayload(rec.Payload); err != nil {
 		return TelemetryRecord{}, err
 	}
+	if rec.ReceivedAt.IsZero() {
+		return TelemetryRecord{}, fmt.Errorf("%w: original receive time is required", contracts.ErrInvalidEnvelope)
+	}
+	rec.TDengineWritten = false
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -381,24 +394,14 @@ func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contract
 		return TelemetryRecord{}, err
 	}
 	defer tx.Rollback()
-	if err := requireDevice(ctx, tx, env.TenantID, env.DeviceID); err != nil {
+	if err := requireDevice(ctx, tx, rec.TenantID, rec.DeviceID); err != nil {
 		return TelemetryRecord{}, err
 	}
-	payloadBytes, err := json.Marshal(env.Payload)
+	payloadBytes, err := json.Marshal(rec.Payload)
 	if err != nil {
 		return TelemetryRecord{}, err
 	}
 	now := time.Now().UTC()
-	rec := TelemetryRecord{
-		MsgID:      env.MsgID,
-		TenantID:   env.TenantID,
-		DeviceID:   env.DeviceID,
-		Ts:         env.Ts,
-		Type:       env.Type,
-		Version:    env.Version,
-		Payload:    env.Payload,
-		ReceivedAt: now,
-	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO telemetry_records (msg_id, tenant_id, device_id, ts, type, version, payload, received_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (msg_id, tenant_id, device_id) DO NOTHING`,
@@ -425,9 +428,12 @@ func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contract
 		return stored, ErrDuplicateTelemetry
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO device_state (tenant_id, device_id, connected, last_seen_at, last_msg_id, updated_at)
-		VALUES ($1,$2,true,$3,$4,$3)
-		ON CONFLICT (tenant_id, device_id) DO UPDATE SET connected = true, last_seen_at = EXCLUDED.last_seen_at, last_msg_id = EXCLUDED.last_msg_id, updated_at = EXCLUDED.updated_at`,
-		rec.TenantID, rec.DeviceID, now, rec.MsgID)
+		VALUES ($1,$2,true,$3,$4,$5)
+		ON CONFLICT (tenant_id, device_id) DO UPDATE SET connected = true,
+		last_seen_at = EXCLUDED.last_seen_at, last_msg_id = EXCLUDED.last_msg_id,
+		updated_at = GREATEST(device_state.updated_at, EXCLUDED.updated_at)
+		WHERE device_state.last_seen_at IS NULL OR device_state.last_seen_at < EXCLUDED.last_seen_at`,
+		rec.TenantID, rec.DeviceID, rec.ReceivedAt, rec.MsgID, now)
 	if err != nil {
 		return TelemetryRecord{}, err
 	}

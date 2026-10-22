@@ -111,8 +111,8 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		// The DLQ is created separately: it carries the same durability settings
 		// but its own retention policy.
 		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, telemetryTopic, commandTopic)
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, dlqTopic)
-		w.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), dlqTopic)
+		w.dlqWriter = newDeadLetterWriter(cfg.KafkaBrokers, dlqTopic)
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
 			groupID = "iot-device-worker"
@@ -300,19 +300,15 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			continue
 		}
 		log.Printf("telemetry consumed: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-		env := contracts.Envelope{
-			MsgID:    rec.MsgID,
-			TenantID: rec.TenantID,
-			DeviceID: rec.DeviceID,
-			Ts:       rec.Ts,
-			Type:     rec.Type,
-			Version:  rec.Version,
-			Payload:  rec.Payload,
+		// Older producers may lack receivedAt. The original Kafka timestamp is
+		// the fallback, never the time this historical record is being consumed.
+		if rec.ReceivedAt.IsZero() {
+			rec.ReceivedAt = msg.Time
 		}
 		storedRec := rec
 		needTDengine := true
 		if w.store != nil {
-			stored, err := w.store.RecordTelemetry(env)
+			stored, err := restoreStoredTelemetry(ctx, w.store, rec)
 			if err != nil {
 				if IsTelemetryDuplicate(err) {
 					// DLQ replay or redelivery: PostgreSQL already has the row.

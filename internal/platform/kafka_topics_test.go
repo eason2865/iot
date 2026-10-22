@@ -187,3 +187,17 @@ func TestDriftedConfigEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestDeadLetterCapacityNeverShrinksExistingTopic(t *testing.T) {
+	desired := buildTopicConfigs([]string{"dlq"}, deadLetterTopicConfig(KafkaTopicConfig{}))[0].ConfigEntries
+	for _, limit := range []string{"1048576", "2097152", "4194304"} {
+		live := []kafka.DescribeConfigResponseConfigEntry{{ConfigName: "min.insync.replicas", ConfigValue: "1"}, {ConfigName: "max.message.bytes", ConfigValue: limit}}
+		drift := driftedConfigEntries(live, desired)
+		if (len(drift) == 1) != (limit == "1048576") {
+			t.Fatalf("capacity=%s, unexpected changes: %+v", limit, drift)
+		}
+		if len(drift) == 1 && (drift[0].ConfigName != "max.message.bytes" || drift[0].ConfigValue != "2097152") {
+			t.Fatalf("wrong DLQ upgrade: %+v", drift)
+		}
+	}
+}

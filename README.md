@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.47`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.48`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -553,6 +553,10 @@ CI runs isolated PostgreSQL regressions, REST→gRPC→database idempotency chec
 Telemetry `payload` is required and must be a JSON object (an empty object is valid). MQTT, REST and gRPC ingress reject missing, null, array or scalar payloads; gRPC returns `InvalidArgument` and REST returns HTTP 400. The MQTT telemetry subscription must actually receive QoS 1; missing, rejected or downgraded SUBACK grants fail the ingestor, including reconnects.
 
 Runtime PostgreSQL operations propagate caller cancellation and have a default five-second cap; schema migration keeps its separate maintenance budget. Command expiry/recovery sweeps process up to 500 rows per transition with `FOR UPDATE SKIP LOCKED`, so a locked command does not prevent unrelated dispatch. State changes and audit events remain atomic; skipped rows are retried in later sweeps.
+
+DLQ writers use a 2 MiB batch limit to fit base64 and metadata around the existing roughly 1 MiB business messages. Startup raises DLQ `max.message.bytes` to at least 2 MiB while preserving larger operator overrides; other topics remain unchanged. Replay readers accept up to 10 MB. Original bytes are retained in `valueBase64` without truncation; larger wrapped records still fail without acknowledgement.
+
+Live ingress stamps server receive time. Worker recovery preserves `TelemetryRecord.receivedAt`, falling back to the original Kafka timestamp for older records. DLQ replay preserves existing receive time or uses `occurredAt`; legacy DLQs without either use device event time as an estimate. Replay never substitutes the current processing time. Device state updates atomically only when receive time advances, keeping `last_seen_at` and `last_msg_id` together; duplicates and older/equal-time records do not refresh liveness.
 
 ## Development Guidelines
 

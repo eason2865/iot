@@ -30,6 +30,9 @@ type KafkaTopicConfig struct {
 	// bounded: a broker configured with -1 never deletes. The dead-letter topic
 	// uses this so an unreplayed backlog cannot grow without limit.
 	RetentionMs int
+	// MinMessageBytes raises max.message.bytes when necessary. Larger existing
+	// operator limits are preserved. Zero leaves this entry unmanaged.
+	MinMessageBytes int
 }
 
 func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
@@ -80,6 +83,11 @@ func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfi
 			topicConfig.ConfigEntries = append(topicConfig.ConfigEntries, kafka.ConfigEntry{
 				ConfigName:  "retention.ms",
 				ConfigValue: strconv.Itoa(cfg.RetentionMs),
+			})
+		}
+		if cfg.MinMessageBytes > 0 {
+			topicConfig.ConfigEntries = append(topicConfig.ConfigEntries, kafka.ConfigEntry{
+				ConfigName: "max.message.bytes", ConfigValue: strconv.Itoa(cfg.MinMessageBytes),
 			})
 		}
 		configs = append(configs, topicConfig)
@@ -270,6 +278,14 @@ func driftedConfigEntries(live []kafka.DescribeConfigResponseConfigEntry, desire
 	}
 	var drift []kafka.ConfigEntry
 	for _, entry := range desired {
+		// max.message.bytes is a capacity floor, never a request to shrink.
+		if entry.ConfigName == "max.message.bytes" {
+			current, liveErr := strconv.Atoi(values[entry.ConfigName])
+			minimum, desiredErr := strconv.Atoi(entry.ConfigValue)
+			if liveErr == nil && desiredErr == nil && current >= minimum {
+				continue
+			}
+		}
 		if current, ok := values[entry.ConfigName]; !ok || current != entry.ConfigValue {
 			drift = append(drift, entry)
 		}

@@ -3,7 +3,22 @@ package platform
 import (
 	"context"
 	"time"
+
+	"iot/internal/contracts"
 )
+
+func restoreStoredTelemetry(ctx context.Context, store Repository, rec TelemetryRecord) (TelemetryRecord, error) {
+	if restorer, ok := store.(interface {
+		RestoreTelemetryContext(context.Context, TelemetryRecord) (TelemetryRecord, error)
+	}); ok {
+		return restorer.RestoreTelemetryContext(ctx, rec)
+	}
+	env := contracts.Envelope{MsgID: rec.MsgID, TenantID: rec.TenantID, DeviceID: rec.DeviceID, Ts: rec.Ts, Type: rec.Type, Version: rec.Version, Payload: rec.Payload}
+	if scoped, ok := store.(TelemetryInbox); ok {
+		return scoped.RecordTelemetryContext(ctx, env)
+	}
+	return store.RecordTelemetry(env)
+}
 
 // Production stores support caller cancellation; legacy in-memory adapters
 // retain the original methods for compatibility with the test harness.

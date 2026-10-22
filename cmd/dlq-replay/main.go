@@ -210,6 +210,21 @@ func replayKafkaPayload(item platform.DeadLetter, value []byte) (string, []byte,
 		return "", nil, fmt.Errorf("invalid MQTT messages must be corrected at their source")
 	}
 	if item.Stage != platform.StageMQTTKafka {
+		if item.Stage == platform.StageTelemetryPostgres || item.Stage == platform.StageTelemetryTDengine {
+			var rec platform.TelemetryRecord
+			if err := json.Unmarshal(value, &rec); err != nil {
+				return "", nil, err
+			}
+			if rec.ReceivedAt.IsZero() {
+				received, err := replayReceivedAt(item, rec.Ts)
+				if err != nil {
+					return "", nil, err
+				}
+				rec.ReceivedAt = received
+				payload, err := json.Marshal(rec)
+				return item.SourceTopic, payload, err
+			}
+		}
 		return item.SourceTopic, value, nil
 	}
 	var env contracts.Envelope
@@ -224,6 +239,26 @@ func replayKafkaPayload(item platform.DeadLetter, value []byte) (string, []byte,
 	if topic == "" {
 		topic = "iot.telemetry"
 	}
-	payload, err := json.Marshal(platform.TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts, Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: time.Now().UTC()})
+	received, err := replayReceivedAt(item, env.Ts)
+	if err != nil {
+		return "", nil, err
+	}
+	payload, err := json.Marshal(platform.TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts, Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: received})
 	return topic, payload, err
+}
+
+func replayReceivedAt(item platform.DeadLetter, ts int64) (time.Time, error) {
+	if item.OccurredAt != "" {
+		received, err := time.Parse(time.RFC3339Nano, item.OccurredAt)
+		if err != nil || received.IsZero() {
+			return time.Time{}, fmt.Errorf("invalid dead-letter occurredAt: %q", item.OccurredAt)
+		}
+		return received, nil
+	}
+	// Legacy DLQs have no server timestamp. Use device event time as a
+	// conservative estimate rather than declaring historical traffic live now.
+	if ts <= 0 {
+		return time.Time{}, fmt.Errorf("telemetry replay has no original timestamp")
+	}
+	return time.UnixMilli(ts).UTC(), nil
 }

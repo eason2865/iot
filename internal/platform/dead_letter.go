@@ -10,6 +10,20 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+// Base64 adds one third to a roughly 1 MiB business record, before JSON
+// metadata and Kafka framing. The DLQ must not reuse the business writer cap.
+const deadLetterBatchBytes = 2 << 20
+
+func deadLetterTopicConfig(cfg KafkaTopicConfig) KafkaTopicConfig {
+	cfg.MinMessageBytes = max(cfg.MinMessageBytes, deadLetterBatchBytes)
+	return cfg
+}
+
+func newDeadLetterWriter(brokers []string, topic string) *kafka.Writer {
+	return &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll,
+		BatchSize: 1, BatchBytes: deadLetterBatchBytes, AllowAutoTopicCreation: true}
+}
+
 // Dead-letter stages. These strings are operational identifiers: they appear in
 // iot.dlq records, in the `-stage` filter of cmd/dlq-replay, and as the `stage`
 // label of iot_dlq_publish_total. They are constants so the label cannot grow an

@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.47`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.48`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -538,6 +538,10 @@ CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、
 遥测 `payload` 必填且必须为 JSON 对象（允许空对象）。MQTT、REST 和 gRPC 摄入拒绝缺失、null、数组或标量；gRPC 返回 `InvalidArgument`，REST 返回 HTTP 400。遥测订阅必须实际获准 QoS 1；SUBACK 缺失、拒绝或降级会使 ingestor 报错退出，重连时同样检查。
 
 运行期 PostgreSQL 操作透传调用方取消信号，并设默认 5 秒上限；结构迁移保留独立维护预算。命令过期和恢复扫描每种状态转换最多处理 500 条，以 `FOR UPDATE SKIP LOCKED` 跳过已锁命令，让其他命令继续派发。状态和审计保持原子提交，被跳过的行由后续扫描处理。
+
+DLQ writer 的 batch 上限为 2 MiB，为现有约 1 MiB 业务消息预留 Base64 和元数据空间。启动时将 DLQ `max.message.bytes` 提升到至少 2 MiB，保留更大的运维配置；其他 topic 不变。重放 reader 上限为 10 MB。`valueBase64` 保留完整原文字节，不截断；包装后仍超限时继续报错且不确认。
+
+实时摄入使用服务端接收时间；worker 历史恢复保留 `TelemetryRecord.receivedAt`，旧记录缺失时使用原 Kafka 时间戳。DLQ 重放保留已有接收时间，否则使用 `occurredAt`；两者均缺失的旧死信以设备事件时间估算，不使用重放处理时间。设备状态仅在接收时间递增时原子更新 `last_seen_at` 和 `last_msg_id`；重复、较旧或相同时间的消息均不刷新在线状态。
 
 ## 开发建议
 

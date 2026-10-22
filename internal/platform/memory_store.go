@@ -106,31 +106,31 @@ func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
 }
 
 func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
-	if err := contracts.ValidateTelemetryPayload(env.Payload); err != nil {
+	return s.RestoreTelemetryContext(context.Background(), TelemetryRecord{
+		MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts,
+		Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: time.Now().UTC(),
+	})
+}
+
+func (s *memoryStore) RestoreTelemetryContext(ctx context.Context, rec TelemetryRecord) (TelemetryRecord, error) {
+	if err := ctx.Err(); err != nil {
 		return TelemetryRecord{}, err
+	}
+	if err := contracts.ValidateTelemetryPayload(rec.Payload); err != nil {
+		return TelemetryRecord{}, err
+	}
+	if rec.ReceivedAt.IsZero() {
+		return TelemetryRecord{}, fmt.Errorf("%w: original receive time is required", contracts.ErrInvalidEnvelope)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := deviceKey(env.TenantID, env.DeviceID)
+	key := deviceKey(rec.TenantID, rec.DeviceID)
 	if _, exists := s.devices[key]; !exists {
 		return TelemetryRecord{}, fmt.Errorf("device %w", ErrNotFound)
 	}
-	rec := TelemetryRecord{
-		MsgID:      env.MsgID,
-		TenantID:   env.TenantID,
-		DeviceID:   env.DeviceID,
-		Ts:         env.Ts,
-		Type:       env.Type,
-		Version:    env.Version,
-		Payload:    env.Payload,
-		ReceivedAt: time.Now().UTC(),
-	}
 	s.telemetry[key] = append(s.telemetry[key], rec)
-	s.statuses[key] = DeviceStatus{
-		TenantID:   env.TenantID,
-		DeviceID:   env.DeviceID,
-		Online:     true,
-		LastSeenAt: time.Now().UTC(),
+	if previous := s.statuses[key]; previous.LastSeenAt.IsZero() || previous.LastSeenAt.Before(rec.ReceivedAt) {
+		s.statuses[key] = DeviceStatus{TenantID: rec.TenantID, DeviceID: rec.DeviceID, Online: true, LastSeenAt: rec.ReceivedAt}
 	}
 	return rec, nil
 }

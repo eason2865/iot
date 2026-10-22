@@ -56,6 +56,13 @@ guarantee is again no stronger than `RequireOne`.
   replacement-style fallback for brokers without this API. Changes to desired
   values therefore also affect existing topics. Partition-count and
   replication-factor drift is logged only.
+- DLQ writers use a 2 MiB `BatchBytes` budget for the base64/JSON wrapper
+  around existing roughly 1 MiB business records. Both ingestor and worker
+  reconcile DLQ `max.message.bytes` to a floor of 2 MiB; larger operator limits
+  are preserved. Ordinary topics keep their unmanaged size overrides. Replay
+  readers already allow 10 MB. Keep the existing JSON/base64 wire format and
+  full original bytes. This is a bounded budget: records exceeding it fail
+  without acknowledgement, rather than being truncated.
 - If telemetry throughput ever makes the round trip the bottleneck, the correct
   response is a larger `BatchSize`/`BatchTimeout`, not weaker acknowledgements.
 

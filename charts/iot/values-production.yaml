@@ -1,7 +1,7 @@
 # Overlay: replace internal DNS, image and Secrets for your environment.
 # Provision PostgreSQL first with the migrate binary before installing this profile.
 images:
-  app: iot-app:2.49
+  app: iot-app:2.50
 postgres:
   autoMigrate: false
 grpcTLS:

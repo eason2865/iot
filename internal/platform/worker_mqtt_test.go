@@ -94,6 +94,12 @@ func TestWorkerDoesNotPUBACKWhenAckAndDLQFail(t *testing.T) {
 }
 
 func TestWorkerFailsOnRejectedAckSubscription(t *testing.T) {
+	for _, prefix := range []string{"", "$share/iot-device-worker/"} {
+		t.Run(prefix, func(t *testing.T) { testWorkerFailsOnRejectedAckSubscription(t, prefix) })
+	}
+}
+
+func testWorkerFailsOnRejectedAckSubscription(t *testing.T, prefix string) {
 	for _, codes := range [][]byte{{0x80}, {0}, {1, 0x80}} {
 		t.Run(fmt.Sprint(codes), func(t *testing.T) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -132,7 +138,7 @@ func TestWorkerFailsOnRejectedAckSubscription(t *testing.T) {
 				}
 				_, _ = packets.ReadPacket(conn)
 			}()
-			topics := []string{"tenant/t/device/d/ack", "tenant/t/device/other/ack"}[:len(codes)]
+			topics := []string{prefix + "tenant/t/device/d/ack", prefix + "tenant/t/device/other/ack"}[:len(codes)]
 			worker := NewWorker(WorkerConfig{MQTTBrokerURL: "tcp://" + listener.Addr().String(), AckTopicFilters: topics}, nil, nil, nil)
 			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 			defer cancel()

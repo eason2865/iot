@@ -2,6 +2,18 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 共享订阅兼容修复与重新部署（2026-10-22，发布版本 2.50）
+
+- 用户要求重新部署。实际 docker-desktop 集群已无 iot/emqx namespace 和 Helm release，外部 PostgreSQL/Kafka/TDengine 仍在；先完成约 160 MiB 的 PostgreSQL 自定义格式逻辑备份并验证可列目录，备份及私有运行配置保存在 outputs/deployment-20261022-250/（目录700、敏感文件600）。保留原数据、API/MQTT 凭据及外部存储容器，恢复 EMQX Operator 2.3.0、单核心 EMQX Enterprise 6.3.1。
+- 首次部署 2.49 暴露真实共享订阅启动回归：Paho v1.5.1 的 Subscribe 在 token.subs 中去掉 $share/<group>/，而严格 SUBACK 校验按完整 wire filter 查结果，实际 QoS 1 仍被误判缺失。ingestor/worker 持续退出，readiness 按预期保持失败。已取消该失败发布等待，没有绕过 QoS 检查。
+- 两个订阅入口改用 SubscribeMultiple 的单项 map，保留共享过滤器原文作为 SUBACK 结果键；线上的主题、共享组、QoS 1、回调路由和确认顺序保持原语义。不改变依赖版本或产品 SQL。ADR 0009 补充客户端接口选择原因。
+- 回归先将协议 readiness 测试改成生产共享过滤器，旧实现分别报 /readyz=503 want=200、缺少第二个 ACK 订阅；修复后普通/共享订阅均覆盖初始等待、全部 grant、断线、重连、停止，worker 的部分成功后拒绝及 QoS 0、ingestor QoS 0 在两种过滤器下继续失败关闭。真实部署双副本回调投递由后述全链路验证覆盖。
+- 验证通过：go test -count=1 ./...、go test -race ./internal/... ./cmd/dlq-replay、定向协议 race、go vet ./...、make fmt-check、git diff --check、7 个 Linux arm64 二进制构建、本地/生产 Helm lint/template、Compose config 与部署脚本语法。测试期间没有对运行 PostgreSQL 执行产品 SQL 迁移；部署保留本地自动迁移配置。
+- 当前实际部署：Helm iot revision 2，Chart 0.2.7 / App 2.50；镜像 iot-app:local-7a072df451ff（对应本机 iot-app:2.50，manifest list sha256:7a072df451ffdc596a2cf06ff8a1e9312563adff8a57a536d23df7e33e77de3e）。四个业务 Deployment 各2副本，共8个 Ready、0重启；gRPC mTLS 开启，4个 PDB。Demo 已更新 iot-app:2.50。
+- 已刷新新集群的静态 kubeconfig、Prometheus ServiceAccount token/CA 与转发容器；Prometheus 9/9 targets up，Grafana→Prometheus health OK。入口：Management API localhost:18080、Grafana localhost:3000、Prometheus localhost:9090、Demo localhost:18084；MQTT localhost:1883，EMQX Dashboard localhost:18083。
+- 已部署环境真实全链路共20项通过：设备认证/ACL、遥测 PG/TD、重复遥测、命令幂等/ACK/重复ACK、终态重投、跨租户拒绝、非法 MQTT DLQ、REST 毫秒校验、后台补偿及超时审计。删除活跃worker后30条遥测全部完成PG/TD、命令ACK成功，两个worker自动恢复Ready。仅锁测试命令行使ACK在6.62s后进入DLQ，另一命令约1.03s完成ACK；释放锁后以POSTGRES_AUTO_MIGRATE=false运行真实CLI，dry-run位点不变，补ACK后ACK及审计各1、设备重下发0，锁已释放。
+- 隔离验证租户 closed-20261022-151036 保留复核；全局超2分钟未完成遥测=0、sent无deadline=0。完整报告、原始检查、运行快照、监控状态和备份见 outputs/deployment-20261022-250/，目录受 Git ignore。默认发布配置、双语README统一2.50；本轮在main提交、打2.50 tag并一起推送。
+
 ## 凭据日志、MQTT 就绪与 trace 容量修复（2026-10-22，发布版本 2.49）
 
 - 修复 2.48 三类问题：management-api 默认 5xx 请求转储泄露凭据；MQTT 连接/订阅未完成仍就绪；默认全量 file tracing 追加无上限且探针产出 trace。

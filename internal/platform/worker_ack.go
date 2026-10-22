@@ -44,7 +44,9 @@ func (w *Worker) subscribeAckTopics(client mqtt.Client, topics []string) {
 	ctx, cancel := context.WithTimeout(w.acks.ctx, 5*time.Second)
 	defer cancel()
 	for _, topic := range topics {
-		token := client.Subscribe(topic, 1, w.handleAckMessage)
+		// SubscribeMultiple keeps the wire filter as the SUBACK result key;
+		// Paho Subscribe strips $share/<group>/ from that key.
+		token := client.SubscribeMultiple(map[string]byte{topic: 1}, w.handleAckMessage)
 		select {
 		case <-ctx.Done():
 			if w.acks.ctx.Err() != nil {

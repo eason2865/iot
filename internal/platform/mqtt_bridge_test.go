@@ -103,6 +103,12 @@ func TestBridgeDoesNotAcknowledgeBeforeKafkaPersistence(t *testing.T) {
 }
 
 func TestBridgeRejectsQoSZeroSubscription(t *testing.T) {
+	for _, prefix := range []string{"", "$share/iot-telemetry/"} {
+		t.Run(prefix, func(t *testing.T) { testBridgeRejectsQoSZeroSubscription(t, prefix) })
+	}
+}
+
+func testBridgeRejectsQoSZeroSubscription(t *testing.T, prefix string) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +137,7 @@ func TestBridgeRejectsQoSZeroSubscription(t *testing.T) {
 		_ = ack.Write(conn)
 		_, _ = packets.ReadPacket(conn)
 	}()
-	bridge := NewMQTTBridge(MQTTBridgeConfig{BrokerURL: "tcp://" + listener.Addr().String()}, noopPublisher{}, nil)
+	bridge := NewMQTTBridge(MQTTBridgeConfig{BrokerURL: "tcp://" + listener.Addr().String(), TopicFilter: prefix + "tenant/+/device/+/telemetry"}, noopPublisher{}, nil)
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	if err = bridge.Run(ctx); err == nil || !strings.Contains(err.Error(), "requires QoS 1") {

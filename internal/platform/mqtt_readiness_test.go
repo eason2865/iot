@@ -12,8 +12,9 @@ import (
 )
 
 func TestMQTTReadinessTracksSubscriptionsAndReconnect(t *testing.T) {
-	for _, kind := range []string{"ingestor", "worker"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, tc := range []struct{ kind, prefix string }{{"ingestor", ""}, {"worker", ""}, {"ingestor", "$share/iot-telemetry/"}, {"worker", "$share/iot-device-worker/"}} {
+		t.Run(tc.kind+"/"+tc.prefix, func(t *testing.T) {
+			kind := tc.kind
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -85,10 +86,10 @@ func TestMQTTReadinessTracksSubscriptionsAndReconnect(t *testing.T) {
 			var run func(context.Context) error
 			var check func(context.Context) error
 			if kind == "ingestor" {
-				bridge := NewMQTTBridge(MQTTBridgeConfig{BrokerURL: url, ClientID: "readiness-ingestor"}, noopPublisher{}, nil)
+				bridge := NewMQTTBridge(MQTTBridgeConfig{BrokerURL: url, ClientID: "readiness-ingestor", TopicFilter: tc.prefix + "tenant/+/device/+/telemetry"}, noopPublisher{}, nil)
 				run, check = bridge.Run, bridge.CheckReady
 			} else {
-				worker := NewWorker(WorkerConfig{MQTTBrokerURL: url, AckTopicFilters: []string{"tenant/t/device/d/ack", "tenant/t/device/d2/ack"}}, nil, nil, nil)
+				worker := NewWorker(WorkerConfig{MQTTBrokerURL: url, AckTopicFilters: []string{tc.prefix + "tenant/t/device/d/ack", tc.prefix + "tenant/t/device/d2/ack"}}, nil, nil, nil)
 				run, check = worker.Run, worker.CheckReady
 			}
 			app := New(Config{ReadinessCheck: check})

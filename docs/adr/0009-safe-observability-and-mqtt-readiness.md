@@ -26,6 +26,10 @@ to a 128Mi temporary volume and includes health probes.
   SUBACKs confirm only their generation, and fatal errors/shutdown clear readiness.
   Physical connection state detects disconnects. An asynchronous connection-lost
   callback must not clear a later connection's grants. Liveness stays shallow.
+- Use Paho SubscribeMultiple with a single wire filter for each subscription.
+  Unlike Subscribe, it preserves the full `$share/<group>/...` filter as the
+  SUBACK result key, so ordinary and shared subscriptions use the same strict
+  QoS 1 check. Protocol regressions cover both filter forms and reconnects.
 - Keep file tracing available by default, with parent-based root sampling of 0.1
   (override `OTEL_SAMPLER` in range 0–1). Own the file provider explicitly so the
   framework cannot install an append-only exporter over it. External exporters

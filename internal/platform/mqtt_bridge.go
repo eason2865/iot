@@ -92,7 +92,9 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	opts.OnConnect = func(client mqtt.Client) {
 		generation := b.readiness.reset()
 		log.Printf("mqtt bridge connected: filter=%s", filter)
-		token := client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
+		// SubscribeMultiple keeps the wire filter as the SUBACK result key;
+		// Paho Subscribe strips $share/<group>/ from that key.
+		token := client.SubscribeMultiple(map[string]byte{filter: 1}, func(_ mqtt.Client, msg mqtt.Message) {
 			b.mu.Lock()
 			if b.stopping {
 				b.mu.Unlock()

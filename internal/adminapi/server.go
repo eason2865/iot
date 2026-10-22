@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -384,13 +385,17 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func pageFromRequest(r *http.Request) (int, string, error) {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid pagination query: %w", err)
+	}
 	pageSize := 0
-	if raw := r.URL.Query().Get("pageSize"); raw != "" {
+	if raw := query.Get("pageSize"); raw != "" {
 		if _, err := fmt.Sscan(raw, &pageSize); err != nil {
 			return 0, "", fmt.Errorf("pageSize must be an integer")
 		}
 	}
-	page, err := platform.NormalizePageRequest(pageSize, r.URL.Query().Get("cursor"))
+	page, err := platform.NormalizePageRequest(pageSize, query.Get("cursor"))
 	return page.Size, page.Cursor, err
 }
 

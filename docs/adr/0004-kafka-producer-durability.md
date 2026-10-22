@@ -42,6 +42,10 @@ guarantee is again no stronger than `RequireOne`.
 - A configured `min.insync.replicas` above the replication factor is invalid at the
   broker, so it is dropped with a log line instead of failing topic creation or
   pretending the setting was applied.
+- Topic setup binds connection read/write deadlines and explicit context
+  cancellation across controller discovery and creation. Each attempt is capped
+  at five seconds; the total sixty-second startup retry budget includes backoff
+  and clamps the last attempt to the remaining time.
 - Topic creation is idempotent. Partition count (`KAFKA_TOPIC_PARTITIONS`) and
   replication factor apply only when creating a missing topic; changing existing
   partitions or replica assignments remains an operator action.

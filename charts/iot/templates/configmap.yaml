@@ -28,6 +28,7 @@ data:
   # MQTT subscription stays a wildcard and the worker drops the other tenants.
   DEVICE_WORKER_TENANT_IDS: {{ .Values.deviceWorker.tenantIDs | quote }}
   TDENGINE_TABLE: telemetry_v2
+  TDENGINE_WRITE_TIMEOUT: {{ .Values.tdengine.writeTimeout | quote }}
   LISTEN_ADDR: :8080
   MANAGEMENT_API_METRICS_HOST: 0.0.0.0
   MANAGEMENT_API_METRICS_PORT: "9100"

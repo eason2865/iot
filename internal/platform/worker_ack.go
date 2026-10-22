@@ -15,17 +15,59 @@ import (
 )
 
 type workerAckState struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	stopping bool
-	pending  sync.WaitGroup
-	fatal    chan error
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	stopping  bool
+	pending   sync.WaitGroup
+	fatal     chan error
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 func newWorkerAckState() *workerAckState {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &workerAckState{ctx: ctx, cancel: cancel, fatal: make(chan error, 1)}
+	return &workerAckState{ctx: ctx, cancel: cancel, fatal: make(chan error, 1), ready: make(chan struct{})}
+}
+
+func (w *Worker) failAck(err error) {
+	log.Print(err)
+	select {
+	case w.acks.fatal <- err:
+	default:
+	}
+}
+
+func (w *Worker) subscribeAckTopics(client mqtt.Client, topics []string) {
+	ctx, cancel := context.WithTimeout(w.acks.ctx, 5*time.Second)
+	defer cancel()
+	for _, topic := range topics {
+		token := client.Subscribe(topic, 1, w.handleAckMessage)
+		select {
+		case <-ctx.Done():
+			if w.acks.ctx.Err() != nil {
+				return
+			} // Normal worker shutdown.
+			w.failAck(fmt.Errorf("command ACK subscription incomplete: topic=%s: %w", topic, ctx.Err()))
+			return
+		case <-token.Done():
+		}
+		if err := token.Error(); err != nil {
+			w.failAck(fmt.Errorf("command ACK subscribe: topic=%s: %w", topic, err))
+			return
+		}
+		sub, ok := token.(*mqtt.SubscribeToken)
+		if !ok {
+			w.failAck(fmt.Errorf("command ACK subscribe: topic=%s: missing SUBACK result", topic))
+			return
+		}
+		granted, ok := sub.Result()[topic]
+		if !ok || granted != 1 {
+			w.failAck(fmt.Errorf("command ACK subscribe: topic=%s: expected QoS 1, SUBACK=%#x present=%t", topic, granted, ok))
+			return
+		}
+	}
+	w.acks.readyOnce.Do(func() { close(w.acks.ready) })
 }
 
 func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
@@ -80,11 +122,7 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 		cancel()
 		if dlqErr != nil {
 			failure := fmt.Errorf("command ACK not persisted: store: %v; DLQ: %w", err, dlqErr)
-			log.Print(failure)
-			select {
-			case w.acks.fatal <- failure:
-			default:
-			}
+			w.failAck(failure)
 			return // No MQTT PUBACK without a durable copy.
 		}
 	} else if w.metrics != nil {

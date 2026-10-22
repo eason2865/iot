@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -20,22 +21,26 @@ import (
 // "enqueued" and open a new data-loss window. Throughput is scaled on the
 // TDengine side (connection pool / server capacity), not by batching here.
 type TDengineWriter struct {
-	db        *sql.DB
-	database  string
-	table     string
-	mu        sync.Mutex
-	closed    bool
-	closeOnce sync.Once
-	metrics   *Metrics
+	db           *sql.DB
+	database     string
+	table        string
+	mu           sync.Mutex
+	closed       bool
+	closeOnce    sync.Once
+	metrics      *Metrics
+	writeTimeout time.Duration
 }
 
 type TDengineConfig struct {
-	DSN      string
-	Database string
-	Table    string
+	DSN          string
+	Database     string
+	Table        string
+	WriteTimeout time.Duration
 }
 
 var errTDengineWriterClosed = errors.New("tdengine writer closed")
+
+const defaultTDengineWriteTimeout = 5 * time.Second
 
 func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, error) {
 	if cfg.DSN == "" {
@@ -55,17 +60,24 @@ func NewTDengineWriter(cfg TDengineConfig, metrics *Metrics) (*TDengineWriter, e
 	}
 	db.SetMaxOpenConns(5)
 	db.SetMaxIdleConns(2)
-	if err := db.Ping(); err != nil {
+	timeout := cfg.WriteTimeout
+	if timeout <= 0 {
+		timeout = defaultTDengineWriteTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	w := &TDengineWriter{
-		db:       db,
-		database: database,
-		table:    table,
-		metrics:  metrics,
+		db:           db,
+		database:     database,
+		table:        table,
+		metrics:      metrics,
+		writeTimeout: timeout,
 	}
-	if err := w.ensureSchema(); err != nil {
+	if err := w.ensureSchema(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -84,7 +96,7 @@ func (w *TDengineWriter) Close() error {
 	return w.db.Close()
 }
 
-func (w *TDengineWriter) ensureSchema() error {
+func (w *TDengineWriter) ensureSchema(ctx context.Context) error {
 	stmts := []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", w.database),
 		fmt.Sprintf(`CREATE STABLE IF NOT EXISTS %s.%s (
@@ -100,7 +112,7 @@ func (w *TDengineWriter) ensureSchema() error {
 )`, w.database, w.table),
 	}
 	for _, stmt := range stmts {
-		if _, err := w.db.Exec(stmt); err != nil {
+		if _, err := w.db.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
@@ -108,6 +120,10 @@ func (w *TDengineWriter) ensureSchema() error {
 }
 
 func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
+	return w.WriteTelemetryContext(context.Background(), rec)
+}
+
+func (w *TDengineWriter) WriteTelemetryContext(ctx context.Context, rec TelemetryRecord) error {
 	if w == nil || w.db == nil {
 		return nil
 	}
@@ -119,7 +135,13 @@ func (w *TDengineWriter) WriteTelemetry(rec TelemetryRecord) error {
 	w.mu.Unlock()
 	// A Kafka offset is committed only after this call returns successfully, so
 	// TDengine failures are routed to the DLQ instead of being logged and lost.
-	return w.writeRecord(rec)
+	timeout := w.writeTimeout
+	if timeout <= 0 {
+		timeout = defaultTDengineWriteTimeout
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return w.writeRecord(writeCtx, rec)
 }
 
 // escapeTD escapes a value for a TDengine string literal. Backslashes must be
@@ -134,7 +156,7 @@ func escapeTD(s string) string {
 // cannot help, so compensation must continue with other records.
 var errTDFieldRejected = errors.New("tdengine field rejected")
 
-func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
+func (w *TDengineWriter) writeRecord(ctx context.Context, rec TelemetryRecord) error {
 	if err := contracts.ValidateTelemetryFields(contracts.Envelope{TenantID: rec.TenantID, DeviceID: rec.DeviceID, MsgID: rec.MsgID, Type: rec.Type, Version: rec.Version}); err != nil {
 		return fmt.Errorf("%w: %v", errTDFieldRejected, err)
 	}
@@ -150,7 +172,7 @@ func (w *TDengineWriter) writeRecord(rec TelemetryRecord) error {
 		time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
 		escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
 	)
-	if _, err := w.db.Exec(statement); err != nil {
+	if _, err := w.db.ExecContext(ctx, statement); err != nil {
 		if w.metrics != nil {
 			w.metrics.IncTDengineWrite("error")
 		}

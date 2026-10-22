@@ -2,11 +2,17 @@ package platform
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+var ErrInvalidPage = errors.New("invalid pagination")
+
+var errInvalidCursor = fmt.Errorf("%w: invalid cursor", ErrInvalidPage)
 
 const (
 	defaultPageSize = 50
@@ -27,7 +33,7 @@ func NormalizePageRequest(size int, cursor string) (PageRequest, error) {
 		size = defaultPageSize
 	}
 	if size < 1 || size > maxPageSize {
-		return PageRequest{}, fmt.Errorf("pageSize must be between 1 and %d", maxPageSize)
+		return PageRequest{}, fmt.Errorf("%w: pageSize must be between 1 and %d", ErrInvalidPage, maxPageSize)
 	}
 	return PageRequest{Size: size, Cursor: cursor}, nil
 }
@@ -41,12 +47,17 @@ func decodeCursor(cursor string, count int) ([]string, error) {
 		return nil, nil
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cursor")
+	if err != nil || !utf8.Valid(decoded) {
+		return nil, errInvalidCursor
 	}
 	parts := strings.Split(string(decoded), "\x00")
 	if len(parts) != count {
-		return nil, fmt.Errorf("invalid cursor")
+		return nil, errInvalidCursor
+	}
+	for _, part := range parts {
+		if part == "" {
+			return nil, errInvalidCursor
+		}
 	}
 	return parts, nil
 }
@@ -62,7 +73,7 @@ func decodeCommandCursor(cursor string) (time.Time, string, error) {
 	}
 	nanos, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return time.Time{}, "", fmt.Errorf("invalid cursor")
+		return time.Time{}, "", errInvalidCursor
 	}
 	return time.Unix(0, nanos).UTC(), parts[1], nil
 }
@@ -92,7 +103,7 @@ func decodeTelemetryCursor(cursor string) (time.Time, string, error) {
 	}
 	nanos, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return time.Time{}, "", fmt.Errorf("invalid cursor")
+		return time.Time{}, "", errInvalidCursor
 	}
 	return time.Unix(0, nanos).UTC(), parts[1], nil
 }

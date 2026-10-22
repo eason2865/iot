@@ -2,5 +2,5 @@ apiVersion: v2
 name: iot
 description: IoT application services that connect to externally managed dependencies
 type: application
-version: 0.2.2
-appVersion: "2.45"
+version: 0.2.3
+appVersion: "2.46"

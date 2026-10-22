@@ -1,5 +1,5 @@
 images:
-  app: iot-app:2.45
+  app: iot-app:2.46
 
 replicas:
   managementAPI: 2
@@ -60,6 +60,9 @@ deviceWorker:
   # every tenant, which matches the behaviour before the allowlist existed.
   # Set a comma-separated tenant list to make this worker ignore the rest.
   tenantIDs: ""
+
+tdengine:
+  writeTimeout: 5s
 
 security:
   # Supply real values from an external secret manager in production. The local

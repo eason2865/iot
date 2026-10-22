@@ -2,6 +2,19 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 阻塞边界与分页错误修复（2026-10-22，发布版本 2.46）
+
+- 修复本轮四项复现：TDengine HTTP 无期限等待、Kafka Controller/CreateTopics 不服从 ctx、ACK SUBACK 拒绝后仍运行、非法分页游标被映射成 HTTP 500。
+- TDengine 新增 WriteTelemetryContext，worker 消费和补偿传入生命周期 ctx；SQL 使用 ExecContext。兼容的 WriteTelemetry 入口仍有默认 5s 上限，初始化 PingContext 与 schema SQL 共享超时。TDengineConfig.WriteTimeout / TDENGINE_WRITE_TIMEOUT / Helm tdengine.writeTimeout 可配置，默认 5s；取消或超时不更新 tdengine_written，保留原重试/DLQ路径。
+- Kafka setup 每次操作上限 5s，原生 Conn 设置读写 deadline，并用 context.AfterFunc 在显式取消时关闭连接，覆盖 Controller 查询与 CreateTopics。60s 总预算覆盖末次请求与 500ms 退避，剩余时间不足时向下截断；对账仍用 ctx API，未修改增量配置语义。
+- ACK 订阅统一在 5s 内完成，检查 token 错误及 SubscribeToken.Result 中每个 topic 的实际 grant，必须是 QoS 1。缺失/拒绝/降级/超时均通过 fatal 通知 Run；首次所有订阅确认后才启动业务处理，重连 OnConnect 订阅失败同样报错，正常停机取消不记为订阅故障。
+- 分页返回可识别的 ErrInvalidPage，core 用 errors.Is 映射 InvalidArgument，网关返回 400。Base64、UTF-8、游标字段数/空值/时间字段的非法输入均走此类错误；网关额外拒绝 URL 查询中的错误百分号编码，避免 URL.Query 静默丢弃非法 cursor。真实数据库故障保留 Internal/500，不按错误文字匹配。
+- 回归先红后绿：真实 TDengine driver + 不响应的 HTTP 服务，取消补偿能中断在途写，初始化及兼容写入口均受配置超时约束；Kafka 协议模拟在 Controller 和 CreateTopics 阶段分别卡住，主动取消和 deadline 四种情况均退出，总预算也约束退避；真实 MQTT SUBACK 覆盖 0x80、QoS 0 降级、部分成功后拒绝，Run 必须报错且不能进入 ready。
+- REST→gRPC→隔离 PostgreSQL 回归覆盖 tenants/devices/commands/telemetry 四类列表：编码后的 %%%、原始 cursor=%%%、非法 UTF-8、空字段游标及超限 pageSize 均返回 400；原有命令幂等和数据库故障 500 回归保持通过。
+- 验证：go test -count=1 ./...（开启隔离 PG、真实 Kafka/TDengine 回归）、go test -race ./internal/... ./cmd/dlq-replay、go vet ./...、格式/差异检查、7 个 Linux 二进制构建、Helm 本地/生产双 profile lint/template、Compose config、脚本语法和 protobuf 重生无漂移均通过。Helm 两种 profile 均渲染 TDENGINE_WRITE_TIMEOUT=5s。
+- 默认镜像 iot-app:2.46、Chart 0.2.3；镜像构建完成，manifest list sha256:8beeca0b76cb614f448ab7b11546b548082f38541758afe2d267362cb621e419。本轮无新增产品 SQL 迁移；README、环境示例、ADR 0004/0007 与交接信息已同步。
+- 按项目规则在 main 提交并推送 2.46 tag；仅构建发布代码，不部署运行服务。上一次实际部署记录仍为 2.43，后续版本镜像尚待升级。所有故障模拟与独立 PG 资源完成后清理，不修改运行服务数据和配置。
+
 ## ACK 确认与身份契约修复（2026-10-22，发布版本 2.45）
 
 - 修复本轮确认的三项问题：worker ACK 双写失败后仍自动 PUBACK、dlq-replay 忽略生产禁 DDL 配置、租户冒号与 MQTT 用户名首冒号拆分冲突。

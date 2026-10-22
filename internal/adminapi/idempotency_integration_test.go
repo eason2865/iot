@@ -67,6 +67,16 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	server := &Server{rpc: corev1.NewCoreServiceClient(conn)}
+	for name, handler := range map[string]http.HandlerFunc{"tenants": server.listTenantsHandler, "devices": server.listDevicesHandler, "commands": server.listCommandsHandler, "devices/t/d/telemetry": server.listTelemetryHandler} {
+		for _, query := range []string{"cursor=" + url.QueryEscape("%%%"), "cursor=%%%", "cursor=_w", "cursor=AA", "pageSize=101"} {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/"+name+"?tenantId=t&"+query, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("%s invalid page %s status=%d body=%s", name, query, rec.Code, rec.Body.String())
+			}
+		}
+	}
 	handler := platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"})(http.HandlerFunc(server.createCommandHandler))
 	post := func(key, payload, tenant string) (int, string) {
 		t.Helper()

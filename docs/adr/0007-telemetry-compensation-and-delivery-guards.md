@@ -16,6 +16,10 @@ can also present a command whose device has already acknowledged it.
   time, excluding records received in the last two minutes. An indexed ID cursor
   advances through the backlog and resets at its end. Tenant filtering happens
   before LIMIT, so foreign tenants cannot starve a scoped worker.
+- TDengine initialization and each write use context-aware SQL/HTTP calls, with
+  a default five-second cap (`TDENGINE_WRITE_TIMEOUT`). Worker passes its caller
+  context to consumption and compensation writes, so cancellation interrupts an
+  in-flight sink call without advancing its completion marker.
 - A successful TDengine write is followed by the completion marker. Write or
   marker failures leave the row pending for another sweep. Permanent field
   validation failures (UTF-8, controls, canonical IDs and VARCHAR byte bounds)
@@ -41,6 +45,10 @@ can also present a command whose device has already acknowledged it.
   admitted ACKs for up to three seconds before cancellation, MQTT disconnect and
   DLQ writer closure. Manual replay applies the ACK
   transition directly. Terminal command states retain their existing semantics.
+- Worker waits for QoS 1 grants on every ACK subscription before starting business
+  processing. Missing, rejected or downgraded SUBACK results and subscription
+  errors/timeouts are fatal, including reconnect callbacks. Subscription setup
+  shares a five-second deadline and is canceled on shutdown.
 - ACK callbacks run independently of the MQTT packet router. Database retry
   latency must not block other commands' PUBACKs; PostgreSQL row locks serialize
   duplicate ACK transitions rather than relying on callback ordering.

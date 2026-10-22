@@ -111,6 +111,7 @@ export EMQX_TELEMETRY_INGESTOR_CLIENT_ID=iot-telemetry-ingestor
 export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
 export DEVICE_WORKER_TENANT_IDS=   # optional CSV allowlist; empty = all tenants
 export TDENGINE_TABLE=telemetry_v2
+export TDENGINE_WRITE_TIMEOUT=5s
 export KAFKA_DLQ_TOPIC=iot.dlq
 export KAFKA_TOPIC_REPLICATION_FACTOR=1     # 生产：>= 3
 export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # 生产：>= 2，否则 acks=all 等价于 acks=1
@@ -367,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.45`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.46`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -558,3 +559,9 @@ go test ./...
 ## 许可证
 
 本项目使用 [Apache License 2.0](LICENSE)。
+
+TDengine 初始化和单次写入由 `TDENGINE_WRITE_TIMEOUT` 限时（默认 `5s`，
+Helm 为 `tdengine.writeTimeout`），消费/补偿任务取消会中断在途 HTTP 请求，未完成记录保留待补偿标记。
+Kafka topic 初始化同时约束连接读写、主动取消及总计 60 秒的重试/退避预算。
+worker 仅在所有 ACK topic 均获准 QoS 1 后启动业务处理；拒绝、降级或超时会使 worker 报错退出，重连订阅失败同样处理。
+分页接口的非法游标、错误 URL 查询编码或非法页大小返回 HTTP 400，存储故障仍返回服务端错误。

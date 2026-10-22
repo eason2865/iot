@@ -172,13 +172,7 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		opts.SetConnectRetryInterval(2 * time.Second)
 		ackTopics := normalizeAckTopicFilters(cfg)
 		opts.OnConnect = func(client mqtt.Client) {
-			for _, ackTopic := range ackTopics {
-				token := client.Subscribe(ackTopic, 1, w.handleAckMessage)
-				token.Wait()
-				if err := token.Error(); err != nil {
-					log.Printf("command ack subscribe error: topic=%s err=%v", ackTopic, err)
-				}
-			}
+			w.subscribeAckTopics(client, ackTopics)
 		}
 		w.mqtt = mqtt.NewClient(opts)
 	}
@@ -235,6 +229,13 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		if err := token.Error(); err != nil {
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-w.acks.fatal:
+			return err
+		case <-w.acks.ready:
 		}
 	}
 	errCh := make(chan error, 2)
@@ -342,7 +343,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			}
 		}
 		if w.tdengine != nil && needTDengine {
-			if err := w.tdengine.WriteTelemetry(storedRec); err != nil {
+			if err := w.tdengine.WriteTelemetryContext(ctx, storedRec); err != nil {
 				log.Printf("tdengine write error: %v", err)
 				if w.metrics != nil {
 					w.metrics.IncDeviceWorker("telemetry", "error")
@@ -592,7 +593,7 @@ func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRe
 		if !w.tenantAllowed(rec.TenantID) {
 			continue
 		}
-		if err := w.tdengine.WriteTelemetry(rec); err != nil {
+		if err := w.tdengine.WriteTelemetryContext(ctx, rec); err != nil {
 			log.Printf("tdengine compensation write error: msg=%s err=%v", rec.MsgID, err)
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry_compensate", "error")

@@ -147,6 +147,7 @@ func TestRepoErrorsMapToStatusCodes(t *testing.T) {
 	}{
 		{"not found", fmt.Errorf("tenant %w", platform.ErrNotFound), codes.NotFound},
 		{"already exists", fmt.Errorf("tenant %w", platform.ErrAlreadyExists), codes.AlreadyExists},
+		{"invalid page", fmt.Errorf("cursor: %w", platform.ErrInvalidPage), codes.InvalidArgument},
 		{"unexpected", errors.New("connection reset"), codes.Internal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

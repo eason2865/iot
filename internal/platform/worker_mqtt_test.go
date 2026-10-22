@@ -93,6 +93,61 @@ func TestWorkerDoesNotPUBACKWhenAckAndDLQFail(t *testing.T) {
 	}
 }
 
+func TestWorkerFailsOnRejectedAckSubscription(t *testing.T) {
+	for _, codes := range [][]byte{{0x80}, {0}, {1, 0x80}} {
+		t.Run(fmt.Sprint(codes), func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+				if _, err = packets.ReadPacket(conn); err != nil {
+					return
+				}
+				if err = packets.NewControlPacket(packets.Connack).Write(conn); err != nil {
+					return
+				}
+				for _, code := range codes {
+					packet, err := packets.ReadPacket(conn)
+					if err != nil {
+						return
+					}
+					subscribe, ok := packet.(*packets.SubscribePacket)
+					if !ok {
+						return
+					}
+					suback := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
+					suback.MessageID = subscribe.MessageID
+					suback.ReturnCodes = []byte{code}
+					if err = suback.Write(conn); err != nil {
+						return
+					}
+				}
+				_, _ = packets.ReadPacket(conn)
+			}()
+			topics := []string{"tenant/t/device/d/ack", "tenant/t/device/other/ack"}[:len(codes)]
+			worker := NewWorker(WorkerConfig{MQTTBrokerURL: "tcp://" + listener.Addr().String(), AckTopicFilters: topics}, nil, nil, nil)
+			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+			defer cancel()
+			if err = worker.Run(ctx); err == nil {
+				t.Fatal("failed SUBACK left worker running without all ACK subscriptions")
+			}
+			select {
+			case <-worker.acks.ready:
+				t.Fatal("worker became ready with a rejected or downgraded subscription")
+			default:
+			}
+		})
+	}
+}
+
 func TestWorkerDrainsAckPersistenceBeforeDisconnect(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -88,19 +88,37 @@ func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfi
 }
 
 func ensureKafkaTopicsBestEffort(brokers []string, cfg KafkaTopicConfig, topics ...string) {
-	deadline := time.Now().Add(60 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	ensureKafkaTopicsUntil(ctx, brokers, cfg, topics...)
+}
+
+func ensureKafkaTopicsUntil(ctx context.Context, brokers []string, cfg KafkaTopicConfig, topics ...string) {
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := ensureKafkaTopics(ctx, brokers, cfg, topics...)
+		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := ensureKafkaTopics(attemptCtx, brokers, cfg, topics...)
 		cancel()
-		if err == nil || time.Now().After(deadline) {
+		if err == nil || ctx.Err() != nil {
 			return
 		}
-		time.Sleep(500 * time.Millisecond)
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 	}
 }
 
-func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConfig, topics ...string) error {
+func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConfig, topics ...string) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	defer func() {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+	}()
 	if len(brokers) == 0 || len(topics) == 0 {
 		return nil
 	}
@@ -109,26 +127,43 @@ func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConf
 		return nil
 	}
 
-	conn, err := kafka.DialContext(ctx, "tcp", brokers[0])
+	conn, closeConn, err := dialKafkaSetup(ctx, brokers[0])
 	if err != nil {
 		return err
 	}
 	controller, err := conn.Controller()
-	_ = conn.Close()
+	closeConn()
 	if err != nil {
 		return err
 	}
 	controllerAddr := net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port))
-	controllerConn, err := kafka.DialContext(ctx, "tcp", controllerAddr)
+	controllerConn, closeController, err := dialKafkaSetup(ctx, controllerAddr)
 	if err != nil {
 		return err
 	}
-	defer controllerConn.Close()
+	defer closeController()
 
 	if err := controllerConn.CreateTopics(configs...); err != nil {
 		return err
 	}
 	return reconcileKafkaTopics(ctx, kafka.TCP(controllerAddr), configs)
+}
+
+// kafka.Conn protocol methods lack context parameters. Bound both I/O and
+// explicit cancellation, including a caller that cancels before its deadline.
+func dialKafkaSetup(ctx context.Context, address string) (*kafka.Conn, func(), error) {
+	conn, err := kafka.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, nil, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if err = conn.SetDeadline(deadline); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	return conn, func() { stop(); _ = conn.Close() }, nil
 }
 
 // reconcileKafkaTopics brings pre-existing topics (broker auto.create, or a

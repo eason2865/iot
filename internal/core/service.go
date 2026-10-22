@@ -402,6 +402,8 @@ func mapRepoError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, platform.ErrInvalidPage):
+		return status.Error(codes.InvalidArgument, err.Error())
 	case platform.IsNotFound(err):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):

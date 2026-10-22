@@ -111,6 +111,7 @@ export EMQX_TELEMETRY_INGESTOR_CLIENT_ID=iot-telemetry-ingestor
 export EMQX_DEVICE_WORKER_CLIENT_ID=iot-device-worker
 export DEVICE_WORKER_TENANT_IDS=   # optional CSV allowlist; empty = all tenants
 export TDENGINE_TABLE=telemetry_v2
+export TDENGINE_WRITE_TIMEOUT=5s
 export KAFKA_DLQ_TOPIC=iot.dlq
 export KAFKA_TOPIC_REPLICATION_FACTOR=1     # production: >= 3
 export KAFKA_TOPIC_MIN_INSYNC_REPLICAS=1    # production: >= 2, else acks=all == acks=1
@@ -169,7 +170,7 @@ Core business endpoints:
 - `GET /api/v1/commands/{id}?tenantId=<tenant-id>`
 - `POST /api/v1/commands/{id}/ack`
 
-List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page.
+List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page. Invalid cursors, malformed query encoding and invalid page sizes return HTTP 400; storage failures remain server errors.
 
 Every command endpoint is tenant-scoped: the list and the detail both require `tenantId`, and the ACK additionally requires `deviceId`. A command that belongs to another tenant is reported as not found rather than forbidden, so a response never confirms that another tenant's data exists. The list filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
 
@@ -367,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.45`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.46`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -573,3 +574,11 @@ For security issues, see [SECURITY.md](SECURITY.md); do not disclose vulnerabili
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+
+TDengine initialization and individual writes are bounded by `TDENGINE_WRITE_TIMEOUT`
+(default `5s`, Helm `tdengine.writeTimeout`). Consumer/compensation cancellation
+interrupts in-flight HTTP requests; unfinished records keep their pending marker.
+Kafka topic setup bounds connection I/O and cancellation to each attempt, and the
+60-second retry budget includes backoff. Worker starts business processing only
+after every ACK topic grants QoS 1; rejected, downgraded or timed-out subscriptions
+fail the worker, including subscription failures on reconnect.

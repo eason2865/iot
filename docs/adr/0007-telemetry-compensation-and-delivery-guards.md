@@ -32,6 +32,12 @@ can also present a command whose device has already acknowledged it.
   become failed only after their lease/backoff expires. Claims never exceed the
   attempt cap. Command state changes and their audit events use one atomic SQL
   statement, including recovery, delivery and expiry.
+- Runtime PostgreSQL operations propagate the request/worker/dispatcher context
+  and use a default five-second cap, including lists, authentication, state writes
+  and completion markers. Schema migration retains its separate maintenance budget.
+  Expiry/recovery sweeps select at most 500 rows per transition using
+  `FOR UPDATE SKIP LOCKED`; a locked row is retried later without blocking other
+  commands. State and audit still commit in one statement.
 - Before command MQTT publishing, worker reads persisted state and verifies the
   tenant/device identity. Missing, foreign, sent and terminal commands are skipped.
   Database errors stop the consumer without committing the message. Failed status

@@ -357,7 +357,7 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			if marker, ok := w.store.(interface {
 				MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
 			}); ok {
-				if err := marker.MarkTelemetryTDengineWritten(storedRec.MsgID, storedRec.TenantID, storedRec.DeviceID); err != nil {
+				if err := markTelemetryWritten(ctx, marker, storedRec.MsgID, storedRec.TenantID, storedRec.DeviceID); err != nil {
 					log.Printf("tdengine completion mark error: %v", err)
 				}
 			}
@@ -503,7 +503,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 					RequeueCommand(id string, retryAfter time.Duration) error
 				}); ok {
 					backoff := time.Second * time.Duration(1<<min(cmd.DispatchAttempts, 6))
-					if rqErr := requeuer.RequeueCommand(cmd.ID, backoff); rqErr != nil {
+					if rqErr := requeueStoredCommand(ctx, requeuer, cmd.ID, backoff); rqErr != nil {
 						log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
 					}
 				}
@@ -517,7 +517,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			if marker, ok := w.store.(interface {
 				MarkCommandSent(id string, deadline time.Time) error
 			}); ok {
-				if err := marker.MarkCommandSent(cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
+				if err := markStoredCommandSent(ctx, marker, cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
 					return fmt.Errorf("command mark sent: id=%s: %w", cmd.ID, err)
 				}
 			}
@@ -603,7 +603,7 @@ func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRe
 			}
 			return false
 		}
-		if err := marker.MarkTelemetryTDengineWritten(rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
+		if err := markTelemetryWritten(ctx, marker, rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
 			log.Printf("tdengine compensation mark error: msg=%s err=%v", rec.MsgID, err)
 			continue
 		}

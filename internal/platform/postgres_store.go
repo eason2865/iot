@@ -16,6 +16,12 @@ import (
 	"iot/migrations"
 )
 
+const defaultPostgresOperationTimeout = 5 * time.Second
+
+func postgresOperationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, defaultPostgresOperationTimeout)
+}
+
 type PostgresStore struct {
 	db  *sql.DB
 	ttl time.Duration
@@ -24,6 +30,8 @@ type PostgresStore struct {
 // PingContext exposes the underlying connection health check so the /readyz
 // probe can fail closed when PostgreSQL is unreachable.
 func (s *PostgresStore) PingContext(ctx context.Context) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	return s.db.PingContext(ctx)
 }
 
@@ -125,10 +133,16 @@ func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
 }
 
 func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
+	return s.CreateTenantContext(context.Background(), t)
+}
+
+func (s *PostgresStore) CreateTenantContext(ctx context.Context, t Tenant) (Tenant, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	if !contracts.IsValidTenantID(t.ID) {
 		return Tenant{}, contracts.ErrInvalidTopicPart
 	}
-	_, err := s.db.Exec(`INSERT INTO tenants (id, name) VALUES ($1, $2)`, t.ID, t.Name)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $2)`, t.ID, t.Name)
 	if err != nil {
 		return Tenant{}, translateSQLError(err, "tenant")
 	}
@@ -136,22 +150,38 @@ func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
 }
 
 func (s *PostgresStore) ListTenants() []Tenant {
-	rows, err := s.db.Query(`SELECT id, name FROM tenants ORDER BY id`)
+	rows, _ := s.ListTenantsContext(context.Background())
+	return rows
+}
+
+func (s *PostgresStore) ListTenantsContext(ctx context.Context) ([]Tenant, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name FROM tenants ORDER BY id`)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []Tenant
 	for rows.Next() {
-		var t Tenant
-		if err := rows.Scan(&t.ID, &t.Name); err == nil {
-			out = append(out, t)
+		var item Tenant
+
+		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+			return nil, err
 		}
+
+		out = append(out, item)
 	}
-	return out
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, error) {
+	return s.ListTenantsPageContext(context.Background(), page)
+}
+
+func (s *PostgresStore) ListTenantsPageContext(ctx context.Context, page PageRequest) ([]Tenant, string, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
 		return nil, "", err
@@ -164,7 +194,7 @@ func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, err
 	if len(parts) == 1 {
 		after = parts[0]
 	}
-	rows, err := s.db.Query(`SELECT id, name FROM tenants WHERE id > $1 ORDER BY id LIMIT $2`, after, page.Size+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM tenants WHERE id > $1 ORDER BY id LIMIT $2`, after, page.Size+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -189,6 +219,12 @@ func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, err
 }
 
 func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, error) {
+	return s.ListDevicesPageContext(context.Background(), page)
+}
+
+func (s *PostgresStore) ListDevicesPageContext(ctx context.Context, page PageRequest) ([]Device, string, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
 		return nil, "", err
@@ -197,7 +233,7 @@ func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, err
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, created_at FROM devices
+	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id, device_id, product_id, created_at FROM devices
 		WHERE (tenant_id > $1) OR (tenant_id = $1 AND device_id > $2)
 		ORDER BY tenant_id, device_id LIMIT $3`, afterTenant, afterDevice, page.Size+1)
 	if err != nil {
@@ -224,16 +260,22 @@ func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, err
 }
 
 func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
+	return s.CreateDeviceContext(context.Background(), d)
+}
+
+func (s *PostgresStore) CreateDeviceContext(ctx context.Context, d Device) (Device, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	if !contracts.IsValidTenantID(d.TenantID) || !contracts.IsValidTopicPart(d.DeviceID) {
 		return Device{}, contracts.ErrInvalidTopicPart
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Device{}, err
 	}
 	defer tx.Rollback()
 	var exists bool
-	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1)`, d.TenantID).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1)`, d.TenantID).Scan(&exists); err != nil {
 		return Device{}, err
 	}
 	if !exists {
@@ -244,12 +286,12 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 	if err != nil {
 		return Device{}, err
 	}
-	_, err = tx.Exec(`INSERT INTO devices (tenant_id, device_id, product_id, secret_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)`,
+	_, err = tx.ExecContext(ctx, `INSERT INTO devices (tenant_id, device_id, product_id, secret_hash, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)`,
 		d.TenantID, d.DeviceID, d.ProductID, hash, d.CreatedAt)
 	if err != nil {
 		return Device{}, translateSQLError(err, "device")
 	}
-	_, err = tx.Exec(`INSERT INTO device_state (tenant_id, device_id, connected, updated_at) VALUES ($1, $2, false, $3)
+	_, err = tx.ExecContext(ctx, `INSERT INTO device_state (tenant_id, device_id, connected, updated_at) VALUES ($1, $2, false, $3)
 		ON CONFLICT (tenant_id, device_id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
 		d.TenantID, d.DeviceID, d.CreatedAt)
 	if err != nil {
@@ -263,19 +305,29 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 }
 
 func (s *PostgresStore) ListDevices() []Device {
-	rows, err := s.db.Query(`SELECT tenant_id, device_id, product_id, created_at FROM devices ORDER BY tenant_id, device_id`)
+	rows, _ := s.ListDevicesContext(context.Background())
+	return rows
+}
+
+func (s *PostgresStore) ListDevicesContext(ctx context.Context) ([]Device, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id,device_id,product_id,created_at FROM devices ORDER BY tenant_id,device_id`)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []Device
 	for rows.Next() {
-		var d Device
-		if err := rows.Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.CreatedAt); err == nil {
-			out = append(out, d)
+		var item Device
+
+		if err := rows.Scan(&item.TenantID, &item.DeviceID, &item.ProductID, &item.CreatedAt); err != nil {
+			return nil, err
 		}
+
+		out = append(out, item)
 	}
-	return out
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
@@ -284,6 +336,8 @@ func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
 }
 
 func (s *PostgresStore) GetDeviceContext(ctx context.Context, tenantID, deviceID string) (Device, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	var d Device
 	err := s.db.QueryRowContext(ctx, `SELECT tenant_id, device_id, product_id, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
 		tenantID, deviceID).Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.CreatedAt)
@@ -297,8 +351,14 @@ func (s *PostgresStore) GetDeviceContext(ctx context.Context, tenantID, deviceID
 }
 
 func (s *PostgresStore) AuthenticateDevice(tenantID, deviceID, secret string) bool {
+	return s.AuthenticateDeviceContext(context.Background(), tenantID, deviceID, secret)
+}
+
+func (s *PostgresStore) AuthenticateDeviceContext(ctx context.Context, tenantID, deviceID, secret string) bool {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	var hash string
-	if err := s.db.QueryRow(`SELECT secret_hash FROM devices WHERE tenant_id = $1 AND device_id = $2`, tenantID, deviceID).Scan(&hash); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT secret_hash FROM devices WHERE tenant_id = $1 AND device_id = $2`, tenantID, deviceID).Scan(&hash); err != nil {
 		return false
 	}
 	return VerifyDeviceSecret(hash, secret)
@@ -311,6 +371,11 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 }
 
 func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contracts.Envelope) (TelemetryRecord, error) {
+	if err := contracts.ValidateTelemetryPayload(env.Payload); err != nil {
+		return TelemetryRecord{}, err
+	}
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return TelemetryRecord{}, err
@@ -375,7 +440,13 @@ func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contract
 // MarkTelemetryTDengineWritten records that the telemetry row was persisted to
 // TDengine, so a later DLQ replay does not write it twice.
 func (s *PostgresStore) MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error {
-	_, err := s.db.Exec(`UPDATE telemetry_records SET tdengine_written = TRUE WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
+	return s.MarkTelemetryTDengineWrittenContext(context.Background(), msgID, tenantID, deviceID)
+}
+
+func (s *PostgresStore) MarkTelemetryTDengineWrittenContext(ctx context.Context, msgID, tenantID, deviceID string) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	_, err := s.db.ExecContext(ctx, `UPDATE telemetry_records SET tdengine_written = TRUE WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
 		msgID, tenantID, deviceID)
 	return err
 }
@@ -385,6 +456,8 @@ func (s *PostgresStore) MarkTelemetryTDengineWritten(msgID, tenantID, deviceID s
 // compensation scan. olderThan excludes freshly ingested rows so the scan does
 // not race the consumer that is about to write them.
 func (s *PostgresStore) ListUnwrittenTelemetry(ctx context.Context, olderThan time.Time, afterID int64, tenantIDs []string, limit int) ([]TelemetryRecord, int64, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	if limit < 1 {
 		return nil, afterID, nil
 	}
@@ -415,25 +488,38 @@ func (s *PostgresStore) ListUnwrittenTelemetry(ctx context.Context, olderThan ti
 }
 
 func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
-	rows, err := s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
-		FROM telemetry_records WHERE tenant_id = $1 AND device_id = $2 ORDER BY received_at ASC`, tenantID, deviceID)
+	rows, _ := s.ListTelemetryContext(context.Background(), tenantID, deviceID)
+	return rows
+}
+
+func (s *PostgresStore) ListTelemetryContext(ctx context.Context, tenantID, deviceID string) ([]TelemetryRecord, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `SELECT msg_id,tenant_id,device_id,ts,type,version,payload,received_at FROM telemetry_records WHERE tenant_id=$1 AND device_id=$2 ORDER BY received_at ASC`, tenantID, deviceID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []TelemetryRecord
 	for rows.Next() {
-		var rec TelemetryRecord
+		var item TelemetryRecord
 		var payload []byte
-		if err := rows.Scan(&rec.MsgID, &rec.TenantID, &rec.DeviceID, &rec.Ts, &rec.Type, &rec.Version, &payload, &rec.ReceivedAt); err == nil {
-			rec.Payload = json.RawMessage(payload)
-			out = append(out, rec)
+		if err := rows.Scan(&item.MsgID, &item.TenantID, &item.DeviceID, &item.Ts, &item.Type, &item.Version, &payload, &item.ReceivedAt); err != nil {
+			return nil, err
 		}
+		item.Payload = json.RawMessage(payload)
+		out = append(out, item)
 	}
-	return out
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, string, error) {
+	return s.ListTelemetryPageContext(context.Background(), page)
+}
+
+func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageRequest) ([]TelemetryRecord, string, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	tenantID, deviceID := page.TenantID, page.DeviceID
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
@@ -450,13 +536,13 @@ func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, 
 	// which behaves inconsistently across drivers/deployments.
 	var rows *sql.Rows
 	if page.Cursor == "" {
-		rows, err = s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
+		rows, err = s.db.QueryContext(ctx, `SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
 			FROM telemetry_records
 			WHERE tenant_id = $1 AND device_id = $2
 			ORDER BY received_at ASC, msg_id ASC LIMIT $3`,
 			page.TenantID, page.DeviceID, page.Size+1)
 	} else {
-		rows, err = s.db.Query(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
+		rows, err = s.db.QueryContext(ctx, `SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
 			FROM telemetry_records
 			WHERE tenant_id = $1 AND device_id = $2
 			  AND (received_at > $3 OR (received_at = $3 AND msg_id > $4))
@@ -494,6 +580,8 @@ func (s *PostgresStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus
 }
 
 func (s *PostgresStore) GetDeviceStatusContext(ctx context.Context, tenantID, deviceID string) (DeviceStatus, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	var status DeviceStatus
 	var lastSeen sql.NullTime
 	err := s.db.QueryRowContext(ctx, `SELECT tenant_id, device_id, connected, last_seen_at FROM device_state WHERE tenant_id = $1 AND device_id = $2`,
@@ -534,6 +622,8 @@ func requireDevice(ctx context.Context, tx *sql.Tx, tenantID, deviceID string) e
 // CreateCommandWithKey atomically reuses a tenant-scoped request key. A changed
 // device or payload conflicts instead of executing a second device action.
 func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	if err := contracts.ValidateIdempotencyKey(key); err != nil {
 		return Command{}, err
 	}
@@ -590,6 +680,8 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 }
 
 func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, deviceID string) (Command, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Command{}, err
@@ -648,10 +740,16 @@ func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, dev
 }
 
 func (s *PostgresStore) ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error) {
+	return s.ClaimCommandsForDispatchContext(context.Background(), limit, lease)
+}
+
+func (s *PostgresStore) ClaimCommandsForDispatchContext(ctx context.Context, limit int, lease time.Duration) ([]Command, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	if limit < 1 {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`WITH claimed AS (
+	rows, err := s.db.QueryContext(ctx, `WITH claimed AS (
   SELECT id FROM commands WHERE status = 'created' AND next_dispatch_at <= NOW() AND dispatch_attempts < $3
   ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1
 ) UPDATE commands c SET dispatch_attempts = c.dispatch_attempts + 1, next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
@@ -669,7 +767,13 @@ RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.u
 // only when device-worker confirms the MQTT downlink via MarkCommandSent.
 // The claimed attempt and lease fence a delayed completion from an older owner.
 func (s *PostgresStore) MarkCommandPublished(id string, attempt int) error {
-	_, err := s.updateCommandsWithEvent(`UPDATE commands SET status = 'published', updated_at = NOW()
+	return s.MarkCommandPublishedContext(context.Background(), id, attempt)
+}
+
+func (s *PostgresStore) MarkCommandPublishedContext(ctx context.Context, id string, attempt int) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	_, err := s.updateCommandsWithEvent(ctx, `UPDATE commands SET status = 'published', updated_at = NOW()
  WHERE id = $1 AND status = 'created' AND dispatch_attempts = $2 AND next_dispatch_at > NOW() RETURNING id`, "published", id, attempt)
 	return err
 }
@@ -681,13 +785,25 @@ func (s *PostgresStore) MarkCommandPublished(id string, attempt int) error {
 // Kafka first, then updates the row), so requiring strictly 'published' would
 // race and leave the command stuck in published with no deadline.
 func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
-	_, err := s.updateCommandsWithEvent(`UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW()
+	return s.MarkCommandSentContext(context.Background(), id, deadline)
+}
+
+func (s *PostgresStore) MarkCommandSentContext(ctx context.Context, id string, deadline time.Time) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	_, err := s.updateCommandsWithEvent(ctx, `UPDATE commands SET status = 'sent', deadline_at = $2, updated_at = NOW()
  WHERE id = $1 AND status IN ('created', 'published') RETURNING id`, "delivered", id, deadline)
 	return err
 }
 
 func (s *PostgresStore) RescheduleCommand(id string, attempt int, retryAfter time.Duration) error {
-	_, err := s.db.Exec(`UPDATE commands SET next_dispatch_at = NOW() + $3::interval, updated_at = NOW()
+	return s.RescheduleCommandContext(context.Background(), id, attempt, retryAfter)
+}
+
+func (s *PostgresStore) RescheduleCommandContext(ctx context.Context, id string, attempt int, retryAfter time.Duration) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	_, err := s.db.ExecContext(ctx, `UPDATE commands SET next_dispatch_at = NOW() + $3::interval, updated_at = NOW()
  WHERE id = $1 AND status = 'created' AND dispatch_attempts = $2 AND next_dispatch_at > NOW()`, id, attempt, retryAfter.String())
 	return err
 }
@@ -703,7 +819,13 @@ func (s *PostgresStore) RescheduleCommand(id string, attempt int, retryAfter tim
 // increments dispatch_attempts, and RecoverStaleCommands marks the command
 // failed once the cap is hit.
 func (s *PostgresStore) RequeueCommand(id string, retryAfter time.Duration) error {
-	_, err := s.updateCommandsWithEvent(
+	return s.RequeueCommandContext(context.Background(), id, retryAfter)
+}
+
+func (s *PostgresStore) RequeueCommandContext(ctx context.Context, id string, retryAfter time.Duration) error {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	_, err := s.updateCommandsWithEvent(ctx,
 		`UPDATE commands SET status = 'created', next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
 		 WHERE id = $1 AND status = 'published' RETURNING id`,
 		"requeued", id, retryAfter.String())
@@ -716,13 +838,19 @@ func (s *PostgresStore) RequeueCommand(id string, retryAfter time.Duration) erro
 // status flip) can sit in 'sent' with no deadline and would otherwise never
 // converge. nullDeadlineGrace <= 0 disables that backstop.
 func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error) {
-	query := `UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND deadline_at <= $1 RETURNING id`
+	return s.ExpireCommandsContext(context.Background(), now, nullDeadlineGrace)
+}
+
+func (s *PostgresStore) ExpireCommandsContext(ctx context.Context, now time.Time, nullDeadlineGrace time.Duration) (int64, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	predicate := `status='sent' AND deadline_at <= $1`
 	args := []any{now}
 	if nullDeadlineGrace > 0 {
-		query = `UPDATE commands SET status = 'timeout', updated_at = $1 WHERE status = 'sent' AND (deadline_at <= $1 OR (deadline_at IS NULL AND updated_at + $2::interval <= $1)) RETURNING id`
+		predicate = `status='sent' AND (deadline_at <= $1 OR (deadline_at IS NULL AND updated_at + $2::interval <= $1))`
 		args = append(args, nullDeadlineGrace.String())
 	}
-	return s.updateCommandsWithEvent(query, "timeout", args...)
+	return s.updateCommandBatchWithEvent(ctx, `status='timeout',updated_at=$1`, predicate, "timeout", args...)
 }
 
 // RecoverStaleCommands repairs commands stranded by dispatcher/worker outages:
@@ -736,27 +864,34 @@ func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Dur
 // Redelivery is safe: MarkCommandSent and AckCommand state guards keep
 // duplicate MQTT downlinks and ACKs idempotent.
 func (s *PostgresStore) RecoverStaleCommands(staleBefore time.Time, maxAttempts int) (int64, int64, error) {
-	requeued, err := s.updateCommandsWithEvent(
-		`UPDATE commands SET status = 'created', next_dispatch_at = NOW(), updated_at = NOW()
-		 WHERE status = 'published' AND updated_at <= $1 AND dispatch_attempts < $2 RETURNING id`,
-		"requeued", staleBefore, maxAttempts)
-	if err != nil {
-		return 0, 0, err
-	}
-	failed, err := s.updateCommandsWithEvent(
-		`UPDATE commands SET status = 'failed', updated_at = NOW()
-		 WHERE dispatch_attempts >= $2 AND ((status = 'created' AND next_dispatch_at <= NOW()) OR (status = 'published' AND updated_at <= $1)) RETURNING id`,
-		"failed", staleBefore, maxAttempts)
-	if err != nil {
-		return 0, 0, err
-	}
-	return requeued, failed, nil
+	return s.RecoverStaleCommandsContext(context.Background(), staleBefore, maxAttempts)
 }
 
-func (s *PostgresStore) updateCommandsWithEvent(query, event string, args ...any) (int64, error) {
+func (s *PostgresStore) RecoverStaleCommandsContext(ctx context.Context, staleBefore time.Time, maxAttempts int) (int64, int64, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	requeued, err := s.updateCommandBatchWithEvent(ctx, `status='created',next_dispatch_at=NOW(),updated_at=NOW()`,
+		`status='published' AND updated_at <= $1 AND dispatch_attempts < $2`, "requeued", staleBefore, maxAttempts)
+	if err != nil {
+		return 0, 0, err
+	}
+	failed, err := s.updateCommandBatchWithEvent(ctx, `status='failed',updated_at=NOW()`,
+		`dispatch_attempts >= $2 AND ((status='created' AND next_dispatch_at <= NOW()) OR (status='published' AND updated_at <= $1))`, "failed", staleBefore, maxAttempts)
+	return requeued, failed, err
+}
+
+// Skip locked commands and bound each sweep. State and audit remain one atomic
+// statement, so a slow ACK cannot hold up dispatch of an unrelated command.
+func (s *PostgresStore) updateCommandBatchWithEvent(ctx context.Context, assignment, predicate, event string, args ...any) (int64, error) {
+	return s.updateCommandsWithEvent(ctx, `UPDATE commands SET `+assignment+` WHERE id IN (
+ SELECT id FROM commands WHERE `+predicate+` ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED
+ ) RETURNING id`, event, args...)
+}
+
+func (s *PostgresStore) updateCommandsWithEvent(ctx context.Context, query, event string, args ...any) (int64, error) {
 	// One statement makes both writes atomic and uses just one pool connection.
 	args = append(args, event)
-	result, err := s.db.Exec(`WITH changed AS (`+query+`)
+	result, err := s.db.ExecContext(ctx, `WITH changed AS (`+query+`)
  INSERT INTO command_events (command_id, event_type) SELECT id, $`+strconv.Itoa(len(args))+` FROM changed`, args...)
 	if err != nil {
 		return 0, err
@@ -765,28 +900,28 @@ func (s *PostgresStore) updateCommandsWithEvent(query, event string, args ...any
 }
 
 func (s *PostgresStore) ListCommands() []Command {
-	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands ORDER BY created_at DESC, id DESC`)
+	rows, _ := s.ListCommandsContext(context.Background())
+	return rows
+}
+
+func (s *PostgresStore) ListCommandsContext(ctx context.Context) ([]Command, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at FROM commands ORDER BY created_at DESC,id DESC`)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
-	var out []Command
-	for rows.Next() {
-		var cmd Command
-		var payload []byte
-		var deadline sql.NullTime
-		if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err == nil {
-			cmd.Payload = json.RawMessage(payload)
-			if deadline.Valid {
-				cmd.DeadlineAt = deadline.Time
-			}
-			out = append(out, cmd)
-		}
-	}
-	return out
+	return scanCommands(rows)
 }
 
 func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, error) {
+	return s.ListCommandsPageContext(context.Background(), page)
+}
+
+func (s *PostgresStore) ListCommandsPageContext(ctx context.Context, page PageRequest) ([]Command, string, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	tenantID := page.TenantID
 	page, err := NormalizePageRequest(page.Size, page.Cursor)
 	if err != nil {
@@ -800,7 +935,7 @@ func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, e
 	if page.TenantID == "" {
 		return nil, "", fmt.Errorf("tenantId is required")
 	}
-	rows, err := s.db.Query(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at
 FROM commands WHERE tenant_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id < $3))
 ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt), id, page.Size+1)
 	if err != nil {
@@ -828,19 +963,8 @@ func nullTime(value time.Time) any {
 }
 
 func (s *PostgresStore) GetCommand(id string) (Command, bool) {
-	var cmd Command
-	var payload []byte
-	var deadline sql.NullTime
-	err := s.db.QueryRow(`SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1`, id).
-		Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
-	if err != nil {
-		return Command{}, false
-	}
-	cmd.Payload = json.RawMessage(payload)
-	if deadline.Valid {
-		cmd.DeadlineAt = deadline.Time
-	}
-	return cmd, true
+	value, err := s.GetCommandContext(context.Background(), id)
+	return value, err == nil
 }
 
 type commandRows interface {
@@ -884,6 +1008,8 @@ func (s *PostgresStore) GetCommandForDelivery(ctx context.Context, id string) (C
 }
 
 func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Command, error) {
+	ctx, cancel := postgresOperationContext(ctx)
+	defer cancel()
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
@@ -80,7 +81,17 @@ func MQTTAuthenticationHandler(authenticator DeviceAuthenticator, internalPasswo
 			}
 		}
 		tenantID, deviceID, ok := contracts.ParseDeviceUsername(req.Username)
-		if !ok || tenantID == "" || deviceID == "" || authenticator == nil || !authenticator.AuthenticateDevice(tenantID, deviceID, req.Password) {
+		authenticated := false
+		if ok && authenticator != nil {
+			if scoped, yes := authenticator.(interface {
+				AuthenticateDeviceContext(context.Context, string, string, string) bool
+			}); yes {
+				authenticated = scoped.AuthenticateDeviceContext(r.Context(), tenantID, deviceID, req.Password)
+			} else {
+				authenticated = authenticator.AuthenticateDevice(tenantID, deviceID, req.Password)
+			}
+		}
+		if !authenticated {
 			writeJSON(w, http.StatusOK, MQTTAuthResponse{Result: "deny"})
 			return
 		}

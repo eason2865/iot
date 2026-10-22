@@ -106,6 +106,9 @@ func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
 }
 
 func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
+	if err := contracts.ValidateTelemetryPayload(env.Payload); err != nil {
+		return TelemetryRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deviceKey(env.TenantID, env.DeviceID)

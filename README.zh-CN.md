@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.46`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.47`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -534,6 +534,10 @@ go run ./cmd/migrate
 随后应用设置 `POSTGRES_AUTO_MIGRATE=false`，使用仅有业务读写权限的数据库角色；本地默认 true。镜像包含 `/usr/local/bin/migrate`。生产配置示例见 `charts/iot/values-production.yaml`：启用 mTLS、HPA、节点/可用区分散及 Kafka RF=3、ISR=2、6 分区。部署前替换域名、镜像和 Secret，并安装 metrics-server；扩容现存 Kafka topic 仍需人工操作。该示例不创建外部高可用依赖，HPA 参数需要压测调优。
 
 CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、race、Helm 双配置校验和 protobuf 漂移检查。本地设置独立测试数据库 `IOT_POSTGRES_TEST_DSN` 后运行 `go test ./...`；每个数据库测试创建并清理独立 schema。详见 ADR 0008。
+
+遥测 `payload` 必填且必须为 JSON 对象（允许空对象）。MQTT、REST 和 gRPC 摄入拒绝缺失、null、数组或标量；gRPC 返回 `InvalidArgument`，REST 返回 HTTP 400。遥测订阅必须实际获准 QoS 1；SUBACK 缺失、拒绝或降级会使 ingestor 报错退出，重连时同样检查。
+
+运行期 PostgreSQL 操作透传调用方取消信号，并设默认 5 秒上限；结构迁移保留独立维护预算。命令过期和恢复扫描每种状态转换最多处理 500 条，以 `FOR UPDATE SKIP LOCKED` 跳过已锁命令，让其他命令继续派发。状态和审计保持原子提交，被跳过的行由后续扫描处理。
 
 ## 开发建议
 

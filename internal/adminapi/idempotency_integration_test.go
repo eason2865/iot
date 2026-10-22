@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -67,6 +68,74 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	server := &Server{rpc: corev1.NewCoreServiceClient(conn)}
+	for _, payload := range []string{"", "null", "[]", "42", `"text"`} {
+		for _, recordRPC := range []bool{false, true} {
+			var err error
+			if recordRPC {
+				_, err = server.rpc.RecordTelemetry(t.Context(), &corev1.RecordTelemetryRequest{Telemetry: &corev1.TelemetryRecord{MsgId: "invalid-payload", TenantId: "t", DeviceId: "d", Ts: time.Now().UnixMilli(), Type: "temp", Version: "v1", Payload: []byte(payload)}})
+			} else {
+				_, err = server.rpc.IngestTelemetry(t.Context(), &corev1.IngestTelemetryRequest{MsgId: "invalid-payload", TenantId: "t", DeviceId: "d", Ts: time.Now().UnixMilli(), Type: "temp", Version: "v1", Payload: []byte(payload)})
+			}
+			if httpStatusFromGRPC(err) != 400 {
+				t.Errorf("payload %q record=%v status=%d error=%v", payload, recordRPC, httpStatusFromGRPC(err), err)
+			}
+		}
+	}
+	for _, table := range []string{"tenants", "devices", "commands", "telemetry_records"} {
+		t.Run("cancel-list-"+table, func(t *testing.T) {
+			lock, err := admin.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Rollback()
+			if _, err = lock.Exec("LOCK TABLE " + schema + "." + table + " IN ACCESS EXCLUSIVE MODE"); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				switch table {
+				case "tenants":
+					_, err = server.rpc.ListTenants(ctx, &corev1.ListTenantsRequest{})
+				case "devices":
+					_, err = server.rpc.ListDevices(ctx, &corev1.ListDevicesRequest{})
+				case "commands":
+					_, err = server.rpc.ListCommands(ctx, &corev1.ListCommandsRequest{TenantId: "t"})
+				case "telemetry_records":
+					_, err = server.rpc.ListTelemetry(ctx, &corev1.ListTelemetryRequest{TenantId: "t", DeviceId: "d"})
+				}
+				done <- err
+			}()
+			waiting := func() int {
+				t.Helper()
+				var n int
+				if err = admin.QueryRow(`SELECT COUNT(*) FROM pg_locks WHERE relation=$1::regclass AND NOT granted`, schema+"."+table).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			limit := time.Now().Add(time.Second)
+			for waiting() == 0 && time.Now().Before(limit) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if waiting() == 0 {
+				t.Fatal("list query did not reach held table lock")
+			}
+			cancel()
+			if err = <-done; err == nil {
+				t.Fatal("cancelled list succeeded")
+			}
+			limit = time.Now().Add(400 * time.Millisecond)
+			for waiting() != 0 && time.Now().Before(limit) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if waiting() != 0 {
+				t.Fatal("server query remained blocked after RPC cancellation")
+			}
+		})
+	}
 	for name, handler := range map[string]http.HandlerFunc{"tenants": server.listTenantsHandler, "devices": server.listDevicesHandler, "commands": server.listCommandsHandler, "devices/t/d/telemetry": server.listTelemetryHandler} {
 		for _, query := range []string{"cursor=" + url.QueryEscape("%%%"), "cursor=%%%", "cursor=_w", "cursor=AA", "pageSize=101"} {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/"+name+"?tenantId=t&"+query, nil)

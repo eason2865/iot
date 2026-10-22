@@ -225,7 +225,8 @@ func TestIngestTelemetryRepublishesOnDuplicate(t *testing.T) {
 	svc := NewService(dupRepo{}, pub)
 	_, err := svc.IngestTelemetry(context.Background(), &corev1.IngestTelemetryRequest{
 		MsgId: "m1", TenantId: "t1", DeviceId: "d1", Type: "telemetry", Version: "v1",
-		Ts: time.Now().UnixMilli(),
+		Ts:      time.Now().UnixMilli(),
+		Payload: []byte(`{}`),
 	})
 	if err != nil {
 		t.Fatalf("IngestTelemetry duplicate: %v", err)

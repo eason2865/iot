@@ -78,6 +78,7 @@ func TestValidateEnvelopeTimestampBounds(t *testing.T) {
 			Type:     "telemetry",
 			Version:  "v1",
 			Ts:       ts,
+			Payload:  []byte(`{}`),
 		}
 	}
 

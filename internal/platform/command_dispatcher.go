@@ -11,11 +11,11 @@ import (
 const maxDispatchAttempts = 10
 
 type CommandDispatchStore interface {
-	ClaimCommandsForDispatch(limit int, lease time.Duration) ([]Command, error)
-	MarkCommandPublished(id string, attempt int) error
-	RescheduleCommand(id string, attempt int, retryAfter time.Duration) error
-	ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error)
-	RecoverStaleCommands(staleBefore time.Time, maxAttempts int) (int64, int64, error)
+	ClaimCommandsForDispatchContext(ctx context.Context, limit int, lease time.Duration) ([]Command, error)
+	MarkCommandPublishedContext(ctx context.Context, id string, attempt int) error
+	RescheduleCommandContext(ctx context.Context, id string, attempt int, retryAfter time.Duration) error
+	ExpireCommandsContext(ctx context.Context, now time.Time, nullDeadlineGrace time.Duration) (int64, error)
+	RecoverStaleCommandsContext(ctx context.Context, staleBefore time.Time, maxAttempts int) (int64, int64, error)
 }
 
 type CommandDispatcher struct {
@@ -54,7 +54,7 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	// Requeue commands stranded in 'published' (Kafka event never confirmed by
 	// the worker) and fail commands that exhausted dispatch attempts.
 	staleBefore := time.Now().UTC().Add(-d.timeout)
-	if requeued, failed, err := d.store.RecoverStaleCommands(staleBefore, maxDispatchAttempts); err != nil {
+	if requeued, failed, err := d.store.RecoverStaleCommandsContext(ctx, staleBefore, maxDispatchAttempts); err != nil {
 		log.Printf("command recovery scan error: %v", err)
 	} else if requeued > 0 || failed > 0 {
 		log.Printf("command recovery scan requeued %d, failed %d commands", requeued, failed)
@@ -62,7 +62,7 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	// The ACK timeout doubles as the grace period for legacy 'sent' rows that
 	// predate deadline_at: they are given one full timeout window from their
 	// last update before being expired.
-	if expired, err := d.store.ExpireCommands(time.Now().UTC(), d.timeout); err != nil {
+	if expired, err := d.store.ExpireCommandsContext(ctx, time.Now().UTC(), d.timeout); err != nil {
 		log.Printf("command timeout scan error: %v", err)
 	} else if expired > 0 {
 		log.Printf("command timeout scan marked %d commands", expired)
@@ -70,7 +70,7 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 	// Claim immediately before publishing, so queued commands do not spend
 	// their lease waiting for earlier Kafka calls in the batch.
 	for i := 0; i < d.batchSize && ctx.Err() == nil; i++ {
-		commands, err := d.store.ClaimCommandsForDispatch(1, d.lease)
+		commands, err := d.store.ClaimCommandsForDispatchContext(ctx, 1, d.lease)
 		if err != nil {
 			log.Printf("command dispatch claim error: %v", err)
 			return
@@ -85,12 +85,12 @@ func (d *CommandDispatcher) dispatchOnce(ctx context.Context) {
 		if err != nil {
 			backoff := time.Second * time.Duration(1<<min(command.DispatchAttempts, 6))
 			log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
-			if retryErr := d.store.RescheduleCommand(command.ID, command.DispatchAttempts, backoff); retryErr != nil {
+			if retryErr := d.store.RescheduleCommandContext(ctx, command.ID, command.DispatchAttempts, backoff); retryErr != nil {
 				log.Printf("command reschedule error: id=%s err=%v", command.ID, retryErr)
 			}
 			continue
 		}
-		if err := d.store.MarkCommandPublished(command.ID, command.DispatchAttempts); err != nil {
+		if err := d.store.MarkCommandPublishedContext(ctx, command.ID, command.DispatchAttempts); err != nil {
 			log.Printf("command mark published error: id=%s err=%v", command.ID, err)
 		}
 	}

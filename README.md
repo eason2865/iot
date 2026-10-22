@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.46`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.47`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -549,6 +549,10 @@ go run ./cmd/migrate
 Set `POSTGRES_AUTO_MIGRATE=false` for application processes using a DML-only database role; local development defaults to true. Images include `/usr/local/bin/migrate`. The production overlay `charts/iot/values-production.yaml` enables mTLS, HPA, node/zone spreading and Kafka RF=3, ISR=2, 6 partitions. Replace DNS names, image and Secrets, install metrics-server, and tune capacity through load tests. Existing Kafka partitions/replicas still require operator changes; this overlay does not provision HA dependencies.
 
 CI runs isolated PostgreSQL regressions, REST→gRPC→database idempotency checks, vet, race, both Helm profiles and protobuf drift checks. Locally, set `IOT_POSTGRES_TEST_DSN` to a dedicated test database before `go test ./...`; each database test owns and removes a separate schema. See ADR 0008.
+
+Telemetry `payload` is required and must be a JSON object (an empty object is valid). MQTT, REST and gRPC ingress reject missing, null, array or scalar payloads; gRPC returns `InvalidArgument` and REST returns HTTP 400. The MQTT telemetry subscription must actually receive QoS 1; missing, rejected or downgraded SUBACK grants fail the ingestor, including reconnects.
+
+Runtime PostgreSQL operations propagate caller cancellation and have a default five-second cap; schema migration keeps its separate maintenance budget. Command expiry/recovery sweeps process up to 500 rows per transition with `FOR UPDATE SKIP LOCKED`, so a locked command does not prevent unrelated dispatch. State changes and audit events remain atomic; skipped rows are retried in later sweeps.
 
 ## Development Guidelines
 

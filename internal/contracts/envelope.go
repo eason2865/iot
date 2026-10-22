@@ -1,10 +1,12 @@
 package contracts
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 var ErrInvalidEnvelope = errors.New("invalid envelope")
@@ -63,6 +65,9 @@ func ValidateEnvelope(env Envelope) error {
 // validateEnvelopeAt is ValidateEnvelope with an explicit clock, so the
 // timestamp bounds can be exercised without depending on wall-clock time.
 func validateEnvelopeAt(env Envelope, now time.Time) error {
+	if err := ValidateTelemetryPayload(env.Payload); err != nil {
+		return err
+	}
 	if env.Ts <= 0 {
 		return ErrInvalidEnvelope
 	}
@@ -71,6 +76,16 @@ func validateEnvelopeAt(env Envelope, now time.Time) error {
 	}
 	if env.Ts < minEnvelopeTsMillis || env.Ts > now.Add(maxEnvelopeClockSkew).UnixMilli() {
 		return ErrEnvelopeTimestampOutOfRange
+	}
+	return nil
+}
+
+// Payload is required to be one JSON object, matching the published Schema.
+// This stable check is also safe for persisted/Kafka records during recovery.
+func ValidateTelemetryPayload(raw json.RawMessage) error {
+	value := bytes.TrimSpace(raw)
+	if len(value) == 0 || value[0] != '{' || !utf8.Valid(raw) || !json.Valid(raw) {
+		return fmt.Errorf("%w: payload is required and must be a JSON object", ErrInvalidEnvelope)
 	}
 	return nil
 }

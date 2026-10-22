@@ -196,7 +196,7 @@ func TestPostgresWritesWithOneConnection(t *testing.T) {
 	for _, op := range []string{"telemetry", "command", "duplicate"} {
 		t.Run(op, func(t *testing.T) {
 			s := isolatedPostgresStore(t)
-			env := contracts.Envelope{MsgID: "m", TenantID: "t", DeviceID: "d", Ts: time.Now().UnixMilli(), Type: "telemetry", Version: "v1"}
+			env := contracts.Envelope{MsgID: "m", TenantID: "t", DeviceID: "d", Ts: time.Now().UnixMilli(), Type: "telemetry", Version: "v1", Payload: []byte(`{}`)}
 			if op == "duplicate" {
 				if _, err := s.RecordTelemetry(env); err != nil {
 					t.Fatal(err)
@@ -303,7 +303,7 @@ func TestPostgresContextWritesAndLookups(t *testing.T) {
 	if _, err := s.GetDeviceContext(ctx, "t", "d"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetDeviceContext: %v", err)
 	}
-	if _, err := s.RecordTelemetryContext(ctx, contracts.Envelope{}); !errors.Is(err, context.Canceled) {
+	if _, err := s.RecordTelemetryContext(ctx, contracts.Envelope{Payload: []byte(`{}`)}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("RecordTelemetryContext: %v", err)
 	}
 	if _, err := s.CreateCommandWithKey(ctx, "t", "d", "key", nil); !errors.Is(err, context.Canceled) {

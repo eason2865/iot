@@ -110,8 +110,14 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 			b.fail(err)
 			return
 		}
-		if sub, ok := token.(*mqtt.SubscribeToken); ok && sub.Result()[filter] == 0x80 {
-			b.fail(fmt.Errorf("mqtt bridge subscription denied: %s", filter))
+		sub, ok := token.(*mqtt.SubscribeToken)
+		if !ok {
+			b.fail(fmt.Errorf("mqtt bridge subscription missing SUBACK: %s", filter))
+			return
+		}
+		granted, present := sub.Result()[filter]
+		if !present || granted != 1 {
+			b.fail(fmt.Errorf("mqtt bridge subscription requires QoS 1: filter=%s SUBACK=%#x present=%t", filter, granted, present))
 		}
 	}
 	b.client = mqtt.NewClient(opts)

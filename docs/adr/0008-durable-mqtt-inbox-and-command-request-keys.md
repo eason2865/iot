@@ -17,6 +17,14 @@ command-ID deduplication could not prevent two actions after a lost HTTP respons
   PostgreSQL telemetry inbox row before PUBACK. Kafka publishing remains bounded
   to 64 concurrent tasks; the existing worker completion-marker scan repairs
   inbox rows whose Kafka event or TDengine write never completed.
+- Telemetry subscriptions must actually receive a QoS 1 SUBACK grant. Missing,
+  rejected or downgraded results fail the ingestor, including reconnects, because
+  QoS 0 cannot support manual acknowledgement and broker redelivery.
+- Require telemetry payload to be present and a valid JSON object, including `{}`.
+  Share validation across MQTT/REST/gRPC ingress and apply the same stable shape
+  check in stores to prevent bypass. Invalid payloads map to InvalidArgument/400;
+  historical recovery does not reapply the live timestamp window. Existing stored
+  rows are not migrated or deleted.
 - If the inbox is unavailable, a successful Kafka or DLQ write can still establish
   durability. With no successful sink, leave the message unacknowledged and fail
   the ingestor. Invalid messages are acknowledged only after DLQ persistence.

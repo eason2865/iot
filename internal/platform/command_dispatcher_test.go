@@ -12,7 +12,7 @@ type stubDispatchStore struct {
 	limits   []int
 }
 
-func (s *stubDispatchStore) ClaimCommandsForDispatch(limit int, _ time.Duration) ([]Command, error) {
+func (s *stubDispatchStore) ClaimCommandsForDispatchContext(_ context.Context, limit int, _ time.Duration) ([]Command, error) {
 	s.claims++
 	s.limits = append(s.limits, limit)
 	if len(s.commands) > 0 {
@@ -55,12 +55,16 @@ func TestDispatcherClaimsJustBeforeEachBoundedPublish(t *testing.T) {
 	}
 }
 
-func (s *stubDispatchStore) MarkCommandPublished(string, int) error             { return nil }
-func (s *stubDispatchStore) RescheduleCommand(string, int, time.Duration) error { return nil }
-func (s *stubDispatchStore) ExpireCommands(time.Time, time.Duration) (int64, error) {
+func (s *stubDispatchStore) MarkCommandPublishedContext(context.Context, string, int) error {
+	return nil
+}
+func (s *stubDispatchStore) RescheduleCommandContext(context.Context, string, int, time.Duration) error {
+	return nil
+}
+func (s *stubDispatchStore) ExpireCommandsContext(context.Context, time.Time, time.Duration) (int64, error) {
 	return 0, nil
 }
-func (s *stubDispatchStore) RecoverStaleCommands(time.Time, int) (int64, int64, error) {
+func (s *stubDispatchStore) RecoverStaleCommandsContext(context.Context, time.Time, int) (int64, int64, error) {
 	return 0, 0, nil
 }
 

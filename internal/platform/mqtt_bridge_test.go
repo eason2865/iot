@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestBridgeDoesNotAcknowledgeBeforeKafkaPersistence(t *testing.T) {
 		message.Qos = 1
 		message.MessageID = 42
 		message.TopicName = "tenant/t/device/d/telemetry"
-		message.Payload, _ = json.Marshal(map[string]any{"msgId": "m", "tenantId": "t", "deviceId": "d", "ts": time.Now().UnixMilli(), "type": "telemetry", "version": "v1"})
+		message.Payload, _ = json.Marshal(map[string]any{"msgId": "m", "tenantId": "t", "deviceId": "d", "ts": time.Now().UnixMilli(), "type": "telemetry", "version": "v1", "payload": map[string]any{}})
 		if err = message.Write(conn); err != nil {
 			brokerResult <- err
 			return
@@ -98,6 +99,43 @@ func TestBridgeDoesNotAcknowledgeBeforeKafkaPersistence(t *testing.T) {
 	defer bridge.client.Disconnect(100)
 	if err := <-brokerResult; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBridgeRejectsQoSZeroSubscription(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err = packets.ReadPacket(conn); err != nil {
+			return
+		}
+		if err = packets.NewControlPacket(packets.Connack).Write(conn); err != nil {
+			return
+		}
+		packet, err := packets.ReadPacket(conn)
+		if err != nil {
+			return
+		}
+		ack := packets.NewControlPacket(packets.Suback).(*packets.SubackPacket)
+		ack.MessageID = packet.(*packets.SubscribePacket).MessageID
+		ack.ReturnCodes = []byte{0}
+		_ = ack.Write(conn)
+		_, _ = packets.ReadPacket(conn)
+	}()
+	bridge := NewMQTTBridge(MQTTBridgeConfig{BrokerURL: "tcp://" + listener.Addr().String()}, noopPublisher{}, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	if err = bridge.Run(ctx); err == nil || !strings.Contains(err.Error(), "requires QoS 1") {
+		t.Fatalf("expected fatal QoS 0 rejection, got %v", err)
 	}
 }
 

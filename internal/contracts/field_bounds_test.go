@@ -14,7 +14,7 @@ func TestEnvelopeStorageFieldBounds(t *testing.T) {
 				limit = 32
 			}
 			for _, overflow := range []bool{false, true} {
-				env := Envelope{MsgID: "m", TenantID: "t", DeviceID: "d", Type: "temp", Version: "v1", Ts: time.Now().UnixMilli()}
+				env := Envelope{MsgID: "m", TenantID: "t", DeviceID: "d", Type: "temp", Version: "v1", Ts: time.Now().UnixMilli(), Payload: []byte(`{}`)}
 				value := strings.Repeat("x", limit)
 				if multibyte {
 					value = strings.Repeat("界", limit/3) + strings.Repeat("x", limit%3)

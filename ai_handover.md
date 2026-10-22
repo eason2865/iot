@@ -2,6 +2,19 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## PostgreSQL 取消、遥测契约与订阅可靠性修复（2026-10-22，发布版本 2.47）
+
+- 修复 2.46 三类复现：列表/命令扫描等 PostgreSQL 操作不响应取消、遥测 payload 与公开 Schema 不一致、ingestor 接受 QoS 0 降级。
+- PostgreSQL 运行期 SQL 全部改用 QueryContext/QueryRowContext/ExecContext/BeginTx，并设默认 5s 上限；较短的调用方 deadline/主动取消优先。core 四类分页列表、租户/设备创建、MQTT 认证、dispatcher、worker 状态及补偿完成标记透传请求/生命周期 ctx。旧方法保留兼容并转到有 5s 上限的实现，测试 harness 的旧接口保持兼容；生产走 Context 方法。结构迁移保留原启动/维护预算，不套用运行期 5s。
+- 过期与恢复扫描每种状态转换最多处理 500 条，FOR UPDATE SKIP LOCKED 跳过已锁行，后续扫描再处理；状态及 command_events 继续由单条 CTE 原子提交。保留领取 attempt/有效租约限制及末次尝试保护，不改命令 at-least-once 语义。
+- contracts.ValidateTelemetryPayload 统一要求 payload 存在、有效 UTF-8/JSON 且为对象，允许 {} 和对象中的数组/null，拒绝顶层 null/数组/标量、缺失、非法 JSON/UTF-8 及非 JSON 空白。MQTT/REST/两条 gRPC 摄入入口复用 Envelope 校验，PG/内存存储在写入前再检查稳定 payload 形状，防直接调用绕过。参数错误为 InvalidArgument/HTTP 400；历史恢复不重验实时 ts 窗口。本轮不迁移/删除已有非法 payload。
+- ingestor 检查真实 SubscribeToken.Result，目标 filter 必须存在且实际 grant 为 QoS 1；QoS 0、拒绝、缺失和超时经 fatal 通知 Run，重连同样检查。此前已有手动确认及持久化顺序保持不变；不扩展为 broker 离线会话保证。
+- 回归先复现再修复：旧校验接受 null/数组/标量；MQTT 协议 peer 返回 QoS 0 后旧 bridge 正常运行；真实 PG 中锁住过期行会阻止其他命令派发。修复后覆盖 MQTT ParseEnvelope 与两条真实 gRPC 入口，所有非法形状为参数错误；原 QoS 1 确认时序测试保持通过，QoS 0 明确返回订阅故障。
+- 真实 PG 锁回归：锁住 sent 超时行、published 恢复行及 created 耗尽行，其他新命令均在锁未释放时派发；ACCESS EXCLUSIVE 表锁下取消 dispatcher，Run 及数据库等待查询均退出。四类列表通过实际 gRPC 请求，先观察 pg_locks 的未授予锁再取消，在仍持有表锁时确认等待查询消失，避免仅验证客户端取消造成假阳性。原审计原子性、单连接和末次租约回归保持通过。
+- 验证通过：go test -count=1 ./...（开启独立 PG、真实 Kafka/TDengine 回归）、go test -race ./internal/... ./cmd/dlq-replay、最终 payload/SUBACK 边界的定向 race、go vet ./...、格式/差异检查、7 个 Linux arm64 二进制构建、Helm 本地/生产双 profile lint/template、Compose config、部署脚本语法及 protobuf 重生零漂移。
+- 默认镜像 iot-app:2.47、Chart 0.2.4；镜像已构建，manifest list sha256:0a07b0680a6223787b0835fb7f5a79b29c1618f3dc9d7e675b7b60ceb1f23246。双语 README、ADR 0007/0008 与本交接同步。本轮改变运行期 DML，没有新增 DDL 迁移。
+- 按项目规则在 main 提交并推送 2.47 tag；本轮只构建发布，不部署业务服务。上次实际部署记录仍为 2.43。测试使用独立 PG 容器/schema、私有 Kafka topic 和 TDengine database，结束后清理，不修改运行服务数据或配置。
+
 ## 阻塞边界与分页错误修复（2026-10-22，发布版本 2.46）
 
 - 修复本轮四项复现：TDengine HTTP 无期限等待、Kafka Controller/CreateTopics 不服从 ctx、ACK SUBACK 拒绝后仍运行、非法分页游标被映射成 HTTP 500。

@@ -1,4 +1,9 @@
+FROM alpine:3.22@sha256:d406446bc05b82480756ce8f1287964d28768c23955fa9480d2a74a2eae7a654 AS trust
+RUN apk add --no-cache ca-certificates
+
 FROM scratch
+
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 COPY bin/management-api /usr/local/bin/management-api
 COPY bin/iot-core /usr/local/bin/iot-core

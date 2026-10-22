@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,7 +138,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 		})
 	}
 	for name, handler := range map[string]http.HandlerFunc{"tenants": server.listTenantsHandler, "devices": server.listDevicesHandler, "commands": server.listCommandsHandler, "devices/t/d/telemetry": server.listTelemetryHandler} {
-		for _, query := range []string{"cursor=" + url.QueryEscape("%%%"), "cursor=%%%", "cursor=_w", "cursor=AA", "pageSize=101"} {
+		for _, query := range []string{"cursor=" + url.QueryEscape("%%%"), "cursor=%%%", "cursor=_w", "cursor=AA", "pageSize=101", "pageSize=10abc", "pageSize=1.5"} {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/"+name+"?tenantId=t&"+query, nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -179,6 +180,30 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	}
 	if code, _ := post("with space", `{}`, "t"); code != 400 {
 		t.Fatalf("invalid key status=%d", code)
+	}
+
+	// Exercise the real gateway -> gRPC -> PG boundary with both authorization paths.
+	for _, token := range []string{"admin", "tenant-token"} {
+		for _, tc := range []struct {
+			path, body string
+			handler    http.HandlerFunc
+		}{
+			{"/api/v1/devices", `{"tenantId":"t","deviceId":"long-secret","productId":"p","secret":"` + strings.Repeat("x", 73) + `"}`, server.createDeviceHandler},
+			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":"\u0000"}}`, server.createCommandHandler},
+			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":1e1000000}}`, server.createCommandHandler},
+			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":"` + strings.Repeat("x", 1048400) + `"}}`, server.createCommandHandler},
+			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{}} garbage`, server.createCommandHandler},
+			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{}} {}`, server.createCommandHandler},
+		} {
+			req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			h := limitRequestBodyMiddleware(platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"})(tc.handler))
+			h.ServeHTTP(rec, req)
+			if rec.Code != 400 {
+				t.Errorf("token=%s path=%s invalid input status=%d", token, tc.path, rec.Code)
+			}
+		}
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)

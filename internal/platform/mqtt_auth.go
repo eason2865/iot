@@ -172,6 +172,9 @@ func secureEqual(left, right string) bool {
 }
 
 func HashDeviceSecret(secret string) (string, error) {
+	if err := contracts.ValidateDeviceSecret(secret); err != nil {
+		return "", err
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
 	return string(hash), err
 }

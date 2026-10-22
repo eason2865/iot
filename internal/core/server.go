@@ -38,22 +38,22 @@ func Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, closer, err := buildStore(5 * time.Minute)
+	store, storeCloser, err := buildStore(5 * time.Minute)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if closer != nil {
-			_ = closer()
+		if storeCloser != nil {
+			_ = storeCloser()
 		}
 	}()
-	publisher, closer, err := buildPublisher()
+	publisher, publisherCloser, err := buildPublisher()
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if closer != nil {
-			_ = closer()
+		if publisherCloser != nil {
+			_ = publisherCloser()
 		}
 	}()
 	if dispatchStore, ok := store.(platform.CommandDispatchStore); ok && publisher != nil {
@@ -237,12 +237,15 @@ func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 
 func buildPublisher() (platform.MessagePublisher, func() error, error) {
 	brokers := runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092"))
-	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
+	publisher, err := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        brokers,
 		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 		TopicConfig:    topicConfigFromEnv(),
 	}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
 	if publisher == nil {
 		return nil, nil, nil
 	}

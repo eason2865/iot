@@ -70,6 +70,7 @@ const (
 )
 
 type Worker struct {
+	startupErr      error
 	store           Repository
 	tdengine        *TDengineWriter
 	mqtt            mqtt.Client
@@ -111,8 +112,16 @@ func NewWorker(cfg WorkerConfig, store Repository, tdengine *TDengineWriter, met
 		}
 		// The DLQ is created separately: it carries the same durability settings
 		// but its own retention policy.
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.TopicConfig, telemetryTopic, commandTopic)
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), dlqTopic)
+		if err := initializeKafkaTopics(cfg.KafkaBrokers, businessTopicConfig(cfg.TopicConfig), telemetryTopic, commandTopic); err != nil {
+			w.startupErr = err
+			w.acks.cancel()
+			return w
+		}
+		if err := initializeKafkaTopics(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), dlqTopic); err != nil {
+			w.startupErr = err
+			w.acks.cancel()
+			return w
+		}
 		w.dlqWriter = newDeadLetterWriter(cfg.KafkaBrokers, dlqTopic)
 		groupID := cfg.KafkaGroupID
 		if groupID == "" {
@@ -202,6 +211,9 @@ func normalizeAckTopicFilters(cfg WorkerConfig) []string {
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	if w != nil && w.startupErr != nil {
+		return w.startupErr
+	}
 	if w == nil {
 		return nil
 	}

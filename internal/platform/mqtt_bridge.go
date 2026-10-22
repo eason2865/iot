@@ -33,6 +33,7 @@ type MQTTBridgeConfig struct {
 }
 
 type MQTTBridge struct {
+	startupErr   error
 	client       mqtt.Client
 	filter       string
 	metrics      *Metrics
@@ -72,7 +73,11 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, concurrency), publisher: publisher, inbox: cfg.Inbox, ctx: ctx, cancel: cancel, errCh: make(chan error, 1)}
 	if len(cfg.KafkaBrokers) > 0 {
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), topic)
+		if err := initializeKafkaTopics(cfg.KafkaBrokers, deadLetterTopicConfig(cfg.DLQTopicConfig), topic); err != nil {
+			b.startupErr = err
+			cancel()
+			return b
+		}
 		b.dlqWriter = newDeadLetterWriter(cfg.KafkaBrokers, topic)
 	}
 	opts := mqtt.NewClientOptions().AddBroker(cfg.BrokerURL).SetClientID(cfg.ClientID)
@@ -253,6 +258,9 @@ func (b *MQTTBridge) CheckReady(context.Context) error {
 }
 
 func (b *MQTTBridge) Run(ctx context.Context) error {
+	if b != nil && b.startupErr != nil {
+		return b.startupErr
+	}
 	if b == nil || b.client == nil {
 		return nil
 	}

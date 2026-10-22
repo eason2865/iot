@@ -143,6 +143,14 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 		metrics: platform.NewMetrics(),
 	}
 
+	complete := false
+	defer func() {
+		if !complete {
+			for i := len(res.closers) - 1; i >= 0; i-- {
+				_ = res.closers[i]()
+			}
+		}
+	}()
 	store, closer, err := buildStore(ttl)
 	if err != nil {
 		return nil, err
@@ -220,6 +228,7 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 		}, store, tdWriter, res.metrics)
 	}
 
+	complete = true
 	return res, nil
 }
 
@@ -266,12 +275,15 @@ func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 
 func buildPublisher(metrics *platform.Metrics) (platform.MessagePublisher, func() error, error) {
 	brokers := runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092"))
-	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
+	publisher, err := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        brokers,
 		TelemetryTopic: runtimeconfig.EnvOrDefault("KAFKA_TELEMETRY_TOPIC", "iot.telemetry"),
 		CommandTopic:   runtimeconfig.EnvOrDefault("KAFKA_COMMAND_TOPIC", "iot.command"),
 		TopicConfig:    topicConfigFromEnv(),
 	}, metrics)
+	if err != nil {
+		return nil, nil, err
+	}
 	if publisher == nil {
 		return nil, nil, nil
 	}

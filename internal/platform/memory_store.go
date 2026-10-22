@@ -70,6 +70,9 @@ func (s *memoryStore) ListTenants() []Tenant {
 }
 
 func (s *memoryStore) CreateDevice(d Device) (Device, error) {
+	if err := contracts.ValidateDeviceSecret(d.Secret); err != nil {
+		return Device{}, err
+	}
 	if !contracts.IsValidTenantID(d.TenantID) || !contracts.IsValidTopicPart(d.DeviceID) {
 		return Device{}, contracts.ErrInvalidTopicPart
 	}
@@ -230,6 +233,9 @@ func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord
 // The memory implementation is only a test harness; PostgreSQL owns production
 // atomicity. Reuse the same lock for key lookup and command allocation.
 func (s *memoryStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+	if err := ValidateCommandInput(tenantID, deviceID, payload); err != nil {
+		return Command{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return Command{}, err
 	}

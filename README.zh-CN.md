@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.50`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.51`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -573,3 +573,17 @@ Helm 为 `tdengine.writeTimeout`），消费/补偿任务取消会中断在途 H
 Kafka topic 初始化同时约束连接读写、主动取消及总计 60 秒的重试/退避预算。
 worker 仅在所有 ACK topic 均获准 QoS 1 后启动业务处理；拒绝、降级或超时会使 worker 报错退出，重连订阅失败同样处理。
 分页接口的非法游标、错误 URL 查询编码或非法页大小返回 HTTP 400，存储故障仍返回服务端错误。
+
+
+运行镜像包含公共 CA 根证书，供 HTTPS 客户端使用。本地部署新增 Python 3 前置要求，
+通过 JSON 编码器构造 EMQX 回调请求头，保持 token 字节不变。设备 secret 限制为
+1–72 个 UTF-8 字节；指令及遥测 JSON 拒绝 NUL、未配对 UTF-16 surrogate 和超出
+JSONB 存储范围的数字，这些输入返回 HTTP 400。分页必须完整解析为整数，正文只能
+包含一个 JSON 文档。
+
+指令受理检查完整编码消息及 PostgreSQL JSONB 规范化结果，在 1 MiB Kafka 预算中
+预留 1024 字节传输开销。topic 初始化失败或分区/副本数不匹配会阻止启动，所有
+生产者关闭自动建 topic；升级修改这些配置前，需要先由运维调整现有 topic。
+旧密钥迁移会清理已有 hash 旁的明文，保留有效 hash，移除旧明文列默认值；非法
+旧凭据导致整个迁移回滚。TDengine 改写整数毫秒时间戳，不受连接时区影响；已有
+偏移历史不会自动修正。

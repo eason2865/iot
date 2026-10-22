@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -399,9 +401,11 @@ func pageFromRequest(r *http.Request) (int, string, error) {
 	}
 	pageSize := 0
 	if raw := query.Get("pageSize"); raw != "" {
-		if _, err := fmt.Sscan(raw, &pageSize); err != nil {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
 			return 0, "", fmt.Errorf("pageSize must be an integer")
 		}
+		pageSize = parsed
 	}
 	page, err := platform.NormalizePageRequest(pageSize, query.Get("cursor"))
 	return page.Size, page.Cursor, err
@@ -604,7 +608,14 @@ func httpStatusFromGRPC(err error) int {
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(dst)
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("request body must contain exactly one JSON value")
+	}
+	return nil
 }
 
 func listenHost() string {

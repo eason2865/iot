@@ -37,11 +37,14 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	}
 	defer store.Close()
 
-	publisher := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
+	publisher, err := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        kafkaBrokers,
 		TelemetryTopic: "iot.telemetry",
 		CommandTopic:   "iot.command",
 	}, metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if publisher == nil {
 		t.Fatal("NewKafkaPublisher() returned nil")
 	}

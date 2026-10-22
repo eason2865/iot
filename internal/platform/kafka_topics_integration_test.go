@@ -67,3 +67,15 @@ func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
 		}
 	}
 }
+
+func TestKafkaInitializationRejectsReplicaAndPartitionDrift(t *testing.T) {
+	brokers, topic := regressionKafkaTopic(t)
+	for _, cfg := range []KafkaTopicConfig{{ReplicationFactor: 2, MinInsyncReplicas: 1, NumPartitions: 1}, {ReplicationFactor: 1, MinInsyncReplicas: 1, NumPartitions: 2}} {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		err := ensureKafkaTopics(ctx, brokers, cfg, topic)
+		cancel()
+		if err == nil || !strings.Contains(err.Error(), "operational change required") {
+			t.Fatalf("drift did not block startup: cfg=%+v err=%v", cfg, err)
+		}
+	}
+}

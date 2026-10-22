@@ -1,10 +1,14 @@
 package core
 
 import (
+	"database/sql"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +185,48 @@ func TestTopicConfigHonorsPartitionCount(t *testing.T) {
 	t.Setenv("KAFKA_TOPIC_PARTITIONS", "6")
 	if got := topicConfigFromEnv().NumPartitions; got != 6 {
 		t.Fatalf("topic partitions = %d, want 6", got)
+	}
+}
+
+func TestPublisherInitializationFailurePropagates(t *testing.T) {
+	t.Setenv("KAFKA_BROKERS", "127.0.0.1:1")
+	t.Setenv("KAFKA_TOPIC_REPLICATION_FACTOR", "1")
+	t.Setenv("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", "2")
+	p, close, err := buildPublisher()
+	if err == nil || p != nil || close != nil {
+		t.Fatalf("startup ignored invalid durability config: %v", err)
+	}
+}
+
+func TestFailedRuntimeStartupClosesPostgres(t *testing.T) {
+	dsn := os.Getenv("IOT_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set IOT_POSTGRES_TEST_DSN")
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("startup_cleanup_%d", time.Now().UnixNano())
+	q := u.Query()
+	q.Set("application_name", name)
+	u.RawQuery = q.Encode()
+	t.Setenv("POSTGRES_DSN", u.String())
+	t.Setenv("POSTGRES_AUTO_MIGRATE", "false")
+	t.Setenv("OTEL_DISABLED", "true")
+	t.Setenv("KAFKA_BROKERS", "127.0.0.1:1")
+	t.Setenv("KAFKA_TOPIC_REPLICATION_FACTOR", "1")
+	t.Setenv("KAFKA_TOPIC_MIN_INSYNC_REPLICAS", "2")
+	if err = Run(); err == nil {
+		t.Fatal("runtime started with invalid durability")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err = db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE application_name=$1`, name).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("startup leaked %d database connections: %v", n, err)
 	}
 }

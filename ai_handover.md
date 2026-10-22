@@ -2,6 +2,19 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 时区、容量、输入与启动可靠性修复（2026-10-22，发布版本 2.51）
+
+- 针对 main / 2.50 / 1ea1c23 的8类问题逐项修复，本轮只构建、验证和发布，不替换运行服务。当前实际部署仍为2.50（Helm iot revision 2、4个服务各2/2 Ready），部署证据见 outputs/deployment-20261022-250/。
+- TDengine INSERT 改用整数 rec.Ts 毫秒，不再拼接无时区UTC时间字符串；真实driver在UTC及Asia/Shanghai会话下读回相同UnixMilli。将旧实现临时还原后，上海会话测试明确偏移8小时；修复不自动改写已经偏移的历史数据。
+- 指令受理统一 ValidateCommandInput：业务Kafka writer显式1MiB、topic max.message.bytes至少1MiB（保留更大的运维设置），完整指令按最长状态/时间/attempt预留metadata，并另留1024字节key/framing预算。core、PG、内存入口都检查；PG在同一事务中SELECT payload::jsonb后再检查，防指数数字在JSONB中展开后超限，检查通过才INSERT。旧实现复现超限指令提交成功，修复后REST→真实gRPC→PG返回400且不持久化；接近上限的受理指令通过真实Kafka发布/读取，短指数展开超限同样拒绝。已有超限历史命令不自动删除或改写。
+- Kafka初始化返回最终错误（默认60s总预算、5s/次、退避可取消），publisher构造改为(*KafkaPublisher,error)，core/bootstrap都向上传递。worker/bridge初始化失败保存startupErr，Run在消费、连接MQTT之前返回；所有writer关闭自动建topic。ISR>RF立即拒绝；所有分区副本数及分区总数必须与配置相符，不符合则报错等待运维处理，不自动重分配。真实单broker私有topic验证副本/分区漂移会失败，协议peer覆盖Controller/CreateTopics不响应和取消；未做三broker故障演练。启动失败清理已打开资源，同时修复core的closer变量被publisher覆盖而漏关PG；真实pg_stat_activity验证失败退出后连接数归零。
+- 旧密钥迁移扫描所有仍有secret的记录：没有hash则哈希，有有效hash则保留并清空明文，非法hash/无法迁移凭据导致整事务回滚，不悄悄覆盖已有认证身份。002_upgrade.sql移除旧secret列默认值，避免后续创建设备重新填充默认明文。真实隔离PG覆盖混合状态、已有hash继续认证及新设备无明文；迁移镜像在独立PG连续执行两次成功。生产POSTGRES_AUTO_MIGRATE=false需显式运行新版migrate后才会进行该清理，不宣称当前业务库有明文或已执行清理。
+- scratch最终镜像从固定digest Alpine trust阶段复制公共CA包；实际在2.50镜像内检测系统根为0，2.51内为118。gRPC显式挂载CA不变；HTTPS客户端可以使用系统信任根，没有开启跳过证书验证。镜像iot-app:2.51已构建，manifest list sha256:1b586d7d12f059098a2bb1ce319867f88e88104420e431894f695f9aa6950c46。
+- contracts统一校验设备secret为1..72个UTF-8字节，并在HashDeviceSecret防御；JSONB输入使用UseNumber保留精度，拒绝NUL（包含对象键）、未配对surrogate、超范围数字，遥测保持payload对象限制。指令及遥测入口/存储共用校验，core映射InvalidArgument/HTTP400，数据库真实故障保持500。隔离PG对比数值/Unicode边界，两种Bearer路径的真实REST→gRPC→PG覆盖73字节secret、NUL、极大指数及超限指令。
+- HTTP分页改用strconv.Atoi完整解析，拒绝10abc/1.5等；JSON decoder在首个值后要求EOF，拒绝垃圾字符/第二个JSON，对全局及租户Token保持一致。脚本使用Python3 JSON编码器从环境构造EMQX回调headers；在修改集群前完成编码。Python3成为本地部署前置要求，真实脚本配stub命令覆盖引号/反斜杠token字节不变，不使用真实凭据测试。
+- 验证通过：开启独立PG、真实Kafka/TDengine的go test -count=1 ./...，go test -race ./internal/... ./cmd/dlq-replay，最终输入/迁移/启动清理定向race，go vet ./...，make fmt-check及git diff --check，7个Linux arm64二进制，本地/生产Helm lint/template，Compose config，shell/Python语法检查，protobuf重生零漂移，真实镜像CA检查与重复迁移。证据在Git忽略的 outputs/fixes-251/；PG测试容器iot-fix251-pg与各schema、私有Kafka topic、TDengine database完成后清理，不操作运行服务的数据。
+- 默认镜像2.51、Chart0.2.8，双语README、ADR0004和本交接同步。设计边界保持：至少一次投递/设备按command ID去重；TD同设备同毫秒碰撞及仅存payload摘要；PG遥测自动归档未补齐；外部HA、恢复演练、大积压、滚动和容量压力仍需独立完成。本轮按仓库规则在main提交、打2.51 tag并一起推送。
+
 ## 共享订阅兼容修复与重新部署（2026-10-22，发布版本 2.50）
 
 - 用户要求重新部署。实际 docker-desktop 集群已无 iot/emqx namespace 和 Helm release，外部 PostgreSQL/Kafka/TDengine 仍在；先完成约 160 MiB 的 PostgreSQL 自定义格式逻辑备份并验证可列目录，备份及私有运行配置保存在 outputs/deployment-20261022-250/（目录700、敏感文件600）。保留原数据、API/MQTT 凭据及外部存储容器，恢复 EMQX Operator 2.3.0、单核心 EMQX Enterprise 6.3.1。

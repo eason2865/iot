@@ -25,9 +25,9 @@ type KafkaPublisherConfig struct {
 	TopicConfig    KafkaTopicConfig
 }
 
-func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublisher {
+func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) (*KafkaPublisher, error) {
 	if len(cfg.Brokers) == 0 {
-		return nil
+		return nil, nil
 	}
 	telemetryTopic := cfg.TelemetryTopic
 	if telemetryTopic == "" {
@@ -37,7 +37,9 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublish
 	if commandTopic == "" {
 		commandTopic = "iot.command"
 	}
-	ensureKafkaTopicsBestEffort(cfg.Brokers, cfg.TopicConfig, telemetryTopic, commandTopic)
+	if err := initializeKafkaTopics(cfg.Brokers, businessTopicConfig(cfg.TopicConfig), telemetryTopic, commandTopic); err != nil {
+		return nil, err
+	}
 	return &KafkaPublisher{
 		telemetryWriter: &kafka.Writer{
 			Addr:     kafka.TCP(cfg.Brokers...),
@@ -52,7 +54,8 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublish
 			RequiredAcks:           kafka.RequireAll,
 			BatchSize:              1,
 			BatchTimeout:           10 * time.Millisecond,
-			AllowAutoTopicCreation: true,
+			BatchBytes:             businessBatchBytes,
+			AllowAutoTopicCreation: false,
 		},
 		commandWriter: &kafka.Writer{
 			Addr:     kafka.TCP(cfg.Brokers...),
@@ -67,10 +70,11 @@ func NewKafkaPublisher(cfg KafkaPublisherConfig, metrics *Metrics) *KafkaPublish
 			RequiredAcks:           kafka.RequireAll,
 			BatchSize:              1,
 			BatchTimeout:           10 * time.Millisecond,
-			AllowAutoTopicCreation: true,
+			BatchBytes:             businessBatchBytes,
+			AllowAutoTopicCreation: false,
 		},
 		metrics: metrics,
-	}
+	}, nil
 }
 
 func (p *KafkaPublisher) Close() error {

@@ -18,6 +18,8 @@ import (
 // acks=1, because the ISR can shrink to the leader alone and writes still
 // succeed there.
 type KafkaTopicConfig struct {
+	// SetupTimeout bounds startup reconciliation; zero uses 60 seconds.
+	SetupTimeout      time.Duration
 	ReplicationFactor int
 	MinInsyncReplicas int
 	// NumPartitions is the partition count for topics this service creates.
@@ -54,7 +56,7 @@ func (c KafkaTopicConfig) normalized() KafkaTopicConfig {
 // a reconciliation pass that incrementally SETs drifted config entries. Partition
 // count and replication factor still only take effect on first creation —
 // changing them on a live topic is an operational task, not something this
-// service can do, so drift there is logged instead.
+// service can do, so such drift fails startup until an operator fixes it.
 func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfig {
 	cfg = cfg.normalized()
 	configs := make([]kafka.TopicConfig, 0, len(topics))
@@ -95,25 +97,36 @@ func buildTopicConfigs(topics []string, cfg KafkaTopicConfig) []kafka.TopicConfi
 	return configs
 }
 
-func ensureKafkaTopicsBestEffort(brokers []string, cfg KafkaTopicConfig, topics ...string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func initializeKafkaTopics(brokers []string, cfg KafkaTopicConfig, topics ...string) error {
+	timeout := cfg.SetupTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	ensureKafkaTopicsUntil(ctx, brokers, cfg, topics...)
+	return ensureKafkaTopicsUntil(ctx, brokers, cfg, topics...)
 }
 
-func ensureKafkaTopicsUntil(ctx context.Context, brokers []string, cfg KafkaTopicConfig, topics ...string) {
+func ensureKafkaTopicsUntil(ctx context.Context, brokers []string, cfg KafkaTopicConfig, topics ...string) error {
+	if cfg.normalized().MinInsyncReplicas > cfg.normalized().ReplicationFactor {
+		return fmt.Errorf("min.insync.replicas exceeds replication factor")
+	}
+	var last error
 	for {
 		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err := ensureKafkaTopics(attemptCtx, brokers, cfg, topics...)
+		last = ensureKafkaTopics(attemptCtx, brokers, cfg, topics...)
 		cancel()
-		if err == nil || ctx.Err() != nil {
-			return
+		if last == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("Kafka topic initialization failed (%v): %w", last, ctx.Err())
 		}
 		timer := time.NewTimer(500 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			return fmt.Errorf("Kafka topic initialization failed (%v): %w", last, ctx.Err())
 		case <-timer.C:
 		}
 	}
@@ -129,6 +142,9 @@ func ensureKafkaTopics(ctx context.Context, brokers []string, cfg KafkaTopicConf
 	}()
 	if len(brokers) == 0 || len(topics) == 0 {
 		return nil
+	}
+	if cfg.normalized().MinInsyncReplicas > cfg.normalized().ReplicationFactor {
+		return fmt.Errorf("min.insync.replicas exceeds replication factor")
 	}
 	configs := buildTopicConfigs(topics, cfg)
 	if len(configs) == 0 {
@@ -178,7 +194,7 @@ func dialKafkaSetup(ctx context.Context, address string) (*kafka.Conn, func(), e
 // previous deployment with different settings) in line with the desired
 // config. Config entries are compared and corrected via IncrementalAlterConfigs; drift in
 // partition count or replication factor cannot be fixed safely here, so it is
-// logged loudly instead of staying silent.
+// returned as an error until an operator changes the assignment.
 func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.TopicConfig) error {
 	client := &kafka.Client{Addr: addr}
 
@@ -204,13 +220,17 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 			return fmt.Errorf("kafka topic %s: metadata: %w", tc.Topic, live.Error)
 		}
 		if len(live.Partitions) != tc.NumPartitions {
-			log.Printf("kafka topic %s: partition count is %d, desired %d; not auto-correcting, this needs an operational change",
-				tc.Topic, len(live.Partitions), tc.NumPartitions)
+			return fmt.Errorf("kafka topic %s: partition count is %d, desired %d; operational change required", tc.Topic, len(live.Partitions), tc.NumPartitions)
 		}
-		if len(live.Partitions) > 0 && len(live.Partitions[0].Replicas) != tc.ReplicationFactor {
-			log.Printf("kafka topic %s: replication factor is %d, desired %d; not auto-correcting, this needs an operational change",
-				tc.Topic, len(live.Partitions[0].Replicas), tc.ReplicationFactor)
+		for _, partition := range live.Partitions {
+			if partition.Error != nil {
+				return fmt.Errorf("kafka topic %s partition metadata: %w", tc.Topic, partition.Error)
+			}
+			if len(partition.Replicas) != tc.ReplicationFactor {
+				return fmt.Errorf("kafka topic %s: replication factor is %d, desired %d; operational change required", tc.Topic, len(partition.Replicas), tc.ReplicationFactor)
+			}
 		}
+
 		if len(tc.ConfigEntries) == 0 {
 			continue
 		}

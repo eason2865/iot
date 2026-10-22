@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 
 	"iot/internal/contracts"
 	"iot/migrations"
@@ -101,15 +102,15 @@ func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='devices' AND column_name='secret')`).Scan(&legacy); err != nil || !legacy {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT tenant_id,device_id,secret FROM devices WHERE secret_hash IS NULL AND secret IS NOT NULL AND secret<>''`)
+	rows, err := tx.QueryContext(ctx, `SELECT tenant_id,device_id,secret,COALESCE(secret_hash,'') FROM devices WHERE secret IS NOT NULL`)
 	if err != nil {
 		return err
 	}
-	type credential struct{ tenant, device, secret string }
+	type credential struct{ tenant, device, secret, hash string }
 	var credentials []credential
 	for rows.Next() {
 		var c credential
-		if err = rows.Scan(&c.tenant, &c.device, &c.secret); err != nil {
+		if err = rows.Scan(&c.tenant, &c.device, &c.secret, &c.hash); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -121,9 +122,14 @@ func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	for _, c := range credentials {
-		hash, err := HashDeviceSecret(c.secret)
-		if err != nil {
-			return err
+		hash := c.hash
+		if hash == "" {
+			hash, err = HashDeviceSecret(c.secret)
+			if err != nil {
+				return fmt.Errorf("legacy device credential is invalid: %w", err)
+			}
+		} else if _, err := bcrypt.Cost([]byte(hash)); err != nil {
+			return fmt.Errorf("legacy device hash is invalid; migration rolled back")
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE devices SET secret_hash=$1,secret=NULL WHERE tenant_id=$2 AND device_id=$3`, hash, c.tenant, c.device); err != nil {
 			return err
@@ -628,6 +634,9 @@ func requireDevice(ctx context.Context, tx *sql.Tx, tenantID, deviceID string) e
 // CreateCommandWithKey atomically reuses a tenant-scoped request key. A changed
 // device or payload conflicts instead of executing a second device action.
 func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+	if err := ValidateCommandInput(tenantID, deviceID, payload); err != nil {
+		return Command{}, err
+	}
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
 	if err := contracts.ValidateIdempotencyKey(key); err != nil {
@@ -644,6 +653,16 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
 	}
+	// PostgreSQL expands numeric exponents in JSONB. Check that exact stored
+	// representation before accepting a command the dispatcher cannot deliver.
+	var normalized []byte
+	if err := tx.QueryRowContext(ctx, `SELECT $1::jsonb`, []byte(payload)).Scan(&normalized); err != nil {
+		return Command{}, err
+	}
+	if err := ValidateCommandInput(tenantID, deviceID, normalized); err != nil {
+		return Command{}, err
+	}
+	payload = normalized
 	id, err := uuid.NewV7()
 	if err != nil {
 		return Command{}, err

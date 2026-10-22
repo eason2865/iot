@@ -83,6 +83,9 @@ func (s *Service) CreateDevice(ctx context.Context, req *corev1.CreateDeviceRequ
 	if !contracts.IsValidTenantID(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
+	if err := contracts.ValidateDeviceSecret(req.GetSecret()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	var device platform.Device
 	var err error
 	if repo, ok := s.repo.(interface {
@@ -257,8 +260,8 @@ func (s *Service) CreateCommand(ctx context.Context, req *corev1.CreateCommandRe
 	if !contracts.IsValidTenantID(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
-	if len(req.GetPayload()) > 0 && !json.Valid(req.GetPayload()) {
-		return nil, status.Error(codes.InvalidArgument, "payload must be valid JSON")
+	if err := platform.ValidateCommandInput(req.GetTenantId(), req.GetDeviceId(), req.GetPayload()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	if err := contracts.ValidateIdempotencyKey(req.GetIdempotencyKey()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -452,6 +455,9 @@ func toTimestamp(t time.Time) *timestamppb.Timestamp {
 // message text; doing that by substring previously turned "invalid topic
 // characters" into 502 and "does not belong to device" into 502 as well.
 func mapRepoError(err error) error {
+	if errors.Is(err, contracts.ErrInvalidPayload) || errors.Is(err, contracts.ErrInvalidDeviceSecret) {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
 	switch {
 	case err == nil:
 		return nil

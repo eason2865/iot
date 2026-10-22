@@ -21,7 +21,7 @@ func deadLetterTopicConfig(cfg KafkaTopicConfig) KafkaTopicConfig {
 
 func newDeadLetterWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll,
-		BatchSize: 1, BatchBytes: deadLetterBatchBytes, AllowAutoTopicCreation: true}
+		BatchSize: 1, BatchBytes: deadLetterBatchBytes, AllowAutoTopicCreation: false}
 }
 
 // Dead-letter stages. These strings are operational identifiers: they appear in

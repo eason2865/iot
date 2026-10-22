@@ -6,7 +6,7 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
-APP_IMAGE="${APP_IMAGE:-iot-app:2.50}"
+APP_IMAGE="${APP_IMAGE:-iot-app:2.51}"
 DEPLOY_APP_IMAGE="$APP_IMAGE"
 DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
@@ -97,6 +97,9 @@ wait_for_deployment() {
   fi
 }
 
+# Validate/encode before mutating the cluster; Python 3 is a local deployment prerequisite.
+EMQX_AUTHN_HEADERS_JSON="$(IOT_AUTH_CALLBACK_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" python3 "$(dirname "$0")/emqx-auth-headers.py")"
+
 if [ "$CHECK_EXTERNAL_DEPS" = "1" ]; then
   wait_for_docker_deps
 fi
@@ -119,7 +122,7 @@ kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
 kubectl create namespace emqx --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n emqx create secret generic iot-runtime-secrets \
   --from-literal=IOT_CORE_MQTT_AUTH_TOKEN="$IOT_CORE_MQTT_AUTH_TOKEN" \
-  --from-literal=EMQX_AUTHN_HEADERS_JSON="{\"content-type\":\"application/json\",\"x_iot_auth_token\":\"$IOT_CORE_MQTT_AUTH_TOKEN\"}" \
+  --from-literal=EMQX_AUTHN_HEADERS_JSON="$EMQX_AUTHN_HEADERS_JSON" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 if [ "$GRPC_TLS_ENABLED" = "1" ]; then

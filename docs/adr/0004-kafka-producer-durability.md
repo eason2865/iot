@@ -55,14 +55,25 @@ guarantee is again no stronger than `RequireOne`.
   overrides. Configuration errors propagate to the startup retry loop; there is no
   replacement-style fallback for brokers without this API. Changes to desired
   values therefore also affect existing topics. Partition-count and
-  replication-factor drift is logged only.
+  replication-factor drift fails startup until an operator changes the assignment.
 - DLQ writers use a 2 MiB `BatchBytes` budget for the base64/JSON wrapper
   around existing roughly 1 MiB business records. Both ingestor and worker
   reconcile DLQ `max.message.bytes` to a floor of 2 MiB; larger operator limits
-  are preserved. Ordinary topics keep their unmanaged size overrides. Replay
+  are preserved. Business topic `max.message.bytes` has a 1 MiB floor and writers use the same
+  explicit budget; larger operator overrides remain intact. Replay
   readers already allow 10 MB. Keep the existing JSON/base64 wire format and
   full original bytes. This is a bounded budget: records exceeding it fail
   without acknowledgement, rather than being truncated.
+- Topic initialization returns its final error after the bounded retry budget.
+  Core/ingestor/worker do not start business processing after setup failure.
+  All writers disable automatic topic creation, so a recovery cannot silently
+  create a topic using broker defaults. Invalid ISR/RF settings fail immediately.
+- Command admission measures the complete JSON message with worst-case dispatcher
+  metadata against a 1 MiB budget minus 1024 bytes for Kafka framing and the key.
+  PostgreSQL admission also validates the JSONB-normalized representation before
+  INSERT, because numeric exponents may expand. An oversized new command returns
+  InvalidArgument/HTTP 400 without a command row. Existing oversized commands
+  require operator handling; no historical rows are rewritten or deleted.
 - If telemetry throughput ever makes the round trip the bottleneck, the correct
   response is a larger `BatchSize`/`BatchTimeout`, not weaker acknowledgements.
 

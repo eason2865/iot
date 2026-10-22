@@ -167,9 +167,9 @@ func (w *TDengineWriter) writeRecord(ctx context.Context, rec TelemetryRecord) e
 	stable := w.database + "." + w.table
 	childTable := stable + "_" + tableHash
 	statement := fmt.Sprintf(
-		"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES ('%s', '%s', '%s', '%s', '%s', %d)",
+		"INSERT INTO %s USING %s TAGS ('%s', '%s') VALUES (%d, '%s', '%s', '%s', '%s', %d)",
 		childTable, stable, escapeTD(rec.TenantID), escapeTD(rec.DeviceID),
-		time.UnixMilli(rec.Ts).UTC().Format("2006-01-02 15:04:05.000"), escapeTD(rec.MsgID),
+		rec.Ts, escapeTD(rec.MsgID),
 		escapeTD(rec.Type), escapeTD(rec.Version), hash, len(rec.Payload),
 	)
 	if _, err := w.db.ExecContext(ctx, statement); err != nil {

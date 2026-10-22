@@ -368,7 +368,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.50`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.51`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -593,3 +593,21 @@ Kafka topic setup bounds connection I/O and cancellation to each attempt, and th
 60-second retry budget includes backoff. Worker starts business processing only
 after every ACK topic grants QoS 1; rejected, downgraded or timed-out subscriptions
 fail the worker, including subscription failures on reconnect.
+
+
+The runtime image includes public CA roots for HTTPS clients. Local deployment now
+requires Python 3 to JSON-encode EMQX callback headers without changing token bytes.
+Device secrets must contain 1–72 UTF-8 bytes. Command and telemetry JSON rejects
+NUL characters, unpaired UTF-16 surrogates and numbers outside JSONB storage limits;
+these input errors return HTTP 400. Pagination requires a complete integer, and
+request bodies must contain exactly one JSON document.
+
+Command admission checks the full encoded message and its PostgreSQL JSONB form
+against the 1 MiB Kafka budget with 1024 bytes reserved for transport overhead.
+Topic initialization errors and partition/replica drift block startup; all producers
+disable automatic topic creation. Fix existing topic assignments before upgrading
+a deployment that changes these settings. Legacy credential migration clears
+plaintext even when a hash already exists, preserves valid hashes, and removes the
+legacy plaintext column default. Invalid legacy credentials roll the migration back.
+TDengine writes integer milliseconds, independent of connection timezone; existing
+shifted history is not repaired automatically.

@@ -47,10 +47,10 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 
 ## 当前实现
 
-- 6 个服务入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
+- 7 个运行入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`、`cmd/migrate`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
-- 1 份 PostgreSQL 初始化迁移：`migrations/001_init.sql`
+- PostgreSQL 建表与历史列升级 SQL：`migrations/001_init.sql`、`migrations/002_upgrade.sql`
 - 1 份 MQTT 消息 Schema：`docs/mqtt-envelope.schema.json`
 - 已包含基础测试，`go test ./...` 可直接运行
 
@@ -365,7 +365,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.0`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.43`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -513,6 +513,24 @@ worker 每 30 秒按 ID 游标扫描最多 500 条、接收时间超过两分钟
 `/healthz` 用于存活检查；`/readyz` 检查 PostgreSQL，management-api 则检查 gRPC 到核心及 PostgreSQL 的完整路径。四个服务均配置 PDB。Kafka 分区数可通过 `kafka.topicPartitions` 设置，只对新 topic 生效；现存 topic 扩分区须人工执行。
 
 本地监控首次启动前执行 `scripts/port-forward-local-monitoring.sh`，生成专用只读 token 和 CA 文件。Prometheus 通过 kind 网络访问 apiserver，校验证书并逐 Pod 抓取，保留原有 job 标签以兼容看板。CA 轮换后需重新运行脚本并重建 Prometheus 容器。
+
+
+## 请求幂等、遥测持久化与数据库迁移
+
+创建命令时可携带 `Idempotency-Key` 请求头（1–128 个不含空格的可打印 ASCII 字符）。同租户、同 key、同设备和相同 JSON 载荷返回原命令（HTTP 201），不会重复创建命令或审计事件；更换设备或载荷返回 409。key 在对应命令记录存在期间保留。不传 key 保持原有行为，客户端重试时应复用同一个 key。
+
+`telemetry-ingestor` 关闭 MQTT 自动 ACK，优先将遥测写入 PostgreSQL 收件记录后确认；Kafka 发布失败或进程随后退出时，worker 会补偿未完成的 TDengine 写入。PostgreSQL 不可用时，Kafka 或 DLQ 成功写入也可完成确认；所有存储失败则不确认并退出。停机先停止接收新任务，排空在途发布。此保证覆盖应用已接收的消息，设备离线和 broker 未投递消息仍需单独配置 EMQX 会话策略。
+
+SQL 唯一来源为 `migrations/`，Go 通过 embed 使用同一份文件。迁移器先执行 `002_upgrade.sql` 补齐历史列，再执行 `001_init.sql` 建表和索引，整个过程持有事务级 advisory lock 并迁移旧明文密钥，避免多副本同时 DDL。生产用迁移角色提前执行：
+
+```bash
+# POSTGRES_DSN 由部署环境注入，不将凭据写入命令或仓库。
+go run ./cmd/migrate
+```
+
+随后应用设置 `POSTGRES_AUTO_MIGRATE=false`，使用仅有业务读写权限的数据库角色；本地默认 true。镜像包含 `/usr/local/bin/migrate`。生产配置示例见 `charts/iot/values-production.yaml`：启用 mTLS、HPA、节点/可用区分散及 Kafka RF=3、ISR=2、6 分区。部署前替换域名、镜像和 Secret，并安装 metrics-server；扩容现存 Kafka topic 仍需人工操作。该示例不创建外部高可用依赖，HPA 参数需要压测调优。
+
+CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、race、Helm 双配置校验和 protobuf 漂移检查。本地设置独立测试数据库 `IOT_POSTGRES_TEST_DSN` 后运行 `go test ./...`；每个数据库测试创建并清理独立 schema。详见 ADR 0008。
 
 ## 开发建议
 

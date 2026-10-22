@@ -3,18 +3,16 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/segmentio/kafka-go"
-
 	"iot/internal/contracts"
 )
 
-// errPublishBacklogFull marks a message that could not get a publish slot
-// before the timeout; it is dead-lettered with this cause so the DLQ record
-// explains the drop.
 var errPublishBacklogFull = errors.New("mqtt bridge publish backlog full")
 
 type MQTTBridgeConfig struct {
@@ -29,6 +27,9 @@ type MQTTBridgeConfig struct {
 	DLQTopic           string
 	TopicConfig        KafkaTopicConfig
 	DLQTopicConfig     KafkaTopicConfig
+	// Production injects PostgreSQL as a durable inbox. Kafka failures are then
+	// recoverable by the worker even if the ingestor is replaced during publishing.
+	Inbox TelemetryInbox
 }
 
 type MQTTBridge struct {
@@ -37,6 +38,14 @@ type MQTTBridge struct {
 	metrics      *Metrics
 	publishSlots chan struct{}
 	dlqWriter    *kafka.Writer
+	publisher    MessagePublisher
+	inbox        TelemetryInbox
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	stopping     bool
+	pending      sync.WaitGroup
+	errCh        chan error
 }
 
 func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Metrics) *MQTTBridge {
@@ -47,119 +56,139 @@ func NewMQTTBridge(cfg MQTTBridgeConfig, publisher MessagePublisher, metrics *Me
 	if filter == "" {
 		filter = contracts.TelemetryTopicFilter
 	}
-	publishConcurrency := cfg.PublishConcurrency
-	if publishConcurrency <= 0 {
-		publishConcurrency = 64
+	concurrency := cfg.PublishConcurrency
+	if concurrency <= 0 {
+		concurrency = 64
 	}
-	publishSlotTimeout := cfg.PublishSlotTimeout
-	if publishSlotTimeout <= 0 {
-		publishSlotTimeout = 30 * time.Second
+	slotTimeout := cfg.PublishSlotTimeout
+	if slotTimeout <= 0 {
+		slotTimeout = 30 * time.Second
 	}
-	dlqTopic := cfg.DLQTopic
-	if dlqTopic == "" {
-		dlqTopic = "iot.dlq"
+	topic := cfg.DLQTopic
+	if topic == "" {
+		topic = "iot.dlq"
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, concurrency), publisher: publisher, inbox: cfg.Inbox, ctx: ctx, cancel: cancel, errCh: make(chan error, 1)}
 	if len(cfg.KafkaBrokers) > 0 {
-		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, dlqTopic)
+		ensureKafkaTopicsBestEffort(cfg.KafkaBrokers, cfg.DLQTopicConfig, topic)
+		b.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: topic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
 	}
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(cfg.BrokerURL)
-	opts.SetClientID(cfg.ClientID)
+	opts := mqtt.NewClientOptions().AddBroker(cfg.BrokerURL).SetClientID(cfg.ClientID)
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
 	}
 	if cfg.Password != "" {
 		opts.SetPassword(cfg.Password)
 	}
-	opts.SetAutoReconnect(true)
-	opts.SetConnectRetry(true)
-	opts.SetConnectRetryInterval(2 * time.Second)
-	bridge := &MQTTBridge{filter: filter, metrics: metrics, publishSlots: make(chan struct{}, publishConcurrency)}
-	if len(cfg.KafkaBrokers) > 0 {
-		bridge.dlqWriter = &kafka.Writer{Addr: kafka.TCP(cfg.KafkaBrokers...), Topic: dlqTopic, Balancer: &kafka.Hash{}, RequiredAcks: kafka.RequireAll, BatchSize: 1, AllowAutoTopicCreation: true}
-	}
-	opts.OnConnect = func(_ mqtt.Client) {
+	opts.SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(2 * time.Second)
+	// A callback only schedules work. Its return must never acknowledge a message
+	// still held solely in process memory.
+	opts.SetAutoAckDisabled(true)
+	opts.OnConnect = func(client mqtt.Client) {
 		log.Printf("mqtt bridge connected: filter=%s", filter)
-		token := bridge.client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
-			env, err := contracts.ParseEnvelope(msg.Payload())
-			if err != nil {
-				log.Printf("mqtt bridge parse error: topic=%s err=%v", msg.Topic(), err)
-				if bridge.metrics != nil {
-					bridge.metrics.IncMQTTBridge("error")
-				}
-				_ = publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTDecode, err, bridge.metrics)
+		token := client.Subscribe(filter, 1, func(_ mqtt.Client, msg mqtt.Message) {
+			b.mu.Lock()
+			if b.stopping {
+				b.mu.Unlock()
 				return
 			}
-			// Reject identity spoofing: the envelope tenant/device must match the
-			// actual MQTT topic the message arrived on. ACL limits which topic a
-			// device can publish to, but not what identity it claims in the body.
-			topicTenant, topicDevice, _, ok := contracts.ParseDeviceTopic(msg.Topic())
-			if !ok || topicTenant != env.TenantID || topicDevice != env.DeviceID {
-				log.Printf("mqtt bridge identity mismatch: topic=%s envelope tenant=%s device=%s", msg.Topic(), env.TenantID, env.DeviceID)
-				if bridge.metrics != nil {
-					bridge.metrics.IncMQTTBridge("error")
-				}
-				_ = publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, StageMQTTIdentity, errIdentityMismatch, bridge.metrics)
+			b.pending.Add(1)
+			b.mu.Unlock()
+			if !acquirePublishSlotContext(b.ctx, b.publishSlots, slotTimeout) {
+				defer b.pending.Done()
+				b.deadLetter(msg, StageMQTTKafka, errPublishBacklogFull, false)
 				return
 			}
-			rec := TelemetryRecord{
-				MsgID:      env.MsgID,
-				TenantID:   env.TenantID,
-				DeviceID:   env.DeviceID,
-				Ts:         env.Ts,
-				Type:       env.Type,
-				Version:    env.Version,
-				Payload:    env.Payload,
-				ReceivedAt: time.Now().UTC(),
-			}
-			if acquirePublishSlot(bridge.publishSlots, publishSlotTimeout) {
-				go func() {
-					defer func() { <-bridge.publishSlots }()
-					if err := publisher.PublishTelemetry(context.Background(), rec); err != nil {
-						log.Printf("mqtt bridge publish telemetry error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, err)
-						if bridge.metrics != nil {
-							bridge.metrics.IncMQTTBridge("error")
-						}
-						if dlqErr := publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, err, bridge.metrics); dlqErr != nil {
-							// The message is now lost for good: the publish failed
-							// and the dead-letter copy failed too. This must be
-							// visible in logs, not silently dropped.
-							log.Printf("mqtt bridge dead-letter error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, dlqErr)
-						}
-						return
-					}
-					if bridge.metrics != nil {
-						bridge.metrics.IncMQTTBridge("ok")
-					}
-				}()
-			} else {
-				log.Printf("mqtt bridge publish backlog full: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-				if bridge.metrics != nil {
-					bridge.metrics.IncMQTTBridge("error")
-				}
-				// Backpressure must not silently drop the message: dead-letter it
-				// on the same stage/path as a failed publish so it can be replayed.
-				if dlqErr := publishDeadLetter(context.Background(), bridge.dlqWriter, kafka.Message{Topic: msg.Topic(), Key: []byte(rec.DeviceID), Value: msg.Payload()}, StageMQTTKafka, errPublishBacklogFull, bridge.metrics); dlqErr != nil {
-					log.Printf("mqtt bridge dead-letter error: tenant=%s device=%s msg=%s err=%v", rec.TenantID, rec.DeviceID, rec.MsgID, dlqErr)
-				}
-				return
-			}
+			go func() { defer b.pending.Done(); defer func() { <-b.publishSlots }(); b.processMessage(msg) }()
 		})
-		token.Wait()
+		if !token.WaitTimeout(5 * time.Second) {
+			b.fail(errors.New("mqtt bridge subscribe timeout"))
+			return
+		}
 		if err := token.Error(); err != nil {
-			log.Printf("mqtt bridge subscribe error: filter=%s err=%v", filter, err)
-			if bridge.metrics != nil {
-				bridge.metrics.IncMQTTBridge("error")
-			}
+			b.fail(err)
+			return
+		}
+		if sub, ok := token.(*mqtt.SubscribeToken); ok && sub.Result()[filter] == 0x80 {
+			b.fail(fmt.Errorf("mqtt bridge subscription denied: %s", filter))
 		}
 	}
-	bridge.client = mqtt.NewClient(opts)
-	return bridge
+	b.client = mqtt.NewClient(opts)
+	return b
+}
+
+func (b *MQTTBridge) processMessage(msg mqtt.Message) {
+	env, err := contracts.ParseEnvelope(msg.Payload())
+	if err != nil {
+		b.deadLetter(msg, StageMQTTDecode, err, false)
+		return
+	}
+	tenant, device, _, ok := contracts.ParseDeviceTopic(msg.Topic())
+	if !ok || tenant != env.TenantID || device != env.DeviceID {
+		b.deadLetter(msg, StageMQTTIdentity, errIdentityMismatch, false)
+		return
+	}
+	rec := TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts, Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: time.Now().UTC()}
+	durable := false
+	if b.inbox != nil {
+		ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+		stored, storeErr := b.inbox.RecordTelemetryContext(ctx, env)
+		cancel()
+		if storeErr == nil || IsTelemetryDuplicate(storeErr) {
+			rec = stored
+			durable = true
+			msg.Ack()
+		} else {
+			log.Printf("mqtt bridge inbox write error: msg=%s err=%v", env.MsgID, storeErr)
+		}
+	}
+	if err := b.publisher.PublishTelemetry(b.ctx, rec); err != nil {
+		b.deadLetter(msg, StageMQTTKafka, err, durable)
+		return
+	}
+	if !durable {
+		msg.Ack()
+	}
+	if b.metrics != nil {
+		b.metrics.IncMQTTBridge("ok")
+	}
+}
+
+func (b *MQTTBridge) deadLetter(msg mqtt.Message, stage string, cause error, durable bool) {
+	if b.metrics != nil {
+		b.metrics.IncMQTTBridge("error")
+	}
+	log.Printf("mqtt bridge error: topic=%s stage=%s err=%v", msg.Topic(), stage, cause)
+	if err := publishDeadLetter(b.ctx, b.dlqWriter, kafka.Message{Topic: msg.Topic(), Value: msg.Payload()}, stage, cause, b.metrics); err != nil {
+		// PostgreSQL inbox rows are retried by the worker's compensation scan.
+		// Otherwise fail the ingestor and leave this MQTT delivery unacknowledged.
+		if !durable {
+			b.fail(fmt.Errorf("mqtt message not persisted: %w", err))
+		}
+		log.Printf("mqtt bridge dead-letter error: %v", err)
+		return
+	}
+	if !durable {
+		msg.Ack()
+	}
+}
+
+func (b *MQTTBridge) fail(err error) {
+	select {
+	case b.errCh <- err:
+	default:
+	}
 }
 
 func acquirePublishSlot(slots chan struct{}, timeout time.Duration) bool {
+	return acquirePublishSlotContext(context.Background(), slots, timeout)
+}
+func acquirePublishSlotContext(ctx context.Context, slots chan struct{}, timeout time.Duration) bool {
 	if timeout <= 0 {
 		select {
+		case <-ctx.Done():
+			return false
 		case slots <- struct{}{}:
 			return true
 		default:
@@ -169,6 +198,8 @@ func acquirePublishSlot(slots chan struct{}, timeout time.Duration) bool {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
+	case <-ctx.Done():
+		return false
 	case slots <- struct{}{}:
 		return true
 	case <-timer.C:
@@ -176,19 +207,49 @@ func acquirePublishSlot(slots chan struct{}, timeout time.Duration) bool {
 	}
 }
 
-func (b *MQTTBridge) Run(ctx context.Context) error {
-	if b == nil || b.client == nil {
-		return nil
+// stop closes admission before waiting so no callback can race WaitGroup.Add.
+// A bounded drain precedes cancellation; persisted inbox rows survive a forced stop.
+func (b *MQTTBridge) stop() {
+	b.mu.Lock()
+	b.stopping = true
+	b.mu.Unlock()
+	done := make(chan struct{})
+	go func() { b.pending.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		b.cancel()
+		<-done
 	}
-	token := b.client.Connect()
-	token.Wait()
-	if err := token.Error(); err != nil {
-		return err
-	}
-	<-ctx.Done()
+	b.cancel()
 	b.client.Disconnect(250)
 	if b.dlqWriter != nil {
 		_ = b.dlqWriter.Close()
 	}
-	return nil
+}
+
+func (b *MQTTBridge) Run(ctx context.Context) error {
+	if b == nil || b.client == nil {
+		return nil
+	}
+	defer b.stop()
+	token := b.client.Connect()
+	for !token.WaitTimeout(100 * time.Millisecond) {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-b.errCh:
+			return err
+		default:
+		}
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-b.errCh:
+		return err
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zeromicro/go-zero/zrpc"
@@ -222,4 +223,28 @@ func (commandLookupRepo) GetCommand(id string) (platform.Command, bool) {
 		return platform.Command{}, false
 	}
 	return platform.Command{ID: "cmd-a", TenantID: "tenant-a", DeviceID: "device-a"}, true
+}
+
+type captureCommandClient struct {
+	corev1.CoreServiceClient
+	request *corev1.CreateCommandRequest
+}
+
+func (c *captureCommandClient) CreateCommand(_ context.Context, req *corev1.CreateCommandRequest, _ ...grpc.CallOption) (*corev1.CreateCommandResponse, error) {
+	c.request = req
+	return &corev1.CreateCommandResponse{Command: &corev1.Command{Id: "command-1"}}, nil
+}
+func TestCreateCommandForwardsIdempotencyKey(t *testing.T) {
+	client := &captureCommandClient{}
+	s := &Server{rpc: client}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands", strings.NewReader(`{"tenantId":"t","deviceId":"d","payload":{"switch":"on"}}`))
+	req.Header.Set("Idempotency-Key", "retry-1")
+	rec := httptest.NewRecorder()
+	s.createCommandHandler(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+	}
+	if client.request.GetIdempotencyKey() != "retry-1" {
+		t.Fatalf("key lost at gateway: %q", client.request.GetIdempotencyKey())
+	}
 }

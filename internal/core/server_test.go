@@ -157,3 +157,10 @@ func TestAuxMuxRoutes(t *testing.T) {
 		t.Fatalf("metrics route body = %q", rec.Body.String())
 	}
 }
+
+func TestTopicConfigHonorsPartitionCount(t *testing.T) {
+	t.Setenv("KAFKA_TOPIC_PARTITIONS", "6")
+	if got := topicConfigFromEnv().NumPartitions; got != 6 {
+		t.Fatalf("topic partitions = %d, want 6", got)
+	}
+}

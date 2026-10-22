@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -221,12 +222,30 @@ func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
 			return
 		}
-		cmd, err := a.store.CreateCommand(req.TenantID, req.DeviceID, req.Payload)
+		var cmd Command
+		var err error
+		key := r.Header.Get("Idempotency-Key")
+		if err = contracts.ValidateIdempotencyKey(key); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if creator, ok := a.store.(CommandCreator); ok {
+			cmd, err = creator.CreateCommandWithKey(r.Context(), req.TenantID, req.DeviceID, key, req.Payload)
+		} else if key != "" {
+			writeError(w, http.StatusBadRequest, "repository does not support command idempotency")
+			return
+		} else {
+			cmd, err = a.store.CreateCommand(req.TenantID, req.DeviceID, req.Payload)
+		}
 		if err != nil {
 			if a.metrics != nil {
 				a.metrics.IncCommand("created", "error")
 			}
-			writeError(w, http.StatusBadRequest, err.Error())
+			if errors.Is(err, ErrIdempotencyConflict) {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusBadRequest, err.Error())
+			}
 			return
 		}
 		if err := a.publisher.PublishCommand(r.Context(), cmd); err != nil {

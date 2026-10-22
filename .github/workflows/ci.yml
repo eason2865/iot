@@ -12,6 +12,22 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: regression-only
+          POSTGRES_DB: iot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d iot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      IOT_POSTGRES_TEST_DSN: postgres://postgres:regression-only@localhost:5432/iot?sslmode=disable
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +43,23 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Race detector
+        run: go test -race ./internal/...
+
+      - uses: azure/setup-helm@v4.3.1
+        with:
+          version: v3.17.3
+
+      - name: Validate Helm profiles
+        run: |
+          helm lint charts/iot
+          helm lint charts/iot -f charts/iot/values-production.yaml
+          helm template iot charts/iot > /dev/null
+          helm template iot charts/iot -f charts/iot/values-production.yaml > /dev/null
 
       - name: Build binaries
         run: make build

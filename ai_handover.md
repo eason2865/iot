@@ -2,6 +2,18 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## 可靠性与发布修复（2026-10-22，发布版本 2.43）
+
+- 已复现并修复 MQTT 回调在 Kafka 写入前 PUBACK、数据库事务内重复取池连接、iot-core 漏读分区配置；新增真实 MQTT 协议和单连接 PostgreSQL 回归。
+- ingestor 注入 PostgreSQL inbox、关闭自动 ACK；PG 成功后确认，否则以 Kafka/DLQ 成功为确认条件。无可用持久化不确认并退出；pending task 排空后关闭共享资源。已存收件由 worker 补偿。此保证不覆盖尚未到达应用的 broker 离线投递策略。
+- 命令 POST 可携带 Idempotency-Key，proto 字段 idempotency_key；同租户相同 key/device/JSONB payload 返回原命令，变更返回409。并发12请求仅一条命令和一条created审计。无key兼容旧行为，key保留至命令删除。
+- RecordTelemetry 与 CreateCommand 在同一事务内查询设备/重复记录，关键读写透传ctx，设备/状态/命令数据库错误不再被API误映射404。
+- 数据库 SQL 统一至 migrations/ 并embed；先002历史列再001当前结构，事务advisory lock防多副本DDL竞争；新增 migrate 二进制和 POSTGRES_AUTO_MIGRATE（本地true，生产profile false）。修复全新数据库迁移对不存在secret列的错误处理，旧密钥迁移在同一事务内完成。
+- 生产overlay增加HPA/软拓扑分散/startup probes，启用mTLS及Kafka RF3/ISR2/6分区；只提供配置示例，不创建外部HA设施，不自动改现存topic。CI增加PG隔离回归、REST→gRPC→PG、vet/race与Helm双profile检查。make build首错立即失败。
+- 本轮验证：go test -count=1 ./...（启用独立PG回归）、go vet ./...、make fmt-check、internal全包race以及最后新增接口/存储回归race、7个Linux二进制构建、Helm本地/生产双profile lint与结构断言、protobuf重复生成零漂移、Compose config、脚本语法和git diff --check均通过。回归包含真实MQTT PUBACK时序、Kafka/DLQ双失败但PG收件可补偿、停机排空、单连接首次/重复遥测与命令、12并发命令幂等、REST→gRPC→PG（201/409/403/400与DB故障500）、双并发旧库升级和只读连接禁DDL启动。
+- Docker镜像 iot-app:2.43 已构建；用该scratch镜像的migrate在专用临时PG连续迁移两次通过（7张表、幂等唯一索引存在）。临时PG已清理；未部署新代码到现有Kubernetes/Compose服务，原有部署状态仍以旧版本记录为准。配置/Compose/脚本默认镜像统一2.43，Chart版本0.2.0。
+- 代码、SQL、文档随main提交和2.43 tag一起发布；本文件已在Git跟踪中，按AGENTS要求同步更新。
+
 ## 全链路故障验证追加修复（2026-10-10，版本 2.42 验证通过）
 
 - 使用实际部署 management-api/iot-core、EMQX、Kafka 和双存储验证完整遥测/命令/ACK链路、非法输入DLQ、幂等和活跃worker Pod故障接替；隔离租户 closed-20261010-160635，30条接替期间遥测全部写入PG/TD，新命令ACK成功。

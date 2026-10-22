@@ -25,7 +25,9 @@ metadata:
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicas.iotCore }}
+  {{- end }}
   selector:
     matchLabels:
       app: iot-core
@@ -34,6 +36,7 @@ spec:
       labels:
         app: iot-core
     spec:
+      {{- include "iot.topologySpread" (dict "root" . "app" "iot-core") | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
@@ -102,6 +105,11 @@ spec:
               mountPath: {{ .Values.grpcTLS.mountPath }}
               readOnly: true
           {{- end }}
+          startupProbe:
+            tcpSocket:
+              port: 9001
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             tcpSocket:
               port: 9001

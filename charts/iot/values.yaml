@@ -1,5 +1,5 @@
 images:
-  app: iot-app:2.42
+  app: iot-app:2.43
 
 replicas:
   managementAPI: 2
@@ -94,3 +94,18 @@ externalDependencies:
     emqxPort: 1883
     tdengineHost: 192.168.65.254
     tdenginePort: 6041
+
+# Requires metrics-server. Kafka partitions still bound worker consumption parallelism.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+# Spread across available nodes/zones; ScheduleAnyway supports small clusters.
+topologySpread:
+  enabled: false
+
+# Disable automatic DDL after running the migrate binary with a migration role.
+postgres:
+  autoMigrate: true

@@ -225,3 +225,28 @@ type conflictRepo struct{ fakeRepo }
 func (conflictRepo) CreateTenant(platform.Tenant) (platform.Tenant, error) {
 	return platform.Tenant{}, fmt.Errorf("tenant %w", platform.ErrAlreadyExists)
 }
+
+type contextualErrorRepo struct{ fakeRepo }
+
+func (contextualErrorRepo) GetDeviceContext(ctx context.Context, _, _ string) (platform.Device, error) {
+	return platform.Device{}, ctx.Err()
+}
+func (contextualErrorRepo) GetDeviceStatusContext(ctx context.Context, _, _ string) (platform.DeviceStatus, error) {
+	return platform.DeviceStatus{}, ctx.Err()
+}
+func (contextualErrorRepo) GetCommandContext(ctx context.Context, _ string) (platform.Command, error) {
+	return platform.Command{}, ctx.Err()
+}
+func TestLookupsPreserveRequestCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	svc := NewService(contextualErrorRepo{}, nil)
+	_, deviceErr := svc.GetDevice(ctx, &corev1.GetDeviceRequest{TenantId: "t", DeviceId: "d"})
+	_, stateErr := svc.GetDeviceStatus(ctx, &corev1.GetDeviceStatusRequest{TenantId: "t", DeviceId: "d"})
+	_, commandErr := svc.GetCommand(ctx, &corev1.GetCommandRequest{TenantId: "t", Id: "c"})
+	for _, err := range []error{deviceErr, stateErr, commandErr} {
+		if status.Code(err) != codes.Canceled {
+			t.Errorf("error=%v, want canceled", err)
+		}
+	}
+}

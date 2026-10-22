@@ -1,6 +1,6 @@
 .PHONY: all test fmt fmt-check build clean helm-local proto
 
-BINS := management-api iot-core demo telemetry-ingestor device-worker dlq-replay
+BINS := management-api iot-core demo telemetry-ingestor device-worker dlq-replay migrate
 GOOS ?= linux
 GOARCH ?= arm64
 CGO_ENABLED ?= 0
@@ -24,7 +24,7 @@ fmt-check:
 
 build:
 	@mkdir -p bin
-	@for bin in $(BINS); do \
+	@set -e; for bin in $(BINS); do \
 		echo "building $$bin"; \
 		GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build -o "bin/$$bin" "./cmd/$$bin"; \
 	done

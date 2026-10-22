@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"iot/internal/contracts"
+	"iot/migrations"
 )
 
 type PostgresStore struct {
@@ -26,6 +27,11 @@ func (s *PostgresStore) PingContext(ctx context.Context) error {
 }
 
 func NewPostgresStore(dsn string, ttl time.Duration) (*PostgresStore, error) {
+	return OpenPostgresStore(dsn, ttl, true)
+}
+
+// OpenPostgresStore can skip DDL when deployments migrate with a separate role.
+func OpenPostgresStore(dsn string, ttl time.Duration, autoMigrate bool) (*PostgresStore, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
@@ -33,14 +39,18 @@ func NewPostgresStore(dsn string, ttl time.Duration) (*PostgresStore, error) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	if err := db.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	store := &PostgresStore{db: db, ttl: ttl}
-	if err := store.ensureSchema(context.Background()); err != nil {
-		_ = db.Close()
-		return nil, err
+	if autoMigrate {
+		if err := store.ensureSchema(ctx); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	return store, nil
 }
@@ -52,141 +62,65 @@ func (s *PostgresStore) Close() error {
 	return s.db.Close()
 }
 
+// MigrateSchema applies the repository SQL under a database/schema-scoped lock.
+// Multiple replicas cannot race DDL; a failed upgrade rolls back as one unit.
+func (s *PostgresStore) MigrateSchema(ctx context.Context) error { return s.ensureSchema(ctx) }
+
 func (s *PostgresStore) ensureSchema(ctx context.Context) error {
-	const schema = `
-CREATE TABLE IF NOT EXISTS tenants (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS devices (
-  tenant_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  secret_hash TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (tenant_id, device_id),
-  CONSTRAINT fk_devices_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS device_state (
-  tenant_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  connected BOOLEAN NOT NULL DEFAULT FALSE,
-  last_seen_at TIMESTAMPTZ,
-  last_msg_id TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (tenant_id, device_id)
-);
-
-CREATE TABLE IF NOT EXISTS telemetry_records (
-  id BIGSERIAL PRIMARY KEY,
-  msg_id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  ts BIGINT NOT NULL,
-  type TEXT NOT NULL,
-  version TEXT NOT NULL,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  tdengine_written BOOLEAN NOT NULL DEFAULT FALSE,
-  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (msg_id, tenant_id, device_id)
-);
-
-CREATE TABLE IF NOT EXISTS commands (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  next_dispatch_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  dispatch_attempts INTEGER NOT NULL DEFAULT 0,
-  deadline_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS command_events (
-  id BIGSERIAL PRIMARY KEY,
-  command_id TEXT NOT NULL REFERENCES commands(id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL,
-  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS command_ack (
-	id BIGSERIAL PRIMARY KEY,
-	command_id TEXT NOT NULL REFERENCES commands(id) ON DELETE CASCADE,
-	tenant_id TEXT NOT NULL,
-	device_id TEXT NOT NULL,
-	ack_status TEXT NOT NULL,
-	ack_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_commands_tenant_device ON commands(tenant_id, device_id);
-CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tenant_id, device_id, received_at DESC);
-`
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
-		return err
-	}
-	// Existing local environments used a plaintext secret column. Preserve the
-	// device identities while replacing every credential with a bcrypt hash.
-	if _, err := s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN IF NOT EXISTS secret_hash TEXT`); err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `ALTER TABLE devices ALTER COLUMN secret DROP NOT NULL`); err != nil && !strings.Contains(err.Error(), "column \"secret\" does not exist") {
-		return err
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS next_dispatch_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
-		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS dispatch_attempts INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE commands ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ`,
-		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_status TEXT NOT NULL DEFAULT 'acked'`,
-		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS ack_payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
-		`ALTER TABLE command_ack ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
-		`ALTER TABLE telemetry_records ADD COLUMN IF NOT EXISTS tdengine_written BOOLEAN NOT NULL DEFAULT FALSE`,
-	} {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_commands_dispatch ON commands(status, next_dispatch_at)`); err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_telemetry_unwritten ON telemetry_records(id) WHERE tdengine_written=FALSE`); err != nil {
-		return err
-	}
-	return s.migrateLegacyDeviceSecrets(ctx)
-}
-
-func (s *PostgresStore) migrateLegacyDeviceSecrets(ctx context.Context) error {
-	var hasLegacy bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'secret')`).Scan(&hasLegacy); err != nil || !hasLegacy {
-		return err
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id, device_id, secret FROM devices WHERE secret_hash IS NULL AND secret IS NOT NULL AND secret <> ''`)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(current_database()),hashtext(current_schema() || ':iot-schema'))`); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, migrations.UpgradeSQL); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, migrations.InitialSQL); err != nil {
+		return err
+	}
+	if err = migrateLegacyDeviceSecrets(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
+	var legacy bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='devices' AND column_name='secret')`).Scan(&legacy); err != nil || !legacy {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT tenant_id,device_id,secret FROM devices WHERE secret_hash IS NULL AND secret IS NOT NULL AND secret<>''`)
+	if err != nil {
+		return err
+	}
+	type credential struct{ tenant, device, secret string }
+	var credentials []credential
 	for rows.Next() {
-		var tenantID, deviceID, secret string
-		if err := rows.Scan(&tenantID, &deviceID, &secret); err != nil {
+		var c credential
+		if err = rows.Scan(&c.tenant, &c.device, &c.secret); err != nil {
+			_ = rows.Close()
 			return err
 		}
-		hash, err := HashDeviceSecret(secret)
+		credentials = append(credentials, c)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, c := range credentials {
+		hash, err := HashDeviceSecret(c.secret)
 		if err != nil {
 			return err
 		}
-		if _, err = s.db.ExecContext(ctx, `UPDATE devices SET secret_hash = $1, secret = NULL WHERE tenant_id = $2 AND device_id = $3`, hash, tenantID, deviceID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE devices SET secret_hash=$1,secret=NULL WHERE tenant_id=$2 AND device_id=$3`, hash, c.tenant, c.device); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
@@ -338,13 +272,21 @@ func (s *PostgresStore) ListDevices() []Device {
 }
 
 func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
+	value, err := s.GetDeviceContext(context.Background(), tenantID, deviceID)
+	return value, err == nil
+}
+
+func (s *PostgresStore) GetDeviceContext(ctx context.Context, tenantID, deviceID string) (Device, error) {
 	var d Device
-	err := s.db.QueryRow(`SELECT tenant_id, device_id, product_id, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
+	err := s.db.QueryRowContext(ctx, `SELECT tenant_id, device_id, product_id, created_at FROM devices WHERE tenant_id = $1 AND device_id = $2`,
 		tenantID, deviceID).Scan(&d.TenantID, &d.DeviceID, &d.ProductID, &d.CreatedAt)
 	if err != nil {
-		return Device{}, false
+		if err == sql.ErrNoRows {
+			return Device{}, ErrNotFound
+		}
+		return Device{}, err
 	}
-	return d, true
+	return d, nil
 }
 
 func (s *PostgresStore) AuthenticateDevice(tenantID, deviceID, secret string) bool {
@@ -356,13 +298,19 @@ func (s *PostgresStore) AuthenticateDevice(tenantID, deviceID, secret string) bo
 }
 
 func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error) {
-	tx, err := s.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.RecordTelemetryContext(ctx, env)
+}
+
+func (s *PostgresStore) RecordTelemetryContext(ctx context.Context, env contracts.Envelope) (TelemetryRecord, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return TelemetryRecord{}, err
 	}
 	defer tx.Rollback()
-	if _, ok := s.GetDevice(env.TenantID, env.DeviceID); !ok {
-		return TelemetryRecord{}, fmt.Errorf("device %w", ErrNotFound)
+	if err := requireDevice(ctx, tx, env.TenantID, env.DeviceID); err != nil {
+		return TelemetryRecord{}, err
 	}
 	payloadBytes, err := json.Marshal(env.Payload)
 	if err != nil {
@@ -379,7 +327,7 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		Payload:    env.Payload,
 		ReceivedAt: now,
 	}
-	res, err := tx.Exec(`INSERT INTO telemetry_records (msg_id, tenant_id, device_id, ts, type, version, payload, received_at)
+	res, err := tx.ExecContext(ctx, `INSERT INTO telemetry_records (msg_id, tenant_id, device_id, ts, type, version, payload, received_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (msg_id, tenant_id, device_id) DO NOTHING`,
 		rec.MsgID, rec.TenantID, rec.DeviceID, rec.Ts, rec.Type, rec.Version, payloadBytes, rec.ReceivedAt)
@@ -395,7 +343,7 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		// never landed.
 		var stored TelemetryRecord
 		var payload []byte
-		if err := s.db.QueryRow(`SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at, tdengine_written
+		if err := tx.QueryRowContext(ctx, `SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at, tdengine_written
 			FROM telemetry_records WHERE msg_id = $1 AND tenant_id = $2 AND device_id = $3`,
 			rec.MsgID, rec.TenantID, rec.DeviceID).
 			Scan(&stored.MsgID, &stored.TenantID, &stored.DeviceID, &stored.Ts, &stored.Type, &stored.Version, &payload, &stored.ReceivedAt, &stored.TDengineWritten); err != nil {
@@ -404,7 +352,7 @@ func (s *PostgresStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord
 		stored.Payload = json.RawMessage(payload)
 		return stored, ErrDuplicateTelemetry
 	}
-	_, err = tx.Exec(`INSERT INTO device_state (tenant_id, device_id, connected, last_seen_at, last_msg_id, updated_at)
+	_, err = tx.ExecContext(ctx, `INSERT INTO device_state (tenant_id, device_id, connected, last_seen_at, last_msg_id, updated_at)
 		VALUES ($1,$2,true,$3,$4,$3)
 		ON CONFLICT (tenant_id, device_id) DO UPDATE SET connected = true, last_seen_at = EXCLUDED.last_seen_at, last_msg_id = EXCLUDED.last_msg_id, updated_at = EXCLUDED.updated_at`,
 		rec.TenantID, rec.DeviceID, now, rec.MsgID)
@@ -534,12 +482,20 @@ func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, 
 }
 
 func (s *PostgresStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool) {
+	value, err := s.GetDeviceStatusContext(context.Background(), tenantID, deviceID)
+	return value, err == nil
+}
+
+func (s *PostgresStore) GetDeviceStatusContext(ctx context.Context, tenantID, deviceID string) (DeviceStatus, error) {
 	var status DeviceStatus
 	var lastSeen sql.NullTime
-	err := s.db.QueryRow(`SELECT tenant_id, device_id, connected, last_seen_at FROM device_state WHERE tenant_id = $1 AND device_id = $2`,
+	err := s.db.QueryRowContext(ctx, `SELECT tenant_id, device_id, connected, last_seen_at FROM device_state WHERE tenant_id = $1 AND device_id = $2`,
 		tenantID, deviceID).Scan(&status.TenantID, &status.DeviceID, &status.Online, &lastSeen)
 	if err != nil {
-		return DeviceStatus{}, false
+		if err == sql.ErrNoRows {
+			return DeviceStatus{}, ErrNotFound
+		}
+		return DeviceStatus{}, err
 	}
 	if lastSeen.Valid {
 		status.LastSeenAt = lastSeen.Time
@@ -547,43 +503,76 @@ func (s *PostgresStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus
 			status.Online = false
 		}
 	}
-	return status, true
+	return status, nil
 }
 
+// CreateCommand preserves the unkeyed API for internal callers.
 func (s *PostgresStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
-	tx, err := s.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.CreateCommandWithKey(ctx, tenantID, deviceID, "", payload)
+}
+
+func requireDevice(ctx context.Context, tx *sql.Tx, tenantID, deviceID string) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM devices WHERE tenant_id=$1 AND device_id=$2)`, tenantID, deviceID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("device %w", ErrNotFound)
+	}
+	return nil
+}
+
+// CreateCommandWithKey atomically reuses a tenant-scoped request key. A changed
+// device or payload conflicts instead of executing a second device action.
+func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+	if err := contracts.ValidateIdempotencyKey(key); err != nil {
+		return Command{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Command{}, err
 	}
 	defer tx.Rollback()
-	if _, ok := s.GetDevice(tenantID, deviceID); !ok {
-		return Command{}, fmt.Errorf("device %w", ErrNotFound)
+	if err := requireDevice(ctx, tx, tenantID, deviceID); err != nil {
+		return Command{}, err
 	}
-	id := uuid.Must(uuid.NewV7()).String()
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Command{}, err
+	}
 	now := time.Now().UTC()
-	cmd := Command{
-		ID:        id,
-		TenantID:  tenantID,
-		DeviceID:  deviceID,
-		Status:    contracts.CommandStatusCreated,
-		Payload:   payload,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
+	cmd := Command{ID: id.String(), TenantID: tenantID, DeviceID: deviceID, Status: contracts.CommandStatusCreated, Payload: payload, CreatedAt: now, UpdatedAt: now}
+	var storedID string
+	err = tx.QueryRowContext(ctx, `INSERT INTO commands (id,tenant_id,device_id,status,payload,next_dispatch_at,created_at,updated_at,idempotency_key)
+ VALUES ($1,$2,$3,$4,$5,$6,$6,$6,NULLIF($7,''))
+ ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, cmd.ID, tenantID, deviceID, cmd.Status, []byte(payload), now, key).Scan(&storedID)
+	if err == sql.ErrNoRows {
+		var raw []byte
+		var deadline sql.NullTime
+		var matches bool
+		err = tx.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,(device_id=$3 AND payload=$4::jsonb)
+  FROM commands WHERE tenant_id=$1 AND idempotency_key=$2`, tenantID, key, deviceID, []byte(payload)).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &raw, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &matches)
+		if err != nil {
+			return Command{}, err
+		}
+		if !matches {
+			return Command{}, ErrIdempotencyConflict
+		}
+		cmd.Payload = json.RawMessage(raw)
+		if deadline.Valid {
+			cmd.DeadlineAt = deadline.Time
+		}
+	} else if err != nil {
+		return Command{}, err
+	} else if _, err = tx.ExecContext(ctx, `INSERT INTO command_events (command_id,event_type) VALUES ($1,'created')`, cmd.ID); err != nil {
 		return Command{}, err
 	}
-	_, err = tx.Exec(`INSERT INTO commands (id, tenant_id, device_id, status, payload, next_dispatch_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$6,$7)`,
-		cmd.ID, cmd.TenantID, cmd.DeviceID, cmd.Status, payloadBytes, cmd.CreatedAt, cmd.UpdatedAt)
-	if err != nil {
-		return Command{}, err
-	}
-	if _, err = tx.Exec(`INSERT INTO command_events (command_id, event_type) VALUES ($1, 'created')`, cmd.ID); err != nil {
-		return Command{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return Command{}, err
 	}
 	return cmd, nil
@@ -917,6 +906,10 @@ func translateSQLError(err error, kind string) error {
 
 // GetCommandForDelivery fails closed on database errors before an MQTT publish.
 func (s *PostgresStore) GetCommandForDelivery(ctx context.Context, id string) (Command, error) {
+	return s.GetCommandContext(ctx, id)
+}
+
+func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Command, error) {
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime

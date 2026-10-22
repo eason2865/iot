@@ -7,4 +7,6 @@ COPY bin/device-worker /usr/local/bin/device-worker
 COPY bin/demo /usr/local/bin/demo
 COPY bin/dlq-replay /usr/local/bin/dlq-replay
 
+COPY bin/migrate /usr/local/bin/migrate
+
 EXPOSE 8080

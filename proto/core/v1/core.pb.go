@@ -1275,12 +1275,14 @@ func (x *RecordTelemetryResponse) GetRecord() *TelemetryRecord {
 }
 
 type CreateCommandRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	DeviceId string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	Payload  []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	// Optional tenant-scoped key for safe retries; changed input returns AlreadyExists.
+	IdempotencyKey string `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateCommandRequest) Reset() {
@@ -1332,6 +1334,13 @@ func (x *CreateCommandRequest) GetPayload() []byte {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *CreateCommandRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
 }
 
 type CreateCommandResponse struct {
@@ -1790,11 +1799,12 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\x16RecordTelemetryRequest\x126\n" +
 	"\ttelemetry\x18\x01 \x01(\v2\x18.core.v1.TelemetryRecordR\ttelemetry\"K\n" +
 	"\x17RecordTelemetryResponse\x120\n" +
-	"\x06record\x18\x01 \x01(\v2\x18.core.v1.TelemetryRecordR\x06record\"j\n" +
+	"\x06record\x18\x01 \x01(\v2\x18.core.v1.TelemetryRecordR\x06record\"\x93\x01\n" +
 	"\x14CreateCommandRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x18\n" +
-	"\apayload\x18\x03 \x01(\fR\apayload\"C\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\x12'\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\"C\n" +
 	"\x15CreateCommandResponse\x12*\n" +
 	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"g\n" +
 	"\x13ListCommandsRequest\x12\x1b\n" +

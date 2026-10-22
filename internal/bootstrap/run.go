@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -62,14 +64,19 @@ func Run(serviceName string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var background sync.WaitGroup
 	errCh := make(chan error, 4)
 	if resources.bridge != nil {
+		background.Add(1)
 		go func() {
+			defer background.Done()
 			errCh <- resources.bridge.Run(ctx)
 		}()
 	}
 	if resources.worker != nil {
+		background.Add(1)
 		go func() {
+			defer background.Done()
 			errCh <- resources.worker.Run(ctx)
 		}()
 	}
@@ -77,6 +84,15 @@ func Run(serviceName string) error {
 		errCh <- srv.ListenAndServe()
 	}()
 
+	defer func() {
+		cancel()
+		done := make(chan struct{})
+		go func() { background.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	}()
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(shutdownCh)
@@ -125,7 +141,12 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 
 	switch serviceName {
 	case "telemetry-ingestor":
+		inbox, ok := store.(platform.TelemetryInbox)
+		if !ok {
+			return nil, fmt.Errorf("telemetry-ingestor requires a durable telemetry inbox")
+		}
 		bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
+			Inbox:        inbox,
 			BrokerURL:    runtimeconfig.EnvOrDefault("EMQX_URL", "tcp://127.0.0.1:1883"),
 			ClientID:     mqttClientID("EMQX_TELEMETRY_INGESTOR_CLIENT_ID", "iot-telemetry-ingestor"),
 			Username:     os.Getenv("EMQX_USERNAME"),
@@ -210,7 +231,11 @@ func mqttClientID(key, fallback string) string {
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 	dsn := runtimeconfig.EnvOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
-	store, err := platform.NewPostgresStore(dsn, ttl)
+	autoMigrate, err := strconv.ParseBool(runtimeconfig.EnvOrDefault("POSTGRES_AUTO_MIGRATE", "true"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("POSTGRES_AUTO_MIGRATE must be true or false")
+	}
+	store, err := platform.OpenPostgresStore(dsn, ttl, autoMigrate)
 	if err != nil {
 		return nil, nil, err
 	}

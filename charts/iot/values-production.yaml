@@ -1,0 +1,32 @@
+# Overlay: replace internal DNS, image and Secrets for your environment.
+# Provision PostgreSQL first with the migrate binary before installing this profile.
+images:
+  app: iot-app:2.43
+postgres:
+  autoMigrate: false
+grpcTLS:
+  enabled: true
+kafka:
+  topicReplicationFactor: 3
+  topicMinInsyncReplicas: 2
+  topicPartitions: 6
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+topologySpread:
+  enabled: true
+externalDependencies:
+  hostGatewayIP: ""
+  kafkaBrokers: kafka.internal:9092
+  emqxUrl: tcp://emqx-listeners.emqx.svc.cluster.local:1883
+  wait:
+    postgresHost: postgres.internal
+    postgresPort: 5432
+    kafkaHost: kafka.internal
+    kafkaPort: 9092
+    emqxHost: emqx-listeners.emqx.svc.cluster.local
+    emqxPort: 1883
+    tdengineHost: tdengine.internal
+    tdenginePort: 6041

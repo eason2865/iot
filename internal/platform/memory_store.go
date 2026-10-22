@@ -1,8 +1,10 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -19,22 +21,24 @@ type memoryStore struct {
 
 	ttl time.Duration
 
-	tenants    map[string]Tenant
-	devices    map[string]Device
-	statuses   map[string]DeviceStatus
-	telemetry  map[string][]TelemetryRecord
-	commands   map[string]Command
-	commandSeq int64
+	tenants     map[string]Tenant
+	devices     map[string]Device
+	statuses    map[string]DeviceStatus
+	telemetry   map[string][]TelemetryRecord
+	commandKeys map[string]string
+	commands    map[string]Command
+	commandSeq  int64
 }
 
 func newMemoryStore(ttl time.Duration) *memoryStore {
 	return &memoryStore{
-		ttl:       ttl,
-		tenants:   map[string]Tenant{},
-		devices:   map[string]Device{},
-		statuses:  map[string]DeviceStatus{},
-		telemetry: map[string][]TelemetryRecord{},
-		commands:  map[string]Command{},
+		ttl:         ttl,
+		tenants:     map[string]Tenant{},
+		devices:     map[string]Device{},
+		statuses:    map[string]DeviceStatus{},
+		telemetry:   map[string][]TelemetryRecord{},
+		commands:    map[string]Command{},
+		commandKeys: map[string]string{},
 	}
 }
 
@@ -123,8 +127,10 @@ func (s *memoryStore) RecordTelemetry(env contracts.Envelope) (TelemetryRecord, 
 }
 
 func (s *memoryStore) CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.CreateCommandWithKey(context.Background(), tenantID, deviceID, "", payload)
+}
+
+func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error) {
 	key := deviceKey(tenantID, deviceID)
 	if _, exists := s.devices[key]; !exists {
 		return Command{}, fmt.Errorf("device %w", ErrNotFound)
@@ -210,4 +216,41 @@ func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord
 	out := make([]TelemetryRecord, len(src))
 	copy(out, src)
 	return out
+}
+
+// The memory implementation is only a test harness; PostgreSQL owns production
+// atomicity. Reuse the same lock for key lookup and command allocation.
+func (s *memoryStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+	if err := ctx.Err(); err != nil {
+		return Command{}, err
+	}
+	if err := contracts.ValidateIdempotencyKey(key); err != nil {
+		return Command{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	var value any
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return Command{}, err
+	}
+	if key != "" {
+		for _, cmd := range s.commands {
+			if cmd.TenantID == tenantID && s.commandKeys[cmd.ID] == key {
+				var old any
+				_ = json.Unmarshal(cmd.Payload, &old)
+				if cmd.DeviceID != deviceID || !reflect.DeepEqual(old, value) {
+					return Command{}, ErrIdempotencyConflict
+				}
+				return cmd, nil
+			}
+		}
+	}
+	cmd, err := s.createCommand(tenantID, deviceID, payload)
+	if err == nil && key != "" {
+		s.commandKeys[cmd.ID] = key
+	}
+	return cmd, err
 }

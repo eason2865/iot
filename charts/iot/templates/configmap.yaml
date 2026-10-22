@@ -7,6 +7,7 @@ metadata:
 data:
   # DSNs contain credentials and live in the Secret (security.existingSecret),
   # not in this ConfigMap: POSTGRES_DSN, TDENGINE_DSN.
+  POSTGRES_AUTO_MIGRATE: {{ .Values.postgres.autoMigrate | quote }}
   KAFKA_BROKERS: {{ .Values.externalDependencies.kafkaBrokers | quote }}
   EMQX_URL: {{ .Values.externalDependencies.emqxUrl | quote }}
   IOT_CORE_ENDPOINTS: iot-core:9001

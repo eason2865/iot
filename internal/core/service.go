@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -99,18 +100,42 @@ func (s *Service) ListDevices(_ context.Context, req *corev1.ListDevicesRequest)
 	return &corev1.ListDevicesResponse{Devices: out, NextCursor: nextCursor}, nil
 }
 
-func (s *Service) GetDevice(_ context.Context, req *corev1.GetDeviceRequest) (*corev1.GetDeviceResponse, error) {
-	device, ok := s.repo.GetDevice(req.GetTenantId(), req.GetDeviceId())
-	if !ok {
-		return nil, status.Error(codes.NotFound, "device not found")
+func (s *Service) GetDevice(ctx context.Context, req *corev1.GetDeviceRequest) (*corev1.GetDeviceResponse, error) {
+	var device platform.Device
+	if repo, ok := s.repo.(interface {
+		GetDeviceContext(context.Context, string, string) (platform.Device, error)
+	}); ok {
+		var err error
+		device, err = repo.GetDeviceContext(ctx, req.GetTenantId(), req.GetDeviceId())
+		if err != nil {
+			return nil, mapRepoError(err)
+		}
+	} else {
+		var found bool
+		device, found = s.repo.GetDevice(req.GetTenantId(), req.GetDeviceId())
+		if !found {
+			return nil, status.Error(codes.NotFound, "device not found")
+		}
 	}
 	return &corev1.GetDeviceResponse{Device: deviceToPB(device)}, nil
 }
 
-func (s *Service) GetDeviceStatus(_ context.Context, req *corev1.GetDeviceStatusRequest) (*corev1.GetDeviceStatusResponse, error) {
-	deviceStatus, ok := s.repo.GetDeviceStatus(req.GetTenantId(), req.GetDeviceId())
-	if !ok {
-		return nil, status.Error(codes.NotFound, "device not found")
+func (s *Service) GetDeviceStatus(ctx context.Context, req *corev1.GetDeviceStatusRequest) (*corev1.GetDeviceStatusResponse, error) {
+	var deviceStatus platform.DeviceStatus
+	if repo, ok := s.repo.(interface {
+		GetDeviceStatusContext(context.Context, string, string) (platform.DeviceStatus, error)
+	}); ok {
+		var err error
+		deviceStatus, err = repo.GetDeviceStatusContext(ctx, req.GetTenantId(), req.GetDeviceId())
+		if err != nil {
+			return nil, mapRepoError(err)
+		}
+	} else {
+		var found bool
+		deviceStatus, found = s.repo.GetDeviceStatus(req.GetTenantId(), req.GetDeviceId())
+		if !found {
+			return nil, status.Error(codes.NotFound, "device not found")
+		}
 	}
 	return &corev1.GetDeviceStatusResponse{Status: deviceStatusToPB(deviceStatus)}, nil
 }
@@ -143,7 +168,7 @@ func (s *Service) IngestTelemetry(ctx context.Context, req *corev1.IngestTelemet
 	if err := contracts.ValidateEnvelope(envelope); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid telemetry envelope: %v", err)
 	}
-	record, err := s.repo.RecordTelemetry(envelope)
+	record, err := s.recordTelemetry(ctx, envelope)
 	if err != nil && !platform.IsTelemetryDuplicate(err) {
 		return nil, mapRepoError(err)
 	}
@@ -165,12 +190,12 @@ func (s *Service) IngestTelemetry(ctx context.Context, req *corev1.IngestTelemet
 	return &corev1.IngestTelemetryResponse{Record: telemetryToPB(record)}, nil
 }
 
-func (s *Service) RecordTelemetry(_ context.Context, req *corev1.RecordTelemetryRequest) (*corev1.RecordTelemetryResponse, error) {
+func (s *Service) RecordTelemetry(ctx context.Context, req *corev1.RecordTelemetryRequest) (*corev1.RecordTelemetryResponse, error) {
 	envelope := envelopeFromRecordPB(req.GetTelemetry())
 	if err := contracts.ValidateEnvelope(envelope); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid telemetry envelope: %v", err)
 	}
-	record, err := s.repo.RecordTelemetry(envelope)
+	record, err := s.recordTelemetry(ctx, envelope)
 	if err != nil {
 		if platform.IsTelemetryDuplicate(err) {
 			return &corev1.RecordTelemetryResponse{Record: telemetryToPB(record)}, nil
@@ -187,7 +212,21 @@ func (s *Service) CreateCommand(ctx context.Context, req *corev1.CreateCommandRe
 	if !contracts.IsValidTopicPart(req.GetTenantId()) || !contracts.IsValidTopicPart(req.GetDeviceId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId or deviceId contains invalid MQTT topic characters")
 	}
-	command, err := s.repo.CreateCommand(req.GetTenantId(), req.GetDeviceId(), req.GetPayload())
+	if len(req.GetPayload()) > 0 && !json.Valid(req.GetPayload()) {
+		return nil, status.Error(codes.InvalidArgument, "payload must be valid JSON")
+	}
+	if err := contracts.ValidateIdempotencyKey(req.GetIdempotencyKey()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	var command platform.Command
+	var err error
+	if repo, ok := s.repo.(platform.CommandCreator); ok {
+		command, err = repo.CreateCommandWithKey(ctx, req.GetTenantId(), req.GetDeviceId(), req.GetIdempotencyKey(), req.GetPayload())
+	} else if req.GetIdempotencyKey() != "" {
+		return nil, status.Error(codes.FailedPrecondition, "repository does not support command idempotency")
+	} else {
+		command, err = s.repo.CreateCommand(req.GetTenantId(), req.GetDeviceId(), req.GetPayload())
+	}
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
@@ -233,14 +272,27 @@ func (s *Service) ListCommands(_ context.Context, req *corev1.ListCommandsReques
 	return &corev1.ListCommandsResponse{Commands: out, NextCursor: nextCursor}, nil
 }
 
-func (s *Service) GetCommand(_ context.Context, req *corev1.GetCommandRequest) (*corev1.GetCommandResponse, error) {
+func (s *Service) GetCommand(ctx context.Context, req *corev1.GetCommandRequest) (*corev1.GetCommandResponse, error) {
 	// Command reads are tenant-scoped, like ListCommands and AckCommand. This was
 	// the only lookup that accepted a bare ID, which made the three command
 	// endpoints disagree about their contract.
 	if req.GetId() == "" || req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id and tenantId are required")
 	}
-	command, ok := s.repo.GetCommand(req.GetId())
+	var command platform.Command
+	var ok bool
+	if repo, contextual := s.repo.(interface {
+		GetCommandContext(context.Context, string) (platform.Command, error)
+	}); contextual {
+		var err error
+		command, err = repo.GetCommandContext(ctx, req.GetId())
+		if err != nil {
+			return nil, mapRepoError(err)
+		}
+		ok = true
+	} else {
+		command, ok = s.repo.GetCommand(req.GetId())
+	}
 	// A command that exists in another tenant is reported as not found, so the
 	// response cannot confirm that another tenant's data exists.
 	if !ok || command.TenantID != req.GetTenantId() {
@@ -249,11 +301,19 @@ func (s *Service) GetCommand(_ context.Context, req *corev1.GetCommandRequest) (
 	return &corev1.GetCommandResponse{Command: commandToPB(command)}, nil
 }
 
-func (s *Service) AckCommand(_ context.Context, req *corev1.AckCommandRequest) (*corev1.AckCommandResponse, error) {
+func (s *Service) AckCommand(ctx context.Context, req *corev1.AckCommandRequest) (*corev1.AckCommandResponse, error) {
 	if req.GetId() == "" || req.GetTenantId() == "" || req.GetDeviceId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "id, tenantId and deviceId are required")
 	}
-	command, err := s.repo.AckCommand(req.GetId(), req.GetTenantId(), req.GetDeviceId())
+	var command platform.Command
+	var err error
+	if repo, ok := s.repo.(interface {
+		AckCommandContext(context.Context, string, string, string) (platform.Command, error)
+	}); ok {
+		command, err = repo.AckCommandContext(ctx, req.GetId(), req.GetTenantId(), req.GetDeviceId())
+	} else {
+		command, err = s.repo.AckCommand(req.GetId(), req.GetTenantId(), req.GetDeviceId())
+	}
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
@@ -344,9 +404,22 @@ func mapRepoError(err error) error {
 		return nil
 	case platform.IsNotFound(err):
 		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "database operation timed out")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "request canceled")
+	case errors.Is(err, platform.ErrIdempotencyConflict):
+		return status.Error(codes.AlreadyExists, err.Error())
 	case platform.IsAlreadyExists(err):
 		return status.Error(codes.AlreadyExists, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())
 	}
+}
+
+func (s *Service) recordTelemetry(ctx context.Context, env contracts.Envelope) (platform.TelemetryRecord, error) {
+	if repo, ok := s.repo.(platform.TelemetryInbox); ok {
+		return repo.RecordTelemetryContext(ctx, env)
+	}
+	return s.repo.RecordTelemetry(env)
 }

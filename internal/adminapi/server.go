@@ -344,9 +344,10 @@ func (s *Server) createCommandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := s.rpc.CreateCommand(r.Context(), &corev1.CreateCommandRequest{
-		TenantId: req.TenantID,
-		DeviceId: req.DeviceID,
-		Payload:  []byte(req.Payload),
+		TenantId:       req.TenantID,
+		DeviceId:       req.DeviceID,
+		Payload:        []byte(req.Payload),
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
 		writeRPCError(w, err)

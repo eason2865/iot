@@ -41,7 +41,7 @@
 | API Gateway / Ingress | TLS 终止、认证、限流和对外 API 入口 | 平台网关命名空间 | 由平台统一部署高可用 Gateway 或 Ingress Controller；仅将 `management-api` 暴露为 HTTP API。当前 Chart 不安装网关。 |
 | `management-api` | REST API、鉴权边界、调用核心服务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。通过 `iot-core:9001` Service DNS 调用核心服务。 |
 | `iot-core` | 租户、设备、命令、状态等核心 gRPC 业务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。仅用 ClusterIP Service 暴露 gRPC 与指标端口。 |
-| `telemetry-ingestor` | MQTT 上行消息解析并写入 Kafka | `iot` | Kubernetes Deployment。通过 EMQX 共享订阅扩容，并为每个 Pod 注入唯一 MQTT Client ID；当前 Chart 默认 2 副本，已具备这两项配置。Chart 已有 PDB，生产仍应补齐 HPA 和拓扑分散。 |
+| `telemetry-ingestor` | MQTT 上行消息解析并写入 Kafka | `iot` | Kubernetes Deployment。通过 EMQX 共享订阅扩容，并为每个 Pod 注入唯一 MQTT Client ID；当前 Chart 默认 2 副本，已具备这两项配置。Chart 已有 PDB、可选 HPA 和拓扑分散，生产应通过 overlay 启用并压测调优。 |
 | `device-worker` | Kafka 消费、状态/时序落库、命令投递、ACK 更新 | `iot` | Kubernetes Deployment。通过 Kafka 分区和消费者组扩容；ACK MQTT 订阅使用共享订阅且 Client ID 由 Pod 名唯一化。当前 Chart 默认 2 副本；worker 在投递前做命令终态预检（`sent/acked/timeout/failed` 直接跳过并提交位点），ACK 落库失败重试后转入 DLQ，具备多副本下的幂等语义。进一步扩容前仍需增加 Kafka 分区（`kafka.topicPartitions`，仅在 topic 创建时生效）。 |
 | EMQX | MQTT 接入、会话、订阅和设备长连接 | `emqx` | 独立 EMQX 集群，由 EMQX Operator 管理；至少多节点、反亲和、PDB、滚动升级和 TCP 负载均衡。设备长连接通过 L4 负载均衡进入 EMQX，而不是进入业务 Pod。EMQX 5.9+ 的集群必须配置许可证 Secret。仓库清单见 [`deploy/emqx/cluster.yaml`](../deploy/emqx/cluster.yaml)。 |
 | PostgreSQL | 租户、设备、命令、当前状态等事务数据 | 独立数据平台 | 优先使用托管高可用 PostgreSQL；自建时使用受支持的 PostgreSQL Operator，配置主备、备份、PITR、监控和定期恢复演练。 |
@@ -80,10 +80,18 @@
 
 当前 `charts/iot` 是本地可运行的 applications-only Chart，默认将 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 四个服务各部署 2 副本，且每个服务均带 PDB（`minAvailable: 1`），并连接外部依赖。它不包含网关、EMQX、PostgreSQL、Kafka、TDengine、Prometheus、Grafana、Alertmanager 或 demo。
 
-投入生产前，应按本指南分别建设这些平台服务，并补齐 HPA、拓扑分散、TLS/Secret、容量基线与灾备演练（Chart 已为四个业务服务内置 PDB）；`device-worker` 扩容前还必须完成 Kafka 分区规划（`kafka.topicPartitions`）。
+投入生产前，应按本指南分别建设这些平台服务，并启用生产 overlay 的 HPA/拓扑分散，配置 TLS/Secret、容量基线与灾备演练（Chart 已为四个业务服务内置 PDB）；`device-worker` 扩容前还必须完成 Kafka 分区规划（`kafka.topicPartitions`）。
 
 ## 已实现的可靠性与监控基线
 
 四个业务 Deployment 均已有 PDB。management-api readiness 验证核心 gRPC 与 PostgreSQL，ingestor/worker readiness 验证 PostgreSQL；存活检查独立。本地 Prometheus 使用命名空间级 Role 经 apiserver proxy 抓取每个 Pod，并校验 CA、保留服务 job 标签；生产由可观测平台直接抓取 Pod。
 
 可选租户 Token 使用 Secret 中的 JSON token→tenant 映射，全局列表仍要求管理 Token。Kafka 新 topic 的分区数可配；现存分区及副本变更由运维执行，动态配置在启动时对账。命令重投跳过已 sent/终态，ACK 有限重试与人工重放保留终态语义；PostgreSQL 遥测完成标记支持后台补偿。重复投递和双依赖同时故障的边界见 ADR 0007。
+
+## 生产配置与数据库发布
+
+使用 `charts/iot/values-production.yaml` 叠加默认配置，替换其中的内部 DNS、镜像与 Secret。该配置启用 mTLS、四个 HPA、节点/可用区分散和 startup probes；Kafka 新 topic 为 6 分区、RF=3、min ISR=2。集群需提供 metrics-server 和足够故障域，现有 topic 的分区与副本需运维单独调整。调度分散采用 ScheduleAnyway，是软约束。
+
+先以迁移角色注入 POSTGRES_DSN 执行镜像中的 `/usr/local/bin/migrate`，然后发布配置 `postgres.autoMigrate=false` 的业务服务；业务数据库角色不需 DDL 权限。迁移与启动使用同一份嵌入 SQL，并以事务锁串行执行。迁移前按数据平台要求完成备份。
+
+命令重试使用 Idempotency-Key，遥测使用 PostgreSQL inbox 后确认 MQTT。完整语义和 broker 离线投递边界见 ADR 0008；TDengine 数值列、同时间戳冲突、数据生命周期与外部 HA 容量仍需按业务规划。

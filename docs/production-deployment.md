@@ -41,7 +41,7 @@ Local is not a production substitute, but it mirrors production deployment bound
 | API Gateway / Ingress | TLS termination, authentication, rate limiting, public API entrypoint | Platform gateway namespace | A highly available Gateway or Ingress Controller deployed uniformly by the platform; expose only `management-api` as the HTTP API. The current chart does not install a gateway. |
 | `management-api` | REST API, auth boundary, calls the core service | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Calls the core via the `iot-core:9001` Service DNS. |
 | `iot-core` | Core gRPC business: tenants, devices, commands, status | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Expose gRPC and metrics ports via ClusterIP Services only. |
-| `telemetry-ingestor` | Parses MQTT uplink messages and writes to Kafka | `iot` | Kubernetes Deployment. Scales via EMQX shared subscriptions with a unique MQTT Client ID per Pod; the current chart defaults to 2 replicas with both already configured. The chart already has a PDB; production should still add HPA and topology spread. |
+| `telemetry-ingestor` | Parses MQTT uplink messages and writes to Kafka | `iot` | Kubernetes Deployment. Scales via EMQX shared subscriptions with a unique MQTT Client ID per Pod; the current chart defaults to 2 replicas with both already configured. The chart has a PDB plus optional HPA and topology spread; enable the production overlay and tune through load tests. |
 | `device-worker` | Kafka consumption, state/time-series persistence, command delivery, ACK updates | `iot` | Kubernetes Deployment. Scales via Kafka partitions and consumer groups; the ACK MQTT subscription uses a shared subscription with the Client ID uniquified by Pod name. The chart defaults to 2 replicas; the worker performs a terminal-state precheck before delivery (`sent/acked/timeout/failed` are skipped and the offset committed), and failed ACK persistence is retried then routed to the DLQ, reducing duplicate deliveries (devices must still deduplicate command IDs). Further scaling still requires more Kafka partitions (`kafka.topicPartitions`, applied only at topic creation). |
 | EMQX | MQTT access, sessions, subscriptions, device long connections | `emqx` | A standalone EMQX cluster managed by the EMQX Operator; at minimum multi-node with anti-affinity, PDB, rolling upgrades, and TCP load balancing. Device long connections enter EMQX through an L4 load balancer, not business Pods. EMQX 5.9+ clusters require a license Secret. See the repo manifest [`deploy/emqx/cluster.yaml`](../deploy/emqx/cluster.yaml). |
 | PostgreSQL | Transactional data: tenants, devices, commands, current state | Independent data platform | Prefer managed HA PostgreSQL; when self-hosting, use a supported PostgreSQL Operator with primary/standby, backups, PITR, monitoring, and regular restore drills. |
@@ -80,7 +80,7 @@ Local is not a production substitute, but it mirrors production deployment bound
 
 The current `charts/iot` is a locally runnable, applications-only chart that by default deploys all four services — `management-api`, `iot-core`, `telemetry-ingestor`, and `device-worker` — at 2 replicas each, with a PDB (`minAvailable: 1`) per service, connecting to external dependencies. It does not include the gateway, EMQX, PostgreSQL, Kafka, TDengine, Prometheus, Grafana, Alertmanager, or demo.
 
-Before going to production, build these platform services separately per this guide, and fill in HPAs, topology spread, TLS/Secrets, capacity baselines, and disaster-recovery drills (the chart already ships PDBs for all four business services). Scaling `device-worker` additionally requires Kafka partition planning (`kafka.topicPartitions`).
+Before going to production, build these platform services separately per this guide, enable HPA/topology spread through the production overlay, and configure TLS/Secrets, capacity baselines, and disaster-recovery drills (the chart already ships PDBs for all four business services). Scaling `device-worker` additionally requires Kafka partition planning (`kafka.topicPartitions`).
 
 ## Implemented reliability and monitoring baseline
 
@@ -97,3 +97,21 @@ while managed dynamic config entries are reconciled at startup. Command publishi
 skips delivered/terminal states; bounded ACK retries and manual ACK replay preserve
 existing terminal semantics. Telemetry compensation uses the PostgreSQL completion
 marker. See ADR 0007 for duplicate delivery and simultaneous-outage limitations.
+
+## Production overlay and database releases
+
+Overlay `charts/iot/values-production.yaml` after replacing its internal DNS,
+image and Secrets. It enables mTLS, four HPAs, node/zone spreading and startup
+probes. New Kafka topics use 6 partitions, RF=3 and min ISR=2. Provide
+metrics-server and sufficient fault domains; existing topic partitions/replicas
+need separate operator changes. Spreading is a soft ScheduleAnyway constraint.
+
+Run `/usr/local/bin/migrate` with POSTGRES_DSN injected for a migration role,
+then release application services with `postgres.autoMigrate=false` and a
+DML-only role. Both paths use the same embedded SQL and serialize migration in a
+transaction. Follow the data platform's backup policy before migrating.
+
+Use Idempotency-Key for command retries. MQTT telemetry acknowledges after a
+PostgreSQL inbox write. ADR 0008 describes guarantees and broker offline-delivery
+boundaries. TDengine measurement columns, timestamp collisions, lifecycle and
+external HA capacity remain business planning decisions.

@@ -135,6 +135,8 @@ message CreateCommandRequest {
   string tenant_id = 1;
   string device_id = 2;
   bytes payload = 3;
+  // Optional tenant-scoped key for safe retries; changed input returns AlreadyExists.
+  string idempotency_key = 4;
 }
 
 message CreateCommandResponse {

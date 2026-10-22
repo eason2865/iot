@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -216,7 +217,11 @@ func rpcServerConf() zrpc.RpcServerConf {
 
 func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
 	dsn := runtimeconfig.EnvOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
-	store, err := platform.NewPostgresStore(dsn, ttl)
+	autoMigrate, err := strconv.ParseBool(runtimeconfig.EnvOrDefault("POSTGRES_AUTO_MIGRATE", "true"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("POSTGRES_AUTO_MIGRATE must be true or false")
+	}
+	store, err := platform.OpenPostgresStore(dsn, ttl, autoMigrate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -245,6 +250,7 @@ func topicConfigFromEnv() platform.KafkaTopicConfig {
 	return platform.KafkaTopicConfig{
 		ReplicationFactor: runtimeconfig.KafkaTopicReplicationFactor(),
 		MinInsyncReplicas: runtimeconfig.KafkaTopicMinInsyncReplicas(),
+		NumPartitions:     runtimeconfig.KafkaTopicPartitions(),
 	}
 }
 

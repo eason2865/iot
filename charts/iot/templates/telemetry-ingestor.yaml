@@ -19,7 +19,9 @@ metadata:
   labels:
     {{- include "iot.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicas.telemetryIngestor }}
+  {{- end }}
   selector:
     matchLabels:
       app: telemetry-ingestor
@@ -28,6 +30,7 @@ spec:
       labels:
         app: telemetry-ingestor
     spec:
+      {{- include "iot.topologySpread" (dict "root" . "app" "telemetry-ingestor") | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
@@ -87,6 +90,12 @@ spec:
             # name and scrape every Pod individually.
             - name: metrics
               containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /readyz

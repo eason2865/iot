@@ -67,3 +67,15 @@ type noopPublisher struct{}
 
 func (noopPublisher) PublishTelemetry(context.Context, TelemetryRecord) error { return nil }
 func (noopPublisher) PublishCommand(context.Context, Command) error           { return nil }
+
+var ErrIdempotencyConflict = errors.New("idempotency key already used for a different device or payload")
+
+// CommandCreator is implemented by durable and test stores. Keys are scoped by tenant.
+type CommandCreator interface {
+	CreateCommandWithKey(context.Context, string, string, string, json.RawMessage) (Command, error)
+}
+
+// TelemetryInbox persists MQTT messages before their broker acknowledgement.
+type TelemetryInbox interface {
+	RecordTelemetryContext(context.Context, contracts.Envelope) (TelemetryRecord, error)
+}

@@ -533,7 +533,7 @@ go run ./cmd/migrate
 
 随后应用设置 `POSTGRES_AUTO_MIGRATE=false`，使用仅有业务读写权限的数据库角色；本地默认 true。镜像包含 `/usr/local/bin/migrate`。生产配置示例见 `charts/iot/values-production.yaml`：启用 mTLS、HPA、节点/可用区分散及 Kafka RF=3、ISR=2、6 分区。部署前替换域名、镜像和 Secret，并安装 metrics-server；扩容现存 Kafka topic 仍需人工操作。该示例不创建外部高可用依赖，HPA 参数需要压测调优。
 
-CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、race、Helm 双配置校验和 protobuf 漂移检查。本地设置独立测试数据库 `IOT_POSTGRES_TEST_DSN` 后运行 `go test ./...`；每个数据库测试创建并清理独立 schema。详见 ADR 0008。
+CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、race、Helm 双配置校验和 protobuf 漂移检查。 Kafka bootstrap 矩阵覆盖 `localhost:9092` 和 `127.0.0.1:9092`，broker 始终公布 `localhost`，同时验证两种地址缓存的元数据就绪。本地设置独立测试数据库 `IOT_POSTGRES_TEST_DSN` 后运行 `go test ./...`；每个数据库测试创建并清理独立 schema。详见 ADR 0008。
 
 遥测 `payload` 必填且必须为 JSON 对象（允许空对象）。MQTT、REST 和 gRPC 摄入拒绝缺失、null、数组或标量；gRPC 返回 `InvalidArgument`，REST 返回 HTTP 400。遥测订阅必须实际获准 QoS 1；SUBACK 缺失、拒绝或降级会使 ingestor 报错退出，重连时同样检查。
 

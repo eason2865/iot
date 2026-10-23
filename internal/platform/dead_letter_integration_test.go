@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,10 @@ func regressionKafkaTopic(t *testing.T) ([]string, string) {
 	topic := fmt.Sprintf("iot-regression-%d", time.Now().UnixNano())
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
+	controller, err := discoverKafkaController(ctx, brokers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := &kafka.Client{Addr: kafka.TCP(brokers...)}
 	response, err := client.CreateTopics(ctx, &kafka.CreateTopicsRequest{Topics: []kafka.TopicConfig{{Topic: topic, NumPartitions: 1, ReplicationFactor: 1}}})
 	if err != nil {
@@ -42,6 +48,15 @@ func regressionKafkaTopic(t *testing.T) ([]string, string) {
 	})
 	if err := waitForKafkaTopicMetadata(ctx, client, topic); err != nil {
 		t.Fatal(err)
+	}
+	// Writers use the original bootstrap pool, while production reconciliation
+	// uses the advertised Controller pool. IP/hostname aliases have independent
+	// DefaultTransport caches: both must be ready before this fixture returns.
+	controllerAddress := kafka.TCP(net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	if controllerAddress.String() != client.Addr.String() {
+		if err := waitForKafkaTopicMetadata(ctx, &kafka.Client{Addr: controllerAddress}, topic); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return brokers, topic
 }

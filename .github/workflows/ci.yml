@@ -9,8 +9,12 @@ on:
 
 jobs:
   test:
-    name: Test
+    name: Test (${{ matrix.kafka-bootstrap }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kafka-bootstrap: ["localhost:9092", "127.0.0.1:9092"]
 
     services:
       kafka:
@@ -46,7 +50,7 @@ jobs:
           --health-retries 10
     env:
       IOT_POSTGRES_TEST_DSN: postgres://postgres:regression-only@localhost:5432/iot?sslmode=disable
-      IOT_KAFKA_TEST_BROKERS: localhost:9092
+      IOT_KAFKA_TEST_BROKERS: ${{ matrix.kafka-bootstrap }}
 
     steps:
       - name: Checkout

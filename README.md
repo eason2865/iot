@@ -551,7 +551,7 @@ go run ./cmd/migrate
 
 Set `POSTGRES_AUTO_MIGRATE=false` for application processes using a DML-only database role; local development defaults to true. Images include `/usr/local/bin/migrate`. The production overlay `charts/iot/values-production.yaml` enables mTLS, HPA, node/zone spreading and Kafka RF=3, ISR=2, 6 partitions. Replace DNS names, image and Secrets, install metrics-server, and tune capacity through load tests. Existing Kafka partitions/replicas still require operator changes; this overlay does not provision HA dependencies.
 
-CI runs isolated PostgreSQL regressions, REST→gRPC→database idempotency checks, vet, race, both Helm profiles and protobuf drift checks. Locally, set `IOT_POSTGRES_TEST_DSN` to a dedicated test database before `go test ./...`; each database test owns and removes a separate schema. See ADR 0008.
+CI runs isolated PostgreSQL regressions, REST→gRPC→database idempotency checks, vet, race, both Helm profiles and protobuf drift checks. The Kafka bootstrap matrix covers both `localhost:9092` and `127.0.0.1:9092` against a broker advertising `localhost`, including metadata readiness in both address caches. Locally, set `IOT_POSTGRES_TEST_DSN` to a dedicated test database before `go test ./...`; each database test owns and removes a separate schema. See ADR 0008.
 
 Telemetry `payload` is required and must be a JSON object (an empty object is valid). MQTT, REST and gRPC ingress reject missing, null, array or scalar payloads; gRPC returns `InvalidArgument` and REST returns HTTP 400. The MQTT telemetry subscription must actually receive QoS 1; missing, rejected or downgraded SUBACK grants fail the ingestor, including reconnects.
 

@@ -2,6 +2,16 @@
 
 > 本文件只记录当前有效架构、运行状态、验证结果和操作入口。历史迁移过程不在这里保留。
 
+## Kafka 测试地址缓存等待闭环（2026-10-23，测试修复 tag 2.54）
+
+- 复核2.53/5fd323a剩余的P2测试竞态：127.0.0.1:9092下原漂移/地址切换用例连续3轮因Unknown Topic Or Partition失败，localhost:9092相同用例3轮通过。新增先预热Controller缓存、再建新topic的回归在旧fixture上3轮失败，明确复现缓存地址键差异；不能据此认定生产地址切换失效。
+- kafka-go v0.4.51的DefaultTransport按network/address字符串维护缓存；bootstrap与broker公布的Controller地址即使指向同一broker，也可能是两个缓存。fixture先按生产discoverKafkaController解析真实Controller，仍通过原bootstrap建topic并等待其缓存，再等待精确Controller地址的同一DefaultTransport缓存；地址相同时去重等待。创建topic只会刷新创建请求所在pool，不能以任意一侧就绪替代两侧。中间只对Controller建topic的尝试使其他writer测试读到旧bootstrap缓存，完整验证发现后已改成两侧等待，最终证据使用final-*日志。
+- 新TestKafkaTopicFixturePrimesReconciliationCache预热两侧旧快照，创建topic后立即读取两侧并执行一次生产reconcile；没有在断言处添加重试。fixture原样返回配置的brokers，因此127.0.0.1别名、断连/不响应的首地址仍真实进入被测代码；原有漂移/fallback断言及3s/4s预算、fixture10s预算均保持。Controller地址用net.JoinHostPort与生产一致。
+- CI增加localhost:9092和127.0.0.1:9092两项完整测试矩阵，broker仍公布localhost，fail-fast=false，防止只覆盖同名地址。双语README和ADR0004同步。没有修改生产Kafka初始化、重试或缓存设置，没有重设DefaultTransport/TTL来绕过问题。
+- 最终本地验证：两种bootstrap分别开启独立PG及真实Kafka/TDengine执行go test -count=1 ./...均通过；相关Kafka回归go test -race -count=3两种地址均通过。go vet ./...、go build ./...、fmt/diff和CI矩阵YAML校验通过。日志outputs/fixes-254/final-all-tests-{ip,localhost}.log、final-race-kafka-{ip,localhost}.log；红灯及中间排查日志也保留但不作为最终通过证据。私有Kafka topic、PG容器/schema及TD测试库完成后清理。
+- 只改*_test.go、CI及文档，生产Go/SQL、Chart、默认镜像不变；按仓库规则在main提交并打2.54 tag一起推送。2.54是测试修复提交，不构建新的运行镜像。
+- 当前实际部署2.53/5fd323a：Helm iot revision5、Chart0.2.10，四服务各2/2 Ready。上一轮部署21项真实链路及实际Pod文件trace脱敏验证通过，部署报告outputs/deployment-20261022-253/。本轮不改运行数据或服务配置。
+
 ## TDengine 补偿、精度与事件/Trace 防护（2026-10-22，发布版本 2.53）
 
 - 针对用户报告的5项缺口：前4项通过真实PG/Kafka/TDengine及实际go-zero中间件/file exporter复现。旧版2000-01-01范围拒绝阻止补偿游标前进；us/ns数据库初始化被接受；负数attempt在MQTT失败后panic；事件attempt=99把DB attempt=2应有的4秒退避改成64秒；401/404的trace写入虚构查询/路径/User-Agent敏感值。基线日志见outputs/fixes-253/。

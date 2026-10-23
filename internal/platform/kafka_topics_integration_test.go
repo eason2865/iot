@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,47 @@ import (
 	"github.com/segmentio/kafka-go"
 	metadataAPI "github.com/segmentio/kafka-go/protocol/metadata"
 )
+
+func TestKafkaTopicFixturePrimesReconciliationCache(t *testing.T) {
+	brokers := strings.Split(os.Getenv("IOT_KAFKA_TEST_BROKERS"), ",")
+	if brokers[0] == "" {
+		t.Skip("set IOT_KAFKA_TEST_BROKERS")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	controller, err := discoverKafkaController(ctx, brokers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := kafka.TCP(net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	// Prime the same default-transport pool that production reconciliation uses
+	// before the new topic exists. A bootstrap alias has a different cache key.
+	client := &kafka.Client{Addr: address}
+	if _, err := client.Metadata(ctx, &kafka.MetadataRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	bootstrapClient := &kafka.Client{Addr: kafka.TCP(brokers...)}
+	if _, err := bootstrapClient.Metadata(ctx, &kafka.MetadataRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	original, topic := regressionKafkaTopic(t)
+	if strings.Join(original, ",") != strings.Join(brokers, ",") {
+		t.Fatal("fixture changed bootstrap addresses and bypassed the test case")
+	}
+	for _, cached := range []*kafka.Client{client, bootstrapClient} {
+		metadata, err := cached.Metadata(ctx, &kafka.MetadataRequest{Topics: []string{topic}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metadata.Topics) != 1 || metadata.Topics[0].Error != nil || len(metadata.Topics[0].Partitions) != 1 {
+			t.Fatalf("fixture left cache stale at %s: %+v", cached.Addr, metadata.Topics)
+		}
+	}
+	// This is deliberately one-shot: retries here would hide broken setup.
+	if err := reconcileKafkaTopics(ctx, address, []kafka.TopicConfig{{Topic: topic, NumPartitions: 1, ReplicationFactor: 1}}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
 	brokers := strings.Split(os.Getenv("IOT_KAFKA_TEST_BROKERS"), ",")
@@ -30,7 +72,7 @@ func TestReconcileKafkaTopicsPreservesUnmanagedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &kafka.Client{Addr: kafka.TCP(fmt.Sprintf("%s:%d", controller.Host, controller.Port))}
+	client := &kafka.Client{Addr: kafka.TCP(net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))}
 	topic := fmt.Sprintf("iot-regression-%d", time.Now().UnixNano())
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)

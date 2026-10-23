@@ -100,3 +100,13 @@ budget, reserving time for controller operations. Each failed or unresponsive
 address has a bounded share; successful discovery closes its probe before the
 controller connection is opened. This handles bootstrap endpoint loss without
 weakening the existing topic verification or total startup timeout.
+
+Integration topic fixtures wait for metadata on both the configured bootstrap
+address and the advertised Controller address, using the same DefaultTransport
+pools as writers and production reconciliation. kafka-go caches metadata by
+address string: `127.0.0.1:9092` and `localhost:9092` are independent even when
+they reach one broker. Topic creation refreshes only the originating pool.
+The original bootstrap list, one-shot drift/fallback assertions and their time
+budgets are preserved. A regression primes both caches before creating a topic
+and checks both immediately afterward. CI runs the full suite with each alias
+while the broker continues advertising `localhost`.

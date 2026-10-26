@@ -142,7 +142,7 @@ func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
 }
 
 func (s *PostgresStore) CreateTenantContext(ctx context.Context, t Tenant) (Tenant, error) {
-	if err := contracts.ValidateMetadataText(t.Name); err != nil {
+	if err := contracts.ValidateTenantName(t.Name); err != nil {
 		return Tenant{}, err
 	}
 	ctx, cancel := postgresOperationContext(ctx)
@@ -239,7 +239,7 @@ func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, err
 func (s *PostgresStore) ListDevicesPageContext(ctx context.Context, page PageRequest) ([]Device, string, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
-	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	page, err := NormalizeListRequest(page, "devices")
 	if err != nil {
 		return nil, "", err
 	}
@@ -247,9 +247,11 @@ func (s *PostgresStore) ListDevicesPageContext(ctx context.Context, page PageReq
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id, device_id, product_id, created_at FROM devices
-		WHERE (tenant_id > $1) OR (tenant_id = $1 AND device_id > $2)
-		ORDER BY tenant_id, device_id LIMIT $3`, afterTenant, afterDevice, page.Size+1)
+	if afterTenant != "" && afterTenant != page.TenantID {
+		return nil, "", errInvalidCursor
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id,device_id,product_id,created_at FROM devices
+ WHERE tenant_id=$1 AND device_id>$2 ORDER BY device_id ASC LIMIT $3`, page.TenantID, afterDevice, page.Size+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -284,7 +286,7 @@ func (s *PostgresStore) CreateDevice(d Device) (Device, error) {
 }
 
 func (s *PostgresStore) CreateDeviceContext(ctx context.Context, d Device) (Device, error) {
-	if err := contracts.ValidateMetadataText(d.ProductID); err != nil {
+	if err := contracts.ValidateProductID(d.ProductID); err != nil {
 		return Device{}, err
 	}
 	ctx, cancel := postgresOperationContext(ctx)
@@ -558,35 +560,34 @@ func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, 
 func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageRequest) ([]TelemetryRecord, string, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
-	tenantID, deviceID := page.TenantID, page.DeviceID
-	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	page, err := NormalizeListRequest(page, "telemetry")
 	if err != nil {
 		return nil, "", err
 	}
-	// NormalizePageRequest returns only Size/Cursor; restore the filters.
-	page.TenantID, page.DeviceID = tenantID, deviceID
-	afterAt, afterMsgID, err := decodeTelemetryCursor(page.Cursor)
+	afterAt, afterID, err := decodePageCursor(page, "telemetry")
 	if err != nil {
 		return nil, "", err
 	}
-	// Two explicit branches: an empty cursor lists from the beginning with no
-	// keyset predicate, avoiding any reliance on NULL-parameter short-circuiting
-	// which behaves inconsistently across drivers/deployments.
-	var rows *sql.Rows
-	if page.Cursor == "" {
-		rows, err = s.db.QueryContext(ctx, `SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
-			FROM telemetry_records
-			WHERE tenant_id = $1 AND device_id = $2
-			ORDER BY received_at ASC, msg_id ASC LIMIT $3`,
-			page.TenantID, page.DeviceID, page.Size+1)
-	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT msg_id, tenant_id, device_id, ts, type, version, payload, received_at
-			FROM telemetry_records
-			WHERE tenant_id = $1 AND device_id = $2
-			  AND (received_at > $3 OR (received_at = $3 AND msg_id > $4))
-			ORDER BY received_at ASC, msg_id ASC LIMIT $5`,
-			page.TenantID, page.DeviceID, afterAt, afterMsgID, page.Size+1)
+	direction, operator := "DESC", "<"
+	if page.Sort == "asc" {
+		direction, operator = "ASC", ">"
 	}
+	var afterMillis any
+	if page.Cursor != "" {
+		afterMillis = afterAt.UnixMilli()
+	}
+	var startMillis, endMillis any
+	if page.HasStartTime {
+		startMillis = page.StartTime.UnixMilli()
+	}
+	if page.HasEndTime {
+		endMillis = page.EndTime.UnixMilli()
+	}
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT msg_id,tenant_id,device_id,ts,type,version,payload,received_at
+ FROM telemetry_records WHERE tenant_id=$1 AND device_id=$2
+ AND ($3::bigint IS NULL OR ts >= $3) AND ($4::bigint IS NULL OR ts < $4)
+ AND ($5='' OR type=$5) AND ($6::bigint IS NULL OR (ts,msg_id) %s ($6,$7))
+ ORDER BY ts %s,msg_id %s LIMIT $8`, operator, direction, direction), page.TenantID, page.DeviceID, startMillis, endMillis, page.Type, afterMillis, afterID, page.Size+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -607,7 +608,7 @@ func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageR
 		}
 		if !accepted {
 			last := out[len(out)-1]
-			next = encodeTelemetryCursor(last.ReceivedAt, last.MsgID)
+			next = encodePageCursor(page, "telemetry", time.UnixMilli(last.Ts), last.MsgID)
 			break
 		}
 		out = append(out, rec)
@@ -709,8 +710,9 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 		var raw []byte
 		var deadline sql.NullTime
 		var matches bool
-		err = tx.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,(device_id=$3 AND payload=$4::jsonb)
-  FROM commands WHERE tenant_id=$1 AND idempotency_key=$2`, tenantID, key, deviceID, []byte(payload)).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &raw, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &matches)
+		var result []byte
+		err = tx.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result,(device_id=$3 AND payload=$4::jsonb)
+  FROM commands WHERE tenant_id=$1 AND idempotency_key=$2`, tenantID, key, deviceID, []byte(payload)).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &raw, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result, &matches)
 		if err != nil {
 			return Command{}, err
 		}
@@ -718,6 +720,11 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 			return Command{}, ErrIdempotencyConflict
 		}
 		cmd.Payload = json.RawMessage(raw)
+		if len(result) > 0 {
+			if err = json.Unmarshal(result, &cmd.Result); err != nil {
+				return Command{}, err
+			}
+		}
 		if deadline.Valid {
 			cmd.DeadlineAt = deadline.Time
 		}
@@ -737,6 +744,24 @@ func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, erro
 }
 
 func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, deviceID string) (Command, error) {
+	return s.AckCommandResultContext(ctx, id, tenantID, deviceID, contracts.CommandResult{Status: contracts.CommandStatusAcked})
+}
+
+func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (Command, error) {
+	if err := contracts.ValidateDeviceIdentity(tenantID, deviceID); err != nil {
+		return Command{}, err
+	}
+	if err := contracts.ValidateCommandID(id); err != nil {
+		return Command{}, err
+	}
+	normalized, err := contracts.NormalizeCommandResult(input)
+	if err != nil {
+		return Command{}, err
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return Command{}, err
+	}
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -747,7 +772,8 @@ func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, dev
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
+	var result []byte
+	err = tx.QueryRowContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at, result FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result)
 	if err == sql.ErrNoRows {
 		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
@@ -755,6 +781,11 @@ func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, dev
 		return Command{}, err
 	}
 	cmd.Payload = json.RawMessage(payload)
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &cmd.Result); err != nil {
+			return Command{}, err
+		}
+	}
 	if deadline.Valid {
 		cmd.DeadlineAt = deadline.Time
 	}
@@ -767,27 +798,37 @@ func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, dev
 	// ACK delivery is at-least-once. Duplicate or late ACKs are harmless and
 	// must not turn a healthy consumer into an error loop.
 	if cmd.Status == contracts.CommandStatusAcked || cmd.Status == contracts.CommandStatusTimeout || cmd.Status == contracts.CommandStatusFailed {
+		if cmd.Result != nil {
+			var equal bool
+			if err = tx.QueryRowContext(ctx, `SELECT result=$2::jsonb FROM commands WHERE id=$1`, id, encoded).Scan(&equal); err != nil {
+				return Command{}, err
+			}
+			if !equal {
+				return Command{}, ErrAcknowledgementConflict
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return Command{}, err
 		}
 		return cmd, nil
 	}
-	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEventAcked)
+	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEvent(normalized.Status))
 	if err != nil {
 		return Command{}, err
 	}
 	now := time.Now().UTC()
-	_, err = tx.ExecContext(ctx, `UPDATE commands SET status = $1, updated_at = $2 WHERE id = $3`, next, now, id)
+	_, err = tx.ExecContext(ctx, `UPDATE commands SET status=$1,updated_at=$2,result=$4::jsonb WHERE id=$3`, next, now, id, encoded)
 	if err != nil {
 		return Command{}, err
 	}
 	cmd.Status = next
 	cmd.UpdatedAt = now
-	if _, err = tx.ExecContext(ctx, `INSERT INTO command_ack (command_id, tenant_id, device_id, ack_status, created_at)
-		SELECT $1, $2, $3, 'acked', $4 WHERE NOT EXISTS (SELECT 1 FROM command_ack WHERE command_id = $1 AND ack_status = 'acked')`, id, tenantID, deviceID, now); err != nil {
+	cmd.Result = &normalized
+	if _, err = tx.ExecContext(ctx, `INSERT INTO command_ack(command_id,tenant_id,device_id,ack_status,ack_payload,created_at)
+ VALUES($1,$2,$3,$4,$5::jsonb,$6)`, id, tenantID, deviceID, normalized.Status, encoded, now); err != nil {
 		return Command{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO command_events (command_id, event_type) VALUES ($1, 'acked')`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO command_events(command_id,event_type,detail) VALUES($1,$2,$3::jsonb)`, id, normalized.Status, encoded); err != nil {
 		return Command{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -811,7 +852,7 @@ func (s *PostgresStore) ClaimCommandsForDispatchContext(ctx context.Context, lim
   ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1
 ) UPDATE commands c SET dispatch_attempts = c.dispatch_attempts + 1, next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
 FROM claimed WHERE c.id = claimed.id
-RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at`, limit, lease.String(), maxDispatchAttempts)
+RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at, c.result`, limit, lease.String(), maxDispatchAttempts)
 	if err != nil {
 		return nil, err
 	}
@@ -964,7 +1005,7 @@ func (s *PostgresStore) ListCommands() []Command {
 func (s *PostgresStore) ListCommandsContext(ctx context.Context) ([]Command, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at FROM commands ORDER BY created_at DESC,id DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result FROM commands ORDER BY created_at DESC,id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -979,22 +1020,23 @@ func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, e
 func (s *PostgresStore) ListCommandsPageContext(ctx context.Context, page PageRequest) ([]Command, string, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
-	tenantID := page.TenantID
-	page, err := NormalizePageRequest(page.Size, page.Cursor)
+	page, err := NormalizeListRequest(page, "commands")
 	if err != nil {
 		return nil, "", err
 	}
-	page.TenantID = tenantID
-	createdAt, id, err := decodeCommandCursor(page.Cursor)
+	createdAt, id, err := decodePageCursor(page, "commands")
 	if err != nil {
 		return nil, "", err
 	}
-	if page.TenantID == "" {
-		return nil, "", fmt.Errorf("tenantId is required")
+	direction, operator := "DESC", "<"
+	if page.Sort == "asc" {
+		direction, operator = "ASC", ">"
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at
-FROM commands WHERE tenant_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id < $3))
-ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt), id, page.Size+1)
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result
+ FROM commands WHERE tenant_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id) %s ($2,$3))
+ AND ($4='' OR device_id=$4) AND ($5='' OR status=$5)
+ AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at < $7)
+ ORDER BY created_at %s,id %s LIMIT $8`, operator, direction, direction), page.TenantID, nullTime(createdAt), id, page.DeviceID, page.Status, listBoundTime(page.StartTime, page.HasStartTime), listBoundTime(page.EndTime, page.HasEndTime), page.Size+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1013,7 +1055,7 @@ ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt),
 		}
 		if !accepted {
 			last := out[len(out)-1]
-			next = encodeCommandCursor(last.CreatedAt, last.ID)
+			next = encodePageCursor(page, "commands", last.CreatedAt, last.ID)
 			break
 		}
 		out = append(out, cmd)
@@ -1022,6 +1064,13 @@ ORDER BY created_at DESC, id DESC LIMIT $4`, page.TenantID, nullTime(createdAt),
 		return nil, "", err
 	}
 	return out, next, nil
+}
+
+func listBoundTime(stamp time.Time, present bool) any {
+	if !present {
+		return nil
+	}
+	return stamp
 }
 
 func nullTime(value time.Time) any {
@@ -1076,7 +1125,8 @@ func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Comma
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime
-	err := s.db.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at FROM commands WHERE id=$1`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline)
+	var result []byte
+	err := s.db.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result FROM commands WHERE id=$1`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result)
 	if err == sql.ErrNoRows {
 		return Command{}, ErrNotFound
 	}
@@ -1084,6 +1134,11 @@ func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Comma
 		return Command{}, err
 	}
 	cmd.Payload = json.RawMessage(payload)
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &cmd.Result); err != nil {
+			return Command{}, err
+		}
+	}
 	if deadline.Valid {
 		cmd.DeadlineAt = deadline.Time
 	}
@@ -1094,10 +1149,16 @@ func scanCommandRow(rows interface{ Scan(...any) error }) (Command, error) {
 	var cmd Command
 	var payload []byte
 	var deadline sql.NullTime
-	if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline); err != nil {
+	var result []byte
+	if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result); err != nil {
 		return Command{}, err
 	}
 	cmd.Payload = json.RawMessage(payload)
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &cmd.Result); err != nil {
+			return Command{}, err
+		}
+	}
 	if deadline.Valid {
 		cmd.DeadlineAt = deadline.Time
 	}

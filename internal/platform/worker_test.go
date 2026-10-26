@@ -173,7 +173,7 @@ func TestHandleAckMessageRetriesTransientStoreError(t *testing.T) {
 	store := &flakyAckStore{memoryStore: base, failures: 1}
 	worker := NewWorker(WorkerConfig{}, store, nil, nil)
 
-	payload, _ := json.Marshal(CommandAckMessage{CommandID: cmd.ID, TenantID: "tenant-a", DeviceID: "device-1"})
+	payload, _ := json.Marshal(CommandAckMessage{Status: "acked", CommandID: cmd.ID, TenantID: "tenant-a", DeviceID: "device-1"})
 	topic, err := contracts.BuildAckTopic("tenant-a", "device-1")
 	if err != nil {
 		t.Fatalf("BuildAckTopic() error = %v", err)
@@ -194,7 +194,7 @@ func TestHandleAckMessageDoesNotRetryUnknownCommand(t *testing.T) {
 	store := &flakyAckStore{memoryStore: base}
 	worker := NewWorker(WorkerConfig{}, store, nil, nil)
 
-	payload, _ := json.Marshal(CommandAckMessage{CommandID: "missing", TenantID: "tenant-a", DeviceID: "device-1"})
+	payload, _ := json.Marshal(CommandAckMessage{Status: "acked", CommandID: "missing", TenantID: "tenant-a", DeviceID: "device-1"})
 	topic, err := contracts.BuildAckTopic("tenant-a", "device-1")
 	if err != nil {
 		t.Fatalf("BuildAckTopic() error = %v", err)
@@ -214,7 +214,7 @@ func TestHandleAckMessageDeadLettersAfterRetriesExhausted(t *testing.T) {
 	// and the handler must log it instead of panicking.
 	worker := NewWorker(WorkerConfig{}, store, nil, nil)
 
-	payload, _ := json.Marshal(CommandAckMessage{CommandID: cmd.ID, TenantID: "tenant-a", DeviceID: "device-1"})
+	payload, _ := json.Marshal(CommandAckMessage{Status: "acked", CommandID: cmd.ID, TenantID: "tenant-a", DeviceID: "device-1"})
 	topic, err := contracts.BuildAckTopic("tenant-a", "device-1")
 	if err != nil {
 		t.Fatalf("BuildAckTopic() error = %v", err)
@@ -260,4 +260,12 @@ func TestCommandDeliveryFailsClosed(t *testing.T) {
 	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err != nil {
 		t.Fatalf("acked replay: %t %v", deliver, err)
 	}
+}
+
+func (s *flakyAckStore) AckCommandResultContext(ctx context.Context, id, tenant, device string, result contracts.CommandResult) (Command, error) {
+	s.calls++
+	if s.calls <= s.failures {
+		return Command{}, fmt.Errorf("transient store error")
+	}
+	return s.memoryStore.AckCommandResultContext(ctx, id, tenant, device, result)
 }

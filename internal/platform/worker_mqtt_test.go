@@ -64,7 +64,7 @@ func TestWorkerDoesNotPUBACKWhenAckAndDLQFail(t *testing.T) {
 		message.Qos = 1
 		message.MessageID = 42
 		message.TopicName = "tenant/t/device/d/ack"
-		message.Payload = []byte(`{"commandId":"cmd","tenantId":"t","deviceId":"d"}`)
+		message.Payload = []byte(`{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`)
 		if err = message.Write(conn); err != nil {
 			brokerResult <- err
 			return
@@ -194,7 +194,7 @@ func TestWorkerDrainsAckPersistenceBeforeDisconnect(t *testing.T) {
 	message.Qos = 1
 	message.MessageID = 43
 	message.TopicName = "tenant/t/device/d/ack"
-	message.Payload = []byte(`{"commandId":"cmd","tenantId":"t","deviceId":"d"}`)
+	message.Payload = []byte(`{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`)
 	if err = message.Write(conn); err != nil {
 		t.Fatal(err)
 	}

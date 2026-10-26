@@ -20,7 +20,7 @@ func boundManagementHandler(t *testing.T) http.Handler {
 	s := newManagementHTTPServer()
 	s.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants("fictional-admin-token", nil)))
 	s.AddRoute(rest.Route{Method: "GET", Path: "/api/v1/tenants", Handler: func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("secret") != "fictional-query-secret" {
+		if r.URL.Query().Get("cursor") != "fictional-query-secret" {
 			t.Error("original query changed")
 		}
 		w.WriteHeader(200)
@@ -56,8 +56,9 @@ func TestManagementTracingNeverExportsRawURLSecrets(t *testing.T) {
 	h := boundManagementHandler(t)
 	for _, route := range []string{"/api/v1/tenants", "/unknown/fictional-path-secret"} {
 		for _, authorized := range []bool{false, true} {
-			r := httptest.NewRequest("GET", route+"?secret=fictional-query-secret&token=fictional-query-token", nil)
+			r := httptest.NewRequest("GET", route+"?cursor=fictional-query-secret", nil)
 			r.Header.Set("Cookie", "fictional-cookie-secret")
+			r.Header.Set("X-Query-Token", "fictional-query-token")
 			r.Header.Set("User-Agent", "fictional-agent-secret")
 			if authorized {
 				r.Header.Set("Authorization", "Bearer fictional-admin-token")

@@ -3,7 +3,7 @@ package platform
 import (
 	"context"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -327,34 +327,33 @@ func statusLabel(status int) string {
 }
 
 func routeLabel(path string) string {
-	switch {
-	case path == "/healthz":
-		return "/healthz"
-	case path == "/readyz":
-		return "/readyz"
-	case path == "/metrics":
-		return "/metrics"
-	case path == "/schemas/mqtt-envelope.json":
-		return "/schemas/mqtt-envelope.json"
-	case path == "/api/v1/tenants":
-		return "/api/v1/tenants"
-	case path == "/api/v1/devices":
-		return "/api/v1/devices"
-	case path == "/api/v1/telemetry":
-		return "/api/v1/telemetry"
-	case path == "/api/v1/commands":
-		return "/api/v1/commands"
-	case strings.HasPrefix(path, "/api/v1/commands/") && strings.HasSuffix(path, "/ack"):
-		return "/api/v1/commands/{id}/ack"
-	case strings.HasPrefix(path, "/api/v1/commands/"):
-		return "/api/v1/commands/{id}"
-	case strings.HasPrefix(path, "/api/v1/devices/") && strings.HasSuffix(path, "/status"):
-		return "/api/v1/devices/{tenantId}/{deviceId}/status"
-	case strings.HasPrefix(path, "/api/v1/devices/") && strings.HasSuffix(path, "/telemetry"):
-		return "/api/v1/devices/{tenantId}/{deviceId}/telemetry"
-	case strings.HasPrefix(path, "/api/v1/devices/"):
-		return "/api/v1/devices/{tenantId}/{deviceId}"
-	default:
+	switch path {
+	case "/healthz", "/readyz", "/metrics", "/schemas/mqtt-envelope.json":
+		return path
+	}
+	r := &http.Request{Method: http.MethodGet, URL: &url.URL{Path: path}}
+	p, err := ManagementRequest(r)
+	if err != nil {
 		return "other"
 	}
+	prefix := "/api/v1/tenants/{tenantId}"
+	switch p.Resource {
+	case "tenants":
+		return "/api/v1/tenants"
+	case "devices":
+		return prefix + "/devices"
+	case "device":
+		return prefix + "/devices/{deviceId}"
+	case "status", "telemetry":
+		return prefix + "/devices/{deviceId}/" + p.Resource
+	case "deviceCommands":
+		return prefix + "/devices/{deviceId}/commands"
+	case "commands":
+		return prefix + "/commands"
+	case "command":
+		return prefix + "/commands/{commandId}"
+	case "acknowledgements":
+		return prefix + "/devices/{deviceId}/commands/{commandId}/acknowledgements"
+	}
+	return "other"
 }

@@ -23,4 +23,5 @@ type CommandResponse struct {
 	Payload   json.RawMessage `json:"payload"`
 	CreatedAt time.Time       `json:"createdAt"`
 	UpdatedAt time.Time       `json:"updatedAt"`
+	Result    *CommandResult  `json:"result,omitempty"`
 }

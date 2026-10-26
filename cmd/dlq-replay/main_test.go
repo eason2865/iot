@@ -89,7 +89,7 @@ func (s *replayAckRecorder) AckCommandContext(_ context.Context, id, tenant, dev
 func TestAckReplayAppliesStateWithoutCommandPublish(t *testing.T) {
 	store := &replayAckRecorder{}
 	item := platform.DeadLetter{Stage: platform.StageCommandAck, SourceTopic: "tenant/t/device/d/ack"}
-	value := []byte(`{"commandId":"cmd","tenantId":"t","deviceId":"d"}`)
+	value := []byte(`{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`)
 	if err := replayAck(context.Background(), item, value, store); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestE2EAckReplayPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := platform.DeadLetter{Stage: platform.StageCommandAck, SourceTopic: "tenant/" + tenant + "/device/d/ack"}
-	value, _ := json.Marshal(platform.CommandAckMessage{CommandID: cmd.ID, TenantID: tenant, DeviceID: "d"})
+	value, _ := json.Marshal(platform.CommandAckMessage{Status: "acked", CommandID: cmd.ID, TenantID: tenant, DeviceID: "d"})
 	for i := 0; i < 2; i++ {
 		if err := replayAck(context.Background(), item, value, store); err != nil {
 			t.Fatal(err)

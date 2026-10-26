@@ -37,6 +37,12 @@ message TelemetryRecord {
   google.protobuf.Timestamp received_at = 8;
 }
 
+message CommandResult {
+  string status = 1;
+  string error_code = 2;
+  bytes payload = 3;
+}
+
 message Command {
   string id = 1;
   string tenant_id = 2;
@@ -45,6 +51,7 @@ message Command {
   bytes payload = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  CommandResult result = 8;
 }
 
 message CreateTenantRequest {
@@ -90,6 +97,7 @@ message ListTenantsResponse {
 message ListDevicesRequest {
   int32 page_size = 1;
   string cursor = 2;
+  string tenant_id = 3;
 }
 
 message ListDevicesResponse {
@@ -102,6 +110,10 @@ message ListTelemetryRequest {
   string device_id = 2;
   int32 page_size = 3;
   string cursor = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  string type = 7;
+  string sort = 8;
 }
 
 message ListTelemetryResponse {
@@ -147,6 +159,11 @@ message ListCommandsRequest {
   int32 page_size = 1;
   string cursor = 2;
   string tenant_id = 3;
+  string device_id = 4;
+  string status = 5;
+  google.protobuf.Timestamp start_time = 6;
+  google.protobuf.Timestamp end_time = 7;
+  string sort = 8;
 }
 
 message ListCommandsResponse {
@@ -170,6 +187,7 @@ message AckCommandRequest {
   string id = 1;
   string tenant_id = 2;
   string device_id = 3;
+  CommandResult result = 4;
 }
 
 message AckCommandResponse {

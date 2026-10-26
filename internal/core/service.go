@@ -32,7 +32,7 @@ func (s *Service) CreateTenant(ctx context.Context, req *corev1.CreateTenantRequ
 	if !contracts.IsValidTenantID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId contains invalid MQTT topic characters")
 	}
-	if err := contracts.ValidateMetadataText(req.GetName()); err != nil {
+	if err := contracts.ValidateTenantName(req.GetName()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	var tenant platform.Tenant
@@ -51,6 +51,9 @@ func (s *Service) CreateTenant(ctx context.Context, req *corev1.CreateTenantRequ
 }
 
 func (s *Service) ListTenants(ctx context.Context, req *corev1.ListTenantsRequest) (*corev1.ListTenantsResponse, error) {
+	if _, err := platform.NormalizePageRequest(int(req.GetPageSize()), req.GetCursor()); err != nil {
+		return nil, mapRepoError(err)
+	}
 	var tenants []platform.Tenant
 	nextCursor := ""
 	if paged, ok := s.repo.(interface {
@@ -89,7 +92,7 @@ func (s *Service) CreateDevice(ctx context.Context, req *corev1.CreateDeviceRequ
 	if err := contracts.ValidateDeviceSecret(req.GetSecret()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := contracts.ValidateMetadataText(req.GetProductId()); err != nil {
+	if err := contracts.ValidateProductID(req.GetProductId()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	var device platform.Device
@@ -118,13 +121,17 @@ func (s *Service) CreateDevice(ctx context.Context, req *corev1.CreateDeviceRequ
 }
 
 func (s *Service) ListDevices(ctx context.Context, req *corev1.ListDevicesRequest) (*corev1.ListDevicesResponse, error) {
+	page, err := platform.NormalizeListRequest(platform.PageRequest{TenantID: req.GetTenantId(), Size: int(req.GetPageSize()), Cursor: req.GetCursor()}, "devices")
+	if err != nil {
+		return nil, mapRepoError(err)
+	}
 	var devices []platform.Device
 	nextCursor := ""
 	if paged, ok := s.repo.(interface {
 		ListDevicesPageContext(context.Context, platform.PageRequest) ([]platform.Device, string, error)
 	}); ok {
 		var err error
-		devices, nextCursor, err = paged.ListDevicesPageContext(ctx, platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		devices, nextCursor, err = paged.ListDevicesPageContext(ctx, page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
@@ -132,12 +139,16 @@ func (s *Service) ListDevices(ctx context.Context, req *corev1.ListDevicesReques
 		ListDevicesPage(platform.PageRequest) ([]platform.Device, string, error)
 	}); ok {
 		var err error
-		devices, nextCursor, err = paged.ListDevicesPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
+		devices, nextCursor, err = paged.ListDevicesPage(page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
 	} else {
-		devices = s.repo.ListDevices()
+		for _, device := range s.repo.ListDevices() {
+			if device.TenantID == page.TenantID {
+				devices = append(devices, device)
+			}
+		}
 	}
 	out := make([]*corev1.Device, 0, len(devices))
 	for _, device := range devices {
@@ -147,6 +158,9 @@ func (s *Service) ListDevices(ctx context.Context, req *corev1.ListDevicesReques
 }
 
 func (s *Service) GetDevice(ctx context.Context, req *corev1.GetDeviceRequest) (*corev1.GetDeviceResponse, error) {
+	if err := contracts.ValidateDeviceIdentity(req.GetTenantId(), req.GetDeviceId()); err != nil {
+		return nil, mapRepoError(err)
+	}
 	var device platform.Device
 	if repo, ok := s.repo.(interface {
 		GetDeviceContext(context.Context, string, string) (platform.Device, error)
@@ -167,6 +181,9 @@ func (s *Service) GetDevice(ctx context.Context, req *corev1.GetDeviceRequest) (
 }
 
 func (s *Service) GetDeviceStatus(ctx context.Context, req *corev1.GetDeviceStatusRequest) (*corev1.GetDeviceStatusResponse, error) {
+	if err := contracts.ValidateDeviceIdentity(req.GetTenantId(), req.GetDeviceId()); err != nil {
+		return nil, mapRepoError(err)
+	}
 	var deviceStatus platform.DeviceStatus
 	if repo, ok := s.repo.(interface {
 		GetDeviceStatusContext(context.Context, string, string) (platform.DeviceStatus, error)
@@ -187,13 +204,17 @@ func (s *Service) GetDeviceStatus(ctx context.Context, req *corev1.GetDeviceStat
 }
 
 func (s *Service) ListTelemetry(ctx context.Context, req *corev1.ListTelemetryRequest) (*corev1.ListTelemetryResponse, error) {
+	page, err := listPageFromRPC(int(req.GetPageSize()), req.GetCursor(), req.GetTenantId(), req.GetDeviceId(), req.GetStartTime(), req.GetEndTime(), req.GetSort(), req.GetType(), "", "telemetry")
+	if err != nil {
+		return nil, mapRepoError(err)
+	}
 	var records []platform.TelemetryRecord
 	nextCursor := ""
 	if paged, ok := s.repo.(interface {
 		ListTelemetryPageContext(context.Context, platform.PageRequest) ([]platform.TelemetryRecord, string, error)
 	}); ok {
 		var err error
-		records, nextCursor, err = paged.ListTelemetryPageContext(ctx, platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId(), DeviceID: req.GetDeviceId()})
+		records, nextCursor, err = paged.ListTelemetryPageContext(ctx, page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
@@ -201,7 +222,7 @@ func (s *Service) ListTelemetry(ctx context.Context, req *corev1.ListTelemetryRe
 		ListTelemetryPage(platform.PageRequest) ([]platform.TelemetryRecord, string, error)
 	}); ok {
 		var err error
-		records, nextCursor, err = paged.ListTelemetryPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId(), DeviceID: req.GetDeviceId()})
+		records, nextCursor, err = paged.ListTelemetryPage(page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
@@ -296,6 +317,10 @@ func (s *Service) CreateCommand(ctx context.Context, req *corev1.CreateCommandRe
 }
 
 func (s *Service) ListCommands(ctx context.Context, req *corev1.ListCommandsRequest) (*corev1.ListCommandsResponse, error) {
+	page, err := listPageFromRPC(int(req.GetPageSize()), req.GetCursor(), req.GetTenantId(), req.GetDeviceId(), req.GetStartTime(), req.GetEndTime(), req.GetSort(), "", req.GetStatus(), "commands")
+	if err != nil {
+		return nil, mapRepoError(err)
+	}
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenantId is required")
 	}
@@ -308,7 +333,7 @@ func (s *Service) ListCommands(ctx context.Context, req *corev1.ListCommandsRequ
 		ListCommandsPageContext(context.Context, platform.PageRequest) ([]platform.Command, string, error)
 	}); ok {
 		var err error
-		commands, nextCursor, err = paged.ListCommandsPageContext(ctx, platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId()})
+		commands, nextCursor, err = paged.ListCommandsPageContext(ctx, page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
@@ -316,7 +341,7 @@ func (s *Service) ListCommands(ctx context.Context, req *corev1.ListCommandsRequ
 		ListCommandsPage(platform.PageRequest) ([]platform.Command, string, error)
 	}); ok {
 		var err error
-		commands, nextCursor, err = paged.ListCommandsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor(), TenantID: req.GetTenantId()})
+		commands, nextCursor, err = paged.ListCommandsPage(page)
 		if err != nil {
 			return nil, mapRepoError(err)
 		}
@@ -335,6 +360,12 @@ func (s *Service) ListCommands(ctx context.Context, req *corev1.ListCommandsRequ
 }
 
 func (s *Service) GetCommand(ctx context.Context, req *corev1.GetCommandRequest) (*corev1.GetCommandResponse, error) {
+	if !contracts.IsValidTenantID(req.GetTenantId()) {
+		return nil, status.Error(codes.InvalidArgument, "valid tenantId is required")
+	}
+	if err := contracts.ValidateCommandID(req.GetId()); err != nil {
+		return nil, mapRepoError(err)
+	}
 	// Command reads are tenant-scoped, like ListCommands and AckCommand. This was
 	// the only lookup that accepted a bare ID, which made the three command
 	// endpoints disagree about their contract.
@@ -364,22 +395,47 @@ func (s *Service) GetCommand(ctx context.Context, req *corev1.GetCommandRequest)
 }
 
 func (s *Service) AckCommand(ctx context.Context, req *corev1.AckCommandRequest) (*corev1.AckCommandResponse, error) {
-	if req.GetId() == "" || req.GetTenantId() == "" || req.GetDeviceId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id, tenantId and deviceId are required")
+	if err := contracts.ValidateDeviceIdentity(req.GetTenantId(), req.GetDeviceId()); err != nil {
+		return nil, mapRepoError(err)
 	}
-	var command platform.Command
-	var err error
-	if repo, ok := s.repo.(interface {
-		AckCommandContext(context.Context, string, string, string) (platform.Command, error)
-	}); ok {
-		command, err = repo.AckCommandContext(ctx, req.GetId(), req.GetTenantId(), req.GetDeviceId())
-	} else {
-		command, err = s.repo.AckCommand(req.GetId(), req.GetTenantId(), req.GetDeviceId())
+	if err := contracts.ValidateCommandID(req.GetId()); err != nil {
+		return nil, mapRepoError(err)
 	}
+	if req.GetResult() == nil {
+		return nil, status.Error(codes.InvalidArgument, "execution result is required")
+	}
+	result, err := contracts.NormalizeCommandResult(contracts.CommandResult{Status: contracts.CommandStatus(req.Result.Status), ErrorCode: req.Result.ErrorCode, Payload: req.Result.Payload})
+	if err != nil {
+		return nil, mapRepoError(err)
+	}
+	store, ok := s.repo.(platform.CommandResultStore)
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "repository does not support execution results")
+	}
+	command, err := store.AckCommandResultContext(ctx, req.GetId(), req.GetTenantId(), req.GetDeviceId(), result)
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
 	return &corev1.AckCommandResponse{Command: commandToPB(command)}, nil
+}
+
+func listPageFromRPC(size int, cursor, tenant, device string, start, end *timestamppb.Timestamp, sort, kindFilter, state, kind string) (platform.PageRequest, error) {
+	page := platform.PageRequest{Size: size, Cursor: cursor, TenantID: tenant, DeviceID: device, Sort: sort, Type: kindFilter, Status: state}
+	if start != nil {
+		if err := start.CheckValid(); err != nil {
+			return page, platform.ErrInvalidPage
+		}
+		page.StartTime = start.AsTime()
+		page.HasStartTime = true
+	}
+	if end != nil {
+		if err := end.CheckValid(); err != nil {
+			return page, platform.ErrInvalidPage
+		}
+		page.EndTime = end.AsTime()
+		page.HasEndTime = true
+	}
+	return platform.NormalizeListRequest(page, kind)
 }
 
 func envelopeFromPB(req *corev1.IngestTelemetryRequest) contracts.Envelope {
@@ -446,7 +502,15 @@ func commandToPB(command platform.Command) *corev1.Command {
 		Payload:   []byte(command.Payload),
 		CreatedAt: toTimestamp(command.CreatedAt),
 		UpdatedAt: toTimestamp(command.UpdatedAt),
+		Result:    resultToPB(command.Result),
 	}
+}
+
+func resultToPB(result *contracts.CommandResult) *corev1.CommandResult {
+	if result == nil {
+		return nil
+	}
+	return &corev1.CommandResult{Status: string(result.Status), ErrorCode: result.ErrorCode, Payload: result.Payload}
 }
 
 func toTimestamp(t time.Time) *timestamppb.Timestamp {
@@ -479,6 +543,8 @@ func mapRepoError(err error) error {
 		return status.Error(codes.DeadlineExceeded, "database operation timed out")
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, "request canceled")
+	case errors.Is(err, platform.ErrAcknowledgementConflict):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, platform.ErrIdempotencyConflict):
 		return status.Error(codes.AlreadyExists, err.Error())
 	case platform.IsAlreadyExists(err):

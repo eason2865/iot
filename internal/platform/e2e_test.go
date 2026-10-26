@@ -105,7 +105,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var status platform.DeviceStatus
-		if err := e2eGetJSON(ts.URL+"/api/v1/devices/"+tenantID+"/"+deviceID+"/status", &status); err != nil {
+		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/status", &status); err != nil {
 			return false
 		}
 		return status.Online && !status.LastSeenAt.IsZero()
@@ -113,7 +113,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var records []platform.TelemetryRecord
-		if err := e2eGetJSON(ts.URL+"/api/v1/devices/"+tenantID+"/"+deviceID+"/telemetry", &records); err != nil {
+		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/telemetry", &records); err != nil {
 			return false
 		}
 		return len(records) >= 1
@@ -142,9 +142,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	}
 
 	var created platform.Command
-	e2ePostJSON(t, ts.URL+"/api/v1/commands", map[string]any{
-		"tenantId": tenantID,
-		"deviceId": deviceID,
+	e2ePostJSON(t, ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
 		"payload": map[string]any{
 			"switch": "on",
 		},
@@ -173,7 +171,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var got platform.Command
-		if err := e2eGetJSON(ts.URL+"/api/v1/commands/"+created.ID+"?tenantId="+tenantID, &got); err != nil {
+		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/commands/"+created.ID, &got); err != nil {
 			return false
 		}
 		return got.Status == platform.CommandStatusAcked
@@ -380,8 +378,7 @@ func e2eCreateTenant(t *testing.T, baseURL, id, name string) {
 
 func e2eCreateDevice(t *testing.T, baseURL, tenantID, deviceID, productID string) {
 	t.Helper()
-	e2ePostJSON(t, baseURL+"/api/v1/devices", map[string]any{
-		"tenantId":  tenantID,
+	e2ePostJSON(t, baseURL+"/api/v1/tenants/"+tenantID+"/devices", map[string]any{
 		"deviceId":  deviceID,
 		"productId": productID,
 		"secret":    "secret-1",

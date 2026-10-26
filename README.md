@@ -159,22 +159,25 @@ Core business endpoints:
 
 - `POST /api/v1/tenants`
 - `GET /api/v1/tenants`
-- `POST /api/v1/devices`
-- `GET /api/v1/devices`
-- `GET /api/v1/devices/{tenantId}/{deviceId}`
-- `GET /api/v1/devices/{tenantId}/{deviceId}/status`
-- `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
-- `POST /api/v1/telemetry`
-- `POST /api/v1/commands`
-- `GET /api/v1/commands?tenantId=<tenant-id>`
-- `GET /api/v1/commands/{id}?tenantId=<tenant-id>`
-- `POST /api/v1/commands/{id}/ack`
+- `POST /api/v1/tenants/{tenantId}/devices`
+- `GET /api/v1/tenants/{tenantId}/devices`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/status`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/commands`
+- `GET /api/v1/tenants/{tenantId}/commands`
+- `GET /api/v1/tenants/{tenantId}/commands/{commandId}`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements`
 
-List endpoints accept `pageSize` and an opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`; the server uses keyset pagination with a maximum of 100 items per page. Invalid cursors, malformed query encoding and invalid page sizes return HTTP 400; storage failures remain server errors.
+Release 2.56 replaces the old routes with tenant-nested resources, without aliases. Tenant identity comes exclusively from the path; existing device identity also belongs in the path. A new device supplies its `deviceId` in the creation body. Tenant-bound tokens can list their own devices.
 
-Every command endpoint is tenant-scoped: the list and the detail both require `tenantId`, and the ACK additionally requires `deviceId`. A command that belongs to another tenant is reported as not found rather than forbidden, so a response never confirms that another tenant's data exists. The list filters by tenant at both the gRPC and PostgreSQL query layers, while `pageSize` and the opaque `cursor` paginate within the tenant.
+Lists accept `pageSize` (default 50, explicit 1–100) and opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`. Telemetry supports `startTime/endTime/type/sort`; commands support `deviceId/status/startTime/endTime/sort`. Times are offset-bearing RFC3339 with at most millisecond precision, using half-open intervals. Telemetry uses device event time; commands use creation time; default order is descending. Unknown, repeated, empty or malformed query parameters return 400. Keep cursor filter scope unchanged.
 
-The REST API is documented by the route table above and by `internal/adminapi`; it no longer ships a separate OpenAPI document.
+Acknowledgements carry `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`. Status is `acked` or `failed`; command responses expose the persisted `result`. Identical results are idempotent; conflicting results return 409. MQTT ACKs also require status, and DLQ replay retains results. Migrate the database and coordinate application, caller and Demo upgrades.
+
+See the [API contract](docs/api-contract.md) for all fields, limits, boundaries and upgrade instructions. REST routes remain owned by `internal/adminapi`, without a separate OpenAPI document.
 
 ## Architecture at a Glance
 
@@ -368,7 +371,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.53`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.56`.
 
 The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -512,8 +515,9 @@ The `iot-core` gRPC port (9001) supports mutual TLS: when enabled, the server re
 `MANAGEMENT_API_TOKEN` grants operator access. Optional `MANAGEMENT_API_TOKENS`
 contains a JSON object mapping token to tenant (`{"token-a":"tenant-a"}`), stored
 in the runtime Secret; the local script accepts `IOT_MANAGEMENT_API_TOKENS`.
-Tenant tokens cannot access global tenant/device lists and writes authorize the
-body tenant rather than an unrelated query parameter.
+Tenant tokens can enumerate their own devices and access tenant-scoped device,
+command and telemetry resources. Global tenant management requires an admin token.
+All business requests authorize the path tenant shared by authorization and handlers.
 
 Worker retries up to 500 persisted, unwritten telemetry records every 30 seconds,
 using an indexed ID cursor and excluding the last two minutes. Tenant filtering
@@ -538,7 +542,7 @@ existing job labels. After a CA rotation rerun the script and recreate Prometheu
 
 ## Request idempotency, durable telemetry and database migrations
 
-POST /api/v1/commands accepts an optional `Idempotency-Key` header (1–128 printable ASCII characters without spaces). Within a tenant, the same key, device and JSON payload returns the original command (HTTP 201) without another command or audit event. Different device/payload returns 409. A key stays reserved while its command row exists. Requests without a key retain their existing behavior; callers should reuse the key when retrying.
+POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands accepts an optional `Idempotency-Key` header (1–128 printable ASCII characters without spaces). Within a tenant, the same key, device and JSON payload returns the original command (HTTP 201) without another command or audit event. Different device/payload returns 409. A key stays reserved while its command row exists. Requests without a key retain their existing behavior; callers should reuse the key when retrying.
 
 The telemetry ingestor disables automatic MQTT ACKs and persists a PostgreSQL inbox row before acknowledging. If Kafka publishing fails or the process is replaced, the worker compensates unfinished TDengine writes. When PostgreSQL is unavailable, a successful Kafka or DLQ write can also establish durability. If every sink fails, the delivery remains unacknowledged and the ingestor exits. Shutdown closes admission and drains pending tasks. This covers messages received by the application; offline devices and broker delivery still require an EMQX session policy.
 
@@ -621,8 +625,8 @@ clearing plaintext and rolls back malformed credentials.
 
 JSONB preflight budgets the expanded numeric/text representation without building
 giant decimal strings. Telemetry payloads have a conservative 1 MiB minus 4096
-bytes budget; other JSONB inputs and individual metadata fields are limited to
-1 MiB. PostgreSQL normalization is checked again before telemetry INSERT. Inputs
+bytes budget; other JSONB inputs are limited to 1 MiB. New tenant names are nonblank,
+1–256 UTF-8 bytes; product IDs are 1–64 ASCII identifier characters. PostgreSQL normalization is checked again before telemetry INSERT. Inputs
 that exceed the budget return HTTP 400. Existing oversized rows are not rewritten.
 Tenant/device/command/telemetry lists use count and a 2 MiB response budget, with
 keyset cursors pointing to the last returned record; pages may be shorter than

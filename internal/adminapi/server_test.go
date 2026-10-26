@@ -237,7 +237,7 @@ func (c *captureCommandClient) CreateCommand(_ context.Context, req *corev1.Crea
 func TestCreateCommandForwardsIdempotencyKey(t *testing.T) {
 	client := &captureCommandClient{}
 	s := &Server{rpc: client}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands", strings.NewReader(`{"tenantId":"t","deviceId":"d","payload":{"switch":"on"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/t/devices/d/commands", strings.NewReader(`{"payload":{"switch":"on"}}`))
 	req.Header.Set("Idempotency-Key", "retry-1")
 	rec := httptest.NewRecorder()
 	s.createCommandHandler(rec, req)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"iot/internal/contracts"
@@ -122,278 +121,222 @@ func (a *App) handleTenants(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		var req struct {
-			TenantID  string `json:"tenantId"`
-			DeviceID  string `json:"deviceId"`
-			ProductID string `json:"productId"`
-			Secret    string `json:"secret"`
-		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if req.TenantID == "" || req.DeviceID == "" || req.ProductID == "" || req.Secret == "" {
-			if a.metrics != nil {
-				a.metrics.IncDevice("error")
-			}
-			writeError(w, http.StatusBadRequest, "tenantId, deviceId, productId and secret are required")
-			return
-		}
-		if !contracts.IsValidTenantID(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
-			if a.metrics != nil {
-				a.metrics.IncDevice("error")
-			}
-			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
-			return
-		}
-		device, err := a.store.CreateDevice(Device{
-			TenantID:  req.TenantID,
-			DeviceID:  req.DeviceID,
-			ProductID: req.ProductID,
-			Secret:    req.Secret,
-		})
-		if err != nil {
-			if a.metrics != nil {
-				a.metrics.IncDevice("error")
-			}
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
-		if a.metrics != nil {
-			a.metrics.IncDevice("ok")
-		}
-		writeJSON(w, http.StatusCreated, device)
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, a.store.ListDevices())
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if r.Method == http.MethodPost {
+		var done func()
+		w, done = a.observeBusinessOutcome(w, "device", "created")
+		defer done()
 	}
+	p, _ := ManagementRequest(r)
+	if r.Method == http.MethodGet {
+		var devices []Device
+		for _, d := range a.store.ListDevices() {
+			if d.TenantID == p.TenantID {
+				d.Secret = ""
+				devices = append(devices, d)
+			}
+		}
+		writeJSON(w, 200, devices)
+		return
+	}
+	var req struct {
+		DeviceID  string `json:"deviceId"`
+		ProductID string `json:"productId"`
+		Secret    string `json:"secret"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	d, err := a.store.CreateDevice(Device{TenantID: p.TenantID, DeviceID: req.DeviceID, ProductID: req.ProductID, Secret: req.Secret})
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	d.Secret = ""
+	writeJSON(w, 201, d)
 }
 
 func (a *App) handleTelemetry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if r.Method == http.MethodPost {
+		var done func()
+		w, done = a.observeBusinessOutcome(w, "telemetry", "")
+		defer done()
+	}
+	p, _ := ManagementRequest(r)
+	var req struct {
+		MsgID   string          `json:"msgId"`
+		Ts      int64           `json:"ts"`
+		Type    string          `json:"type"`
+		Version string          `json:"version"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
-	env, err := contracts.ParseEnvelope(mustReadBody(r))
-	if err != nil {
-		if a.metrics != nil {
-			a.metrics.IncTelemetry("error")
-		}
-		writeError(w, http.StatusBadRequest, err.Error())
+	env := contracts.Envelope{MsgID: req.MsgID, TenantID: p.TenantID, DeviceID: p.DeviceID, Ts: req.Ts, Type: req.Type, Version: req.Version, Payload: req.Payload}
+	if err := contracts.ValidateEnvelope(env); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
-	record, err := a.store.RecordTelemetry(env)
-	if err != nil {
-		if a.metrics != nil {
-			a.metrics.IncTelemetry("error")
-		}
-		writeError(w, http.StatusBadRequest, err.Error())
+	rec, err := a.store.RecordTelemetry(env)
+	if err != nil && !IsTelemetryDuplicate(err) {
+		writeError(w, 400, err.Error())
 		return
 	}
-	if err := a.publisher.PublishTelemetry(r.Context(), record); err != nil {
-		if a.metrics != nil {
-			a.metrics.IncTelemetry("error")
-		}
-		writeError(w, http.StatusBadGateway, err.Error())
+	if err = a.publisher.PublishTelemetry(r.Context(), rec); err != nil {
+		writeError(w, 502, err.Error())
 		return
 	}
-	if a.metrics != nil {
-		a.metrics.IncTelemetry("ok")
-	}
-	writeJSON(w, http.StatusAccepted, record)
+	writeJSON(w, 202, rec)
 }
 
 func (a *App) handleCommands(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		var req struct {
-			TenantID string          `json:"tenantId"`
-			DeviceID string          `json:"deviceId"`
-			Payload  json.RawMessage `json:"payload"`
-		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if req.TenantID == "" || req.DeviceID == "" {
-			if a.metrics != nil {
-				a.metrics.IncCommand("created", "error")
-			}
-			writeError(w, http.StatusBadRequest, "tenantId and deviceId are required")
-			return
-		}
-		if !contracts.IsValidTenantID(req.TenantID) || !contracts.IsValidTopicPart(req.DeviceID) {
-			if a.metrics != nil {
-				a.metrics.IncCommand("created", "error")
-			}
-			writeError(w, http.StatusBadRequest, "tenantId or deviceId contains invalid MQTT topic characters")
-			return
-		}
-		var cmd Command
-		var err error
-		key := r.Header.Get("Idempotency-Key")
-		if err = contracts.ValidateIdempotencyKey(key); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if creator, ok := a.store.(CommandCreator); ok {
-			cmd, err = creator.CreateCommandWithKey(r.Context(), req.TenantID, req.DeviceID, key, req.Payload)
-		} else if key != "" {
-			writeError(w, http.StatusBadRequest, "repository does not support command idempotency")
-			return
-		} else {
-			cmd, err = a.store.CreateCommand(req.TenantID, req.DeviceID, req.Payload)
-		}
-		if err != nil {
-			if a.metrics != nil {
-				a.metrics.IncCommand("created", "error")
-			}
-			if errors.Is(err, ErrIdempotencyConflict) {
-				writeError(w, http.StatusConflict, err.Error())
-			} else {
-				writeError(w, http.StatusBadRequest, err.Error())
-			}
-			return
-		}
-		if err := a.publisher.PublishCommand(r.Context(), cmd); err != nil {
-			if a.metrics != nil {
-				a.metrics.IncCommand("created", "error")
-			}
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-		if a.metrics != nil {
-			a.metrics.IncCommand("created", "ok")
-		}
-		writeJSON(w, http.StatusCreated, commandResponse(cmd))
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, commandResponses(a.store.ListCommands()))
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if r.Method == http.MethodPost {
+		var done func()
+		w, done = a.observeBusinessOutcome(w, "command", "created")
+		defer done()
 	}
+	p, _ := ManagementRequest(r)
+	if r.Method == http.MethodGet {
+		var cmds []Command
+		for _, c := range a.store.ListCommands() {
+			if c.TenantID == p.TenantID {
+				cmds = append(cmds, c)
+			}
+		}
+		writeJSON(w, 200, commandResponses(cmds))
+		return
+	}
+	var req struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err := ValidateCommandInput(p.TenantID, p.DeviceID, req.Payload); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	key := r.Header.Get("Idempotency-Key")
+	if err := contracts.ValidateIdempotencyKey(key); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	var cmd Command
+	var err error
+	if store, ok := a.store.(CommandCreator); ok {
+		cmd, err = store.CreateCommandWithKey(r.Context(), p.TenantID, p.DeviceID, key, req.Payload)
+	} else {
+		cmd, err = a.store.CreateCommand(p.TenantID, p.DeviceID, req.Payload)
+	}
+	if err != nil {
+		code := 400
+		if errors.Is(err, ErrIdempotencyConflict) {
+			code = 409
+		}
+		writeError(w, code, err.Error())
+		return
+	}
+	if err = a.publisher.PublishCommand(r.Context(), cmd); err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 201, commandResponse(cmd))
 }
 
 func (a *App) handleCommandByID(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/commands/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) == 0 || parts[0] == "" {
-		writeError(w, http.StatusNotFound, "not found")
+	if r.Method == http.MethodPost {
+		var done func()
+		w, done = a.observeBusinessOutcome(w, "command", "acked")
+		defer done()
+	}
+	p, _ := ManagementRequest(r)
+	if r.Method == http.MethodGet {
+		cmd, ok := a.store.GetCommand(p.CommandID)
+		if !ok || cmd.TenantID != p.TenantID {
+			writeError(w, 404, "command not found")
+			return
+		}
+		writeJSON(w, 200, commandResponse(cmd))
 		return
 	}
-	id := parts[0]
-	if len(parts) == 1 && r.Method == http.MethodGet {
-		// Command reads are tenant-scoped, mirroring internal/adminapi and
-		// iot-core. The harness exists to validate the REST contract, so it must
-		// not serve a shape the production gateway would refuse.
-		tenantID := r.URL.Query().Get("tenantId")
-		if tenantID == "" {
-			writeError(w, http.StatusBadRequest, "tenantId is required")
-			return
-		}
-		cmd, ok := a.store.GetCommand(id)
-		if !ok || cmd.TenantID != tenantID {
-			writeError(w, http.StatusNotFound, "command not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, commandResponse(cmd))
+	var result contracts.CommandResult
+	if err := decodeJSON(r, &result); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
-	if len(parts) == 2 && parts[1] == "ack" && r.Method == http.MethodPost {
-		var req struct {
-			TenantID string `json:"tenantId"`
-			DeviceID string `json:"deviceId"`
-		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		cmd, err := a.store.AckCommand(id, req.TenantID, req.DeviceID)
-		if err != nil {
-			if a.metrics != nil {
-				a.metrics.IncCommand("acked", "error")
-			}
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if a.metrics != nil {
-			a.metrics.IncCommand("acked", "ok")
-		}
-		writeJSON(w, http.StatusOK, commandResponse(cmd))
+	store, ok := a.store.(CommandResultStore)
+	if !ok {
+		writeError(w, 400, "result storage unavailable")
 		return
 	}
-	writeError(w, http.StatusNotFound, "not found")
+	cmd, err := store.AckCommandResultContext(r.Context(), p.CommandID, p.TenantID, p.DeviceID, result)
+	if err != nil {
+		code := 400
+		if errors.Is(err, ErrAcknowledgementConflict) {
+			code = 409
+		}
+		writeError(w, code, err.Error())
+		return
+	}
+	writeJSON(w, 200, commandResponse(cmd))
 }
 
-// commandResponse projects a stored command onto the management API shape. The
-// store's Command also carries dispatcher bookkeeping (DispatchAttempts,
-// DeadlineAt) for the Kafka event and the dispatch loop; those are not part of
-// the REST contract, so marshalling the domain type here would make this
-// harness disagree with internal/adminapi. See contracts.CommandResponse.
 func commandResponse(cmd Command) contracts.CommandResponse {
-	return contracts.CommandResponse{
-		ID:        cmd.ID,
-		TenantID:  cmd.TenantID,
-		DeviceID:  cmd.DeviceID,
-		Status:    cmd.Status,
-		Payload:   cmd.Payload,
-		CreatedAt: cmd.CreatedAt,
-		UpdatedAt: cmd.UpdatedAt,
-	}
+	return contracts.CommandResponse{ID: cmd.ID, TenantID: cmd.TenantID, DeviceID: cmd.DeviceID, Status: cmd.Status, Payload: cmd.Payload, CreatedAt: cmd.CreatedAt, UpdatedAt: cmd.UpdatedAt, Result: cmd.Result}
 }
-
-func commandResponses(commands []Command) []contracts.CommandResponse {
-	out := make([]contracts.CommandResponse, 0, len(commands))
-	for _, cmd := range commands {
+func commandResponses(cmds []Command) []contracts.CommandResponse {
+	out := make([]contracts.CommandResponse, 0, len(cmds))
+	for _, cmd := range cmds {
 		out = append(out, commandResponse(cmd))
 	}
 	return out
 }
 
 func (a *App) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	tenantID, deviceID := parts[0], parts[1]
-	if len(parts) == 2 && r.Method == http.MethodGet {
-		device, ok := a.store.GetDevice(tenantID, deviceID)
+	p, _ := ManagementRequest(r)
+	switch p.Resource {
+	case "device":
+		d, ok := a.store.GetDevice(p.TenantID, p.DeviceID)
 		if !ok {
-			writeError(w, http.StatusNotFound, "device not found")
+			writeError(w, 404, "device not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, device)
-		return
-	}
-	if len(parts) < 3 {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	action := parts[2]
-	switch action {
+		d.Secret = ""
+		writeJSON(w, 200, d)
 	case "status":
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		status, ok := a.store.GetDeviceStatus(tenantID, deviceID)
+		state, ok := a.store.GetDeviceStatus(p.TenantID, p.DeviceID)
 		if !ok {
-			writeError(w, http.StatusNotFound, "device not found")
+			writeError(w, 404, "device not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, status)
+		writeJSON(w, 200, state)
 	case "telemetry":
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeJSON(w, 200, a.store.ListTelemetry(p.TenantID, p.DeviceID))
+	default:
+		writeError(w, 404, "not found")
+	}
+}
+
+func (a *App) observeBusinessOutcome(w http.ResponseWriter, kind, operation string) (http.ResponseWriter, func()) {
+	rw := &observedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+	return rw, func() {
+		if a.metrics == nil {
 			return
 		}
-		records := a.store.ListTelemetry(tenantID, deviceID)
-		writeJSON(w, http.StatusOK, records)
-	default:
-		writeError(w, http.StatusNotFound, "not found")
+		result := "ok"
+		if rw.status >= 400 {
+			result = "error"
+		}
+		switch kind {
+		case "device":
+			a.metrics.IncDevice(result)
+		case "telemetry":
+			a.metrics.IncTelemetry(result)
+		case "command":
+			a.metrics.IncCommand(operation, result)
+		}
 	}
 }

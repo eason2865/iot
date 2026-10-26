@@ -21,6 +21,7 @@ type CommandAckMessage struct {
 	CommandID string          `json:"commandId"`
 	TenantID  string          `json:"tenantId"`
 	DeviceID  string          `json:"deviceId"`
-	Status    string          `json:"status,omitempty"`
+	Status    string          `json:"status"`
+	ErrorCode string          `json:"errorCode,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }

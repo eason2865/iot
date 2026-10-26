@@ -244,9 +244,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 		for di := 0; di < devicesPerTenant; di++ {
 			deviceID := deviceIDs[ti*devicesPerTenant+di]
 			var cmd platform.Command
-			e2ePostJSON(t, ts.URL+"/api/v1/commands", map[string]any{
-				"tenantId": tenantID,
-				"deviceId": deviceID,
+			e2ePostJSON(t, ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
 				"payload": map[string]any{
 					"switch": "toggle",
 					"idx":    di,
@@ -269,7 +267,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	})
 
 	waitFor(t, 20*time.Second, func() bool {
-		_, err := e2eGetJSONBody(ts.URL + "/api/v1/devices/" + tenantIDs[0] + "/" + deviceIDs[0] + "/status")
+		_, err := e2eGetJSONBody(ts.URL + "/api/v1/tenants/" + tenantIDs[0] + "/devices/" + deviceIDs[0] + "/status")
 		return err == nil
 	})
 

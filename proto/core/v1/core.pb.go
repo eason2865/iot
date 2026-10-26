@@ -318,6 +318,66 @@ func (x *TelemetryRecord) GetReceivedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type CommandResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ErrorCode     string                 `protobuf:"bytes,2,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandResult) Reset() {
+	*x = CommandResult{}
+	mi := &file_proto_core_v1_core_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandResult) ProtoMessage() {}
+
+func (x *CommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_core_v1_core_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
+func (*CommandResult) Descriptor() ([]byte, []int) {
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CommandResult) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *CommandResult) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *CommandResult) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
 type Command struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -327,13 +387,14 @@ type Command struct {
 	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Result        *CommandResult         `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[4]
+	mi := &file_proto_core_v1_core_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -345,7 +406,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[4]
+	mi := &file_proto_core_v1_core_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -358,7 +419,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{4}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Command) GetId() string {
@@ -410,6 +471,13 @@ func (x *Command) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Command) GetResult() *CommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 type CreateTenantRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -420,7 +488,7 @@ type CreateTenantRequest struct {
 
 func (x *CreateTenantRequest) Reset() {
 	*x = CreateTenantRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[5]
+	mi := &file_proto_core_v1_core_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -432,7 +500,7 @@ func (x *CreateTenantRequest) String() string {
 func (*CreateTenantRequest) ProtoMessage() {}
 
 func (x *CreateTenantRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[5]
+	mi := &file_proto_core_v1_core_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -445,7 +513,7 @@ func (x *CreateTenantRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTenantRequest.ProtoReflect.Descriptor instead.
 func (*CreateTenantRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{5}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateTenantRequest) GetId() string {
@@ -474,7 +542,7 @@ type CreateDeviceRequest struct {
 
 func (x *CreateDeviceRequest) Reset() {
 	*x = CreateDeviceRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[6]
+	mi := &file_proto_core_v1_core_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -486,7 +554,7 @@ func (x *CreateDeviceRequest) String() string {
 func (*CreateDeviceRequest) ProtoMessage() {}
 
 func (x *CreateDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[6]
+	mi := &file_proto_core_v1_core_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -499,7 +567,7 @@ func (x *CreateDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDeviceRequest.ProtoReflect.Descriptor instead.
 func (*CreateDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{6}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateDeviceRequest) GetTenantId() string {
@@ -540,7 +608,7 @@ type GetDeviceRequest struct {
 
 func (x *GetDeviceRequest) Reset() {
 	*x = GetDeviceRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[7]
+	mi := &file_proto_core_v1_core_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -552,7 +620,7 @@ func (x *GetDeviceRequest) String() string {
 func (*GetDeviceRequest) ProtoMessage() {}
 
 func (x *GetDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[7]
+	mi := &file_proto_core_v1_core_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -565,7 +633,7 @@ func (x *GetDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDeviceRequest.ProtoReflect.Descriptor instead.
 func (*GetDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{7}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetDeviceRequest) GetTenantId() string {
@@ -591,7 +659,7 @@ type GetDeviceResponse struct {
 
 func (x *GetDeviceResponse) Reset() {
 	*x = GetDeviceResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[8]
+	mi := &file_proto_core_v1_core_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -603,7 +671,7 @@ func (x *GetDeviceResponse) String() string {
 func (*GetDeviceResponse) ProtoMessage() {}
 
 func (x *GetDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[8]
+	mi := &file_proto_core_v1_core_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -616,7 +684,7 @@ func (x *GetDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDeviceResponse.ProtoReflect.Descriptor instead.
 func (*GetDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{8}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetDeviceResponse) GetDevice() *Device {
@@ -636,7 +704,7 @@ type GetDeviceStatusRequest struct {
 
 func (x *GetDeviceStatusRequest) Reset() {
 	*x = GetDeviceStatusRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[9]
+	mi := &file_proto_core_v1_core_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +716,7 @@ func (x *GetDeviceStatusRequest) String() string {
 func (*GetDeviceStatusRequest) ProtoMessage() {}
 
 func (x *GetDeviceStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[9]
+	mi := &file_proto_core_v1_core_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +729,7 @@ func (x *GetDeviceStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDeviceStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetDeviceStatusRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{9}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetDeviceStatusRequest) GetTenantId() string {
@@ -687,7 +755,7 @@ type GetDeviceStatusResponse struct {
 
 func (x *GetDeviceStatusResponse) Reset() {
 	*x = GetDeviceStatusResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[10]
+	mi := &file_proto_core_v1_core_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -699,7 +767,7 @@ func (x *GetDeviceStatusResponse) String() string {
 func (*GetDeviceStatusResponse) ProtoMessage() {}
 
 func (x *GetDeviceStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[10]
+	mi := &file_proto_core_v1_core_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -712,7 +780,7 @@ func (x *GetDeviceStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDeviceStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetDeviceStatusResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{10}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetDeviceStatusResponse) GetStatus() *DeviceStatus {
@@ -732,7 +800,7 @@ type ListTenantsRequest struct {
 
 func (x *ListTenantsRequest) Reset() {
 	*x = ListTenantsRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[11]
+	mi := &file_proto_core_v1_core_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -744,7 +812,7 @@ func (x *ListTenantsRequest) String() string {
 func (*ListTenantsRequest) ProtoMessage() {}
 
 func (x *ListTenantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[11]
+	mi := &file_proto_core_v1_core_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -757,7 +825,7 @@ func (x *ListTenantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantsRequest.ProtoReflect.Descriptor instead.
 func (*ListTenantsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{11}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListTenantsRequest) GetPageSize() int32 {
@@ -784,7 +852,7 @@ type ListTenantsResponse struct {
 
 func (x *ListTenantsResponse) Reset() {
 	*x = ListTenantsResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[12]
+	mi := &file_proto_core_v1_core_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -796,7 +864,7 @@ func (x *ListTenantsResponse) String() string {
 func (*ListTenantsResponse) ProtoMessage() {}
 
 func (x *ListTenantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[12]
+	mi := &file_proto_core_v1_core_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,7 +877,7 @@ func (x *ListTenantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantsResponse.ProtoReflect.Descriptor instead.
 func (*ListTenantsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{12}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListTenantsResponse) GetTenants() []*Tenant {
@@ -830,13 +898,14 @@ type ListDevicesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	TenantId      string                 `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListDevicesRequest) Reset() {
 	*x = ListDevicesRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[13]
+	mi := &file_proto_core_v1_core_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -848,7 +917,7 @@ func (x *ListDevicesRequest) String() string {
 func (*ListDevicesRequest) ProtoMessage() {}
 
 func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[13]
+	mi := &file_proto_core_v1_core_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -861,7 +930,7 @@ func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDevicesRequest.ProtoReflect.Descriptor instead.
 func (*ListDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{13}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListDevicesRequest) GetPageSize() int32 {
@@ -878,6 +947,13 @@ func (x *ListDevicesRequest) GetCursor() string {
 	return ""
 }
 
+func (x *ListDevicesRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
 type ListDevicesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Devices       []*Device              `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
@@ -888,7 +964,7 @@ type ListDevicesResponse struct {
 
 func (x *ListDevicesResponse) Reset() {
 	*x = ListDevicesResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[14]
+	mi := &file_proto_core_v1_core_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -900,7 +976,7 @@ func (x *ListDevicesResponse) String() string {
 func (*ListDevicesResponse) ProtoMessage() {}
 
 func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[14]
+	mi := &file_proto_core_v1_core_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -913,7 +989,7 @@ func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDevicesResponse.ProtoReflect.Descriptor instead.
 func (*ListDevicesResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{14}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListDevicesResponse) GetDevices() []*Device {
@@ -936,13 +1012,17 @@ type ListTelemetryRequest struct {
 	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	PageSize      int32                  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	Type          string                 `protobuf:"bytes,7,opt,name=type,proto3" json:"type,omitempty"`
+	Sort          string                 `protobuf:"bytes,8,opt,name=sort,proto3" json:"sort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListTelemetryRequest) Reset() {
 	*x = ListTelemetryRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[15]
+	mi := &file_proto_core_v1_core_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1034,7 @@ func (x *ListTelemetryRequest) String() string {
 func (*ListTelemetryRequest) ProtoMessage() {}
 
 func (x *ListTelemetryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[15]
+	mi := &file_proto_core_v1_core_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1047,7 @@ func (x *ListTelemetryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTelemetryRequest.ProtoReflect.Descriptor instead.
 func (*ListTelemetryRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{15}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListTelemetryRequest) GetTenantId() string {
@@ -998,6 +1078,34 @@ func (x *ListTelemetryRequest) GetCursor() string {
 	return ""
 }
 
+func (x *ListTelemetryRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *ListTelemetryRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *ListTelemetryRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ListTelemetryRequest) GetSort() string {
+	if x != nil {
+		return x.Sort
+	}
+	return ""
+}
+
 type ListTelemetryResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*TelemetryRecord     `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
@@ -1008,7 +1116,7 @@ type ListTelemetryResponse struct {
 
 func (x *ListTelemetryResponse) Reset() {
 	*x = ListTelemetryResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[16]
+	mi := &file_proto_core_v1_core_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1128,7 @@ func (x *ListTelemetryResponse) String() string {
 func (*ListTelemetryResponse) ProtoMessage() {}
 
 func (x *ListTelemetryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[16]
+	mi := &file_proto_core_v1_core_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1141,7 @@ func (x *ListTelemetryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTelemetryResponse.ProtoReflect.Descriptor instead.
 func (*ListTelemetryResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{16}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListTelemetryResponse) GetRecords() []*TelemetryRecord {
@@ -1065,7 +1173,7 @@ type IngestTelemetryRequest struct {
 
 func (x *IngestTelemetryRequest) Reset() {
 	*x = IngestTelemetryRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[17]
+	mi := &file_proto_core_v1_core_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1077,7 +1185,7 @@ func (x *IngestTelemetryRequest) String() string {
 func (*IngestTelemetryRequest) ProtoMessage() {}
 
 func (x *IngestTelemetryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[17]
+	mi := &file_proto_core_v1_core_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1090,7 +1198,7 @@ func (x *IngestTelemetryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestTelemetryRequest.ProtoReflect.Descriptor instead.
 func (*IngestTelemetryRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{17}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *IngestTelemetryRequest) GetMsgId() string {
@@ -1151,7 +1259,7 @@ type IngestTelemetryResponse struct {
 
 func (x *IngestTelemetryResponse) Reset() {
 	*x = IngestTelemetryResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[18]
+	mi := &file_proto_core_v1_core_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1163,7 +1271,7 @@ func (x *IngestTelemetryResponse) String() string {
 func (*IngestTelemetryResponse) ProtoMessage() {}
 
 func (x *IngestTelemetryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[18]
+	mi := &file_proto_core_v1_core_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1176,7 +1284,7 @@ func (x *IngestTelemetryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestTelemetryResponse.ProtoReflect.Descriptor instead.
 func (*IngestTelemetryResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{18}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *IngestTelemetryResponse) GetRecord() *TelemetryRecord {
@@ -1195,7 +1303,7 @@ type RecordTelemetryRequest struct {
 
 func (x *RecordTelemetryRequest) Reset() {
 	*x = RecordTelemetryRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[19]
+	mi := &file_proto_core_v1_core_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1207,7 +1315,7 @@ func (x *RecordTelemetryRequest) String() string {
 func (*RecordTelemetryRequest) ProtoMessage() {}
 
 func (x *RecordTelemetryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[19]
+	mi := &file_proto_core_v1_core_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1220,7 +1328,7 @@ func (x *RecordTelemetryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordTelemetryRequest.ProtoReflect.Descriptor instead.
 func (*RecordTelemetryRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{19}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RecordTelemetryRequest) GetTelemetry() *TelemetryRecord {
@@ -1239,7 +1347,7 @@ type RecordTelemetryResponse struct {
 
 func (x *RecordTelemetryResponse) Reset() {
 	*x = RecordTelemetryResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[20]
+	mi := &file_proto_core_v1_core_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1359,7 @@ func (x *RecordTelemetryResponse) String() string {
 func (*RecordTelemetryResponse) ProtoMessage() {}
 
 func (x *RecordTelemetryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[20]
+	mi := &file_proto_core_v1_core_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1372,7 @@ func (x *RecordTelemetryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordTelemetryResponse.ProtoReflect.Descriptor instead.
 func (*RecordTelemetryResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{20}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RecordTelemetryResponse) GetRecord() *TelemetryRecord {
@@ -1287,7 +1395,7 @@ type CreateCommandRequest struct {
 
 func (x *CreateCommandRequest) Reset() {
 	*x = CreateCommandRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[21]
+	mi := &file_proto_core_v1_core_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1299,7 +1407,7 @@ func (x *CreateCommandRequest) String() string {
 func (*CreateCommandRequest) ProtoMessage() {}
 
 func (x *CreateCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[21]
+	mi := &file_proto_core_v1_core_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1312,7 +1420,7 @@ func (x *CreateCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCommandRequest.ProtoReflect.Descriptor instead.
 func (*CreateCommandRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{21}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CreateCommandRequest) GetTenantId() string {
@@ -1352,7 +1460,7 @@ type CreateCommandResponse struct {
 
 func (x *CreateCommandResponse) Reset() {
 	*x = CreateCommandResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[22]
+	mi := &file_proto_core_v1_core_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1364,7 +1472,7 @@ func (x *CreateCommandResponse) String() string {
 func (*CreateCommandResponse) ProtoMessage() {}
 
 func (x *CreateCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[22]
+	mi := &file_proto_core_v1_core_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1485,7 @@ func (x *CreateCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCommandResponse.ProtoReflect.Descriptor instead.
 func (*CreateCommandResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{22}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CreateCommandResponse) GetCommand() *Command {
@@ -1392,13 +1500,18 @@ type ListCommandsRequest struct {
 	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	TenantId      string                 `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	Sort          string                 `protobuf:"bytes,8,opt,name=sort,proto3" json:"sort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListCommandsRequest) Reset() {
 	*x = ListCommandsRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[23]
+	mi := &file_proto_core_v1_core_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1523,7 @@ func (x *ListCommandsRequest) String() string {
 func (*ListCommandsRequest) ProtoMessage() {}
 
 func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[23]
+	mi := &file_proto_core_v1_core_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1536,7 @@ func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsRequest.ProtoReflect.Descriptor instead.
 func (*ListCommandsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{23}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListCommandsRequest) GetPageSize() int32 {
@@ -1447,6 +1560,41 @@ func (x *ListCommandsRequest) GetTenantId() string {
 	return ""
 }
 
+func (x *ListCommandsRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *ListCommandsRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ListCommandsRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *ListCommandsRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *ListCommandsRequest) GetSort() string {
+	if x != nil {
+		return x.Sort
+	}
+	return ""
+}
+
 type ListCommandsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Commands      []*Command             `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
@@ -1457,7 +1605,7 @@ type ListCommandsResponse struct {
 
 func (x *ListCommandsResponse) Reset() {
 	*x = ListCommandsResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[24]
+	mi := &file_proto_core_v1_core_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1469,7 +1617,7 @@ func (x *ListCommandsResponse) String() string {
 func (*ListCommandsResponse) ProtoMessage() {}
 
 func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[24]
+	mi := &file_proto_core_v1_core_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1482,7 +1630,7 @@ func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCommandsResponse.ProtoReflect.Descriptor instead.
 func (*ListCommandsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{24}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListCommandsResponse) GetCommands() []*Command {
@@ -1512,7 +1660,7 @@ type GetCommandRequest struct {
 
 func (x *GetCommandRequest) Reset() {
 	*x = GetCommandRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[25]
+	mi := &file_proto_core_v1_core_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1524,7 +1672,7 @@ func (x *GetCommandRequest) String() string {
 func (*GetCommandRequest) ProtoMessage() {}
 
 func (x *GetCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[25]
+	mi := &file_proto_core_v1_core_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1537,7 +1685,7 @@ func (x *GetCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCommandRequest.ProtoReflect.Descriptor instead.
 func (*GetCommandRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{25}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetCommandRequest) GetId() string {
@@ -1563,7 +1711,7 @@ type GetCommandResponse struct {
 
 func (x *GetCommandResponse) Reset() {
 	*x = GetCommandResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[26]
+	mi := &file_proto_core_v1_core_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1723,7 @@ func (x *GetCommandResponse) String() string {
 func (*GetCommandResponse) ProtoMessage() {}
 
 func (x *GetCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[26]
+	mi := &file_proto_core_v1_core_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1736,7 @@ func (x *GetCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCommandResponse.ProtoReflect.Descriptor instead.
 func (*GetCommandResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{26}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetCommandResponse) GetCommand() *Command {
@@ -1603,13 +1751,14 @@ type AckCommandRequest struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	TenantId      string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	DeviceId      string                 `protobuf:"bytes,3,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	Result        *CommandResult         `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AckCommandRequest) Reset() {
 	*x = AckCommandRequest{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[27]
+	mi := &file_proto_core_v1_core_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1621,7 +1770,7 @@ func (x *AckCommandRequest) String() string {
 func (*AckCommandRequest) ProtoMessage() {}
 
 func (x *AckCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[27]
+	mi := &file_proto_core_v1_core_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1634,7 +1783,7 @@ func (x *AckCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckCommandRequest.ProtoReflect.Descriptor instead.
 func (*AckCommandRequest) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{27}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AckCommandRequest) GetId() string {
@@ -1658,6 +1807,13 @@ func (x *AckCommandRequest) GetDeviceId() string {
 	return ""
 }
 
+func (x *AckCommandRequest) GetResult() *CommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 type AckCommandResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Command       *Command               `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
@@ -1667,7 +1823,7 @@ type AckCommandResponse struct {
 
 func (x *AckCommandResponse) Reset() {
 	*x = AckCommandResponse{}
-	mi := &file_proto_core_v1_core_proto_msgTypes[28]
+	mi := &file_proto_core_v1_core_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1679,7 +1835,7 @@ func (x *AckCommandResponse) String() string {
 func (*AckCommandResponse) ProtoMessage() {}
 
 func (x *AckCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_core_v1_core_proto_msgTypes[28]
+	mi := &file_proto_core_v1_core_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1692,7 +1848,7 @@ func (x *AckCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckCommandResponse.ProtoReflect.Descriptor instead.
 func (*AckCommandResponse) Descriptor() ([]byte, []int) {
-	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{28}
+	return file_proto_core_v1_core_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AckCommandResponse) GetCommand() *Command {
@@ -1733,7 +1889,12 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\aversion\x18\x06 \x01(\tR\aversion\x12\x18\n" +
 	"\apayload\x18\a \x01(\fR\apayload\x12;\n" +
 	"\vreceived_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"receivedAt\"\xfb\x01\n" +
+	"receivedAt\"`\n" +
+	"\rCommandResult\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x02 \x01(\tR\terrorCode\x12\x18\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\"\xab\x02\n" +
 	"\aCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1b\n" +
@@ -1743,7 +1904,8 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"9\n" +
+	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12.\n" +
+	"\x06result\x18\b \x01(\v2\x16.core.v1.CommandResultR\x06result\"9\n" +
 	"\x13CreateTenantRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\x86\x01\n" +
@@ -1769,19 +1931,25 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\x13ListTenantsResponse\x12)\n" +
 	"\atenants\x18\x01 \x03(\v2\x0f.core.v1.TenantR\atenants\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"I\n" +
+	"nextCursor\"f\n" +
 	"\x12ListDevicesRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"a\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x1b\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\"a\n" +
 	"\x13ListDevicesResponse\x12)\n" +
 	"\adevices\x18\x01 \x03(\v2\x0f.core.v1.DeviceR\adevices\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\x85\x01\n" +
+	"nextCursor\"\x9f\x02\n" +
 	"\x14ListTelemetryRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"l\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x129\n" +
+	"\n" +
+	"start_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x12\n" +
+	"\x04type\x18\a \x01(\tR\x04type\x12\x12\n" +
+	"\x04sort\x18\b \x01(\tR\x04sort\"l\n" +
 	"\x15ListTelemetryResponse\x122\n" +
 	"\arecords\x18\x01 \x03(\v2\x18.core.v1.TelemetryRecordR\arecords\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1806,11 +1974,17 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\apayload\x18\x03 \x01(\fR\apayload\x12'\n" +
 	"\x0fidempotency_key\x18\x04 \x01(\tR\x0eidempotencyKey\"C\n" +
 	"\x15CreateCommandResponse\x12*\n" +
-	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"g\n" +
+	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"\xa2\x02\n" +
 	"\x13ListCommandsRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x1b\n" +
-	"\ttenant_id\x18\x03 \x01(\tR\btenantId\"e\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12\x1b\n" +
+	"\tdevice_id\x18\x04 \x01(\tR\bdeviceId\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\x129\n" +
+	"\n" +
+	"start_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x12\n" +
+	"\x04sort\x18\b \x01(\tR\x04sort\"e\n" +
 	"\x14ListCommandsResponse\x12,\n" +
 	"\bcommands\x18\x01 \x03(\v2\x10.core.v1.CommandR\bcommands\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1819,11 +1993,12 @@ const file_proto_core_v1_core_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\"@\n" +
 	"\x12GetCommandResponse\x12*\n" +
-	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"]\n" +
+	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand\"\x8d\x01\n" +
 	"\x11AckCommandRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1b\n" +
-	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\"@\n" +
+	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\x12.\n" +
+	"\x06result\x18\x04 \x01(\v2\x16.core.v1.CommandResultR\x06result\"@\n" +
 	"\x12AckCommandResponse\x12*\n" +
 	"\acommand\x18\x01 \x01(\v2\x10.core.v1.CommandR\acommand2\xe0\a\n" +
 	"\vCoreService\x12=\n" +
@@ -1855,88 +2030,95 @@ func file_proto_core_v1_core_proto_rawDescGZIP() []byte {
 	return file_proto_core_v1_core_proto_rawDescData
 }
 
-var file_proto_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_proto_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_proto_core_v1_core_proto_goTypes = []any{
 	(*Tenant)(nil),                  // 0: core.v1.Tenant
 	(*Device)(nil),                  // 1: core.v1.Device
 	(*DeviceStatus)(nil),            // 2: core.v1.DeviceStatus
 	(*TelemetryRecord)(nil),         // 3: core.v1.TelemetryRecord
-	(*Command)(nil),                 // 4: core.v1.Command
-	(*CreateTenantRequest)(nil),     // 5: core.v1.CreateTenantRequest
-	(*CreateDeviceRequest)(nil),     // 6: core.v1.CreateDeviceRequest
-	(*GetDeviceRequest)(nil),        // 7: core.v1.GetDeviceRequest
-	(*GetDeviceResponse)(nil),       // 8: core.v1.GetDeviceResponse
-	(*GetDeviceStatusRequest)(nil),  // 9: core.v1.GetDeviceStatusRequest
-	(*GetDeviceStatusResponse)(nil), // 10: core.v1.GetDeviceStatusResponse
-	(*ListTenantsRequest)(nil),      // 11: core.v1.ListTenantsRequest
-	(*ListTenantsResponse)(nil),     // 12: core.v1.ListTenantsResponse
-	(*ListDevicesRequest)(nil),      // 13: core.v1.ListDevicesRequest
-	(*ListDevicesResponse)(nil),     // 14: core.v1.ListDevicesResponse
-	(*ListTelemetryRequest)(nil),    // 15: core.v1.ListTelemetryRequest
-	(*ListTelemetryResponse)(nil),   // 16: core.v1.ListTelemetryResponse
-	(*IngestTelemetryRequest)(nil),  // 17: core.v1.IngestTelemetryRequest
-	(*IngestTelemetryResponse)(nil), // 18: core.v1.IngestTelemetryResponse
-	(*RecordTelemetryRequest)(nil),  // 19: core.v1.RecordTelemetryRequest
-	(*RecordTelemetryResponse)(nil), // 20: core.v1.RecordTelemetryResponse
-	(*CreateCommandRequest)(nil),    // 21: core.v1.CreateCommandRequest
-	(*CreateCommandResponse)(nil),   // 22: core.v1.CreateCommandResponse
-	(*ListCommandsRequest)(nil),     // 23: core.v1.ListCommandsRequest
-	(*ListCommandsResponse)(nil),    // 24: core.v1.ListCommandsResponse
-	(*GetCommandRequest)(nil),       // 25: core.v1.GetCommandRequest
-	(*GetCommandResponse)(nil),      // 26: core.v1.GetCommandResponse
-	(*AckCommandRequest)(nil),       // 27: core.v1.AckCommandRequest
-	(*AckCommandResponse)(nil),      // 28: core.v1.AckCommandResponse
-	(*timestamppb.Timestamp)(nil),   // 29: google.protobuf.Timestamp
+	(*CommandResult)(nil),           // 4: core.v1.CommandResult
+	(*Command)(nil),                 // 5: core.v1.Command
+	(*CreateTenantRequest)(nil),     // 6: core.v1.CreateTenantRequest
+	(*CreateDeviceRequest)(nil),     // 7: core.v1.CreateDeviceRequest
+	(*GetDeviceRequest)(nil),        // 8: core.v1.GetDeviceRequest
+	(*GetDeviceResponse)(nil),       // 9: core.v1.GetDeviceResponse
+	(*GetDeviceStatusRequest)(nil),  // 10: core.v1.GetDeviceStatusRequest
+	(*GetDeviceStatusResponse)(nil), // 11: core.v1.GetDeviceStatusResponse
+	(*ListTenantsRequest)(nil),      // 12: core.v1.ListTenantsRequest
+	(*ListTenantsResponse)(nil),     // 13: core.v1.ListTenantsResponse
+	(*ListDevicesRequest)(nil),      // 14: core.v1.ListDevicesRequest
+	(*ListDevicesResponse)(nil),     // 15: core.v1.ListDevicesResponse
+	(*ListTelemetryRequest)(nil),    // 16: core.v1.ListTelemetryRequest
+	(*ListTelemetryResponse)(nil),   // 17: core.v1.ListTelemetryResponse
+	(*IngestTelemetryRequest)(nil),  // 18: core.v1.IngestTelemetryRequest
+	(*IngestTelemetryResponse)(nil), // 19: core.v1.IngestTelemetryResponse
+	(*RecordTelemetryRequest)(nil),  // 20: core.v1.RecordTelemetryRequest
+	(*RecordTelemetryResponse)(nil), // 21: core.v1.RecordTelemetryResponse
+	(*CreateCommandRequest)(nil),    // 22: core.v1.CreateCommandRequest
+	(*CreateCommandResponse)(nil),   // 23: core.v1.CreateCommandResponse
+	(*ListCommandsRequest)(nil),     // 24: core.v1.ListCommandsRequest
+	(*ListCommandsResponse)(nil),    // 25: core.v1.ListCommandsResponse
+	(*GetCommandRequest)(nil),       // 26: core.v1.GetCommandRequest
+	(*GetCommandResponse)(nil),      // 27: core.v1.GetCommandResponse
+	(*AckCommandRequest)(nil),       // 28: core.v1.AckCommandRequest
+	(*AckCommandResponse)(nil),      // 29: core.v1.AckCommandResponse
+	(*timestamppb.Timestamp)(nil),   // 30: google.protobuf.Timestamp
 }
 var file_proto_core_v1_core_proto_depIdxs = []int32{
-	29, // 0: core.v1.Device.created_at:type_name -> google.protobuf.Timestamp
-	29, // 1: core.v1.DeviceStatus.last_seen_at:type_name -> google.protobuf.Timestamp
-	29, // 2: core.v1.TelemetryRecord.received_at:type_name -> google.protobuf.Timestamp
-	29, // 3: core.v1.Command.created_at:type_name -> google.protobuf.Timestamp
-	29, // 4: core.v1.Command.updated_at:type_name -> google.protobuf.Timestamp
-	1,  // 5: core.v1.GetDeviceResponse.device:type_name -> core.v1.Device
-	2,  // 6: core.v1.GetDeviceStatusResponse.status:type_name -> core.v1.DeviceStatus
-	0,  // 7: core.v1.ListTenantsResponse.tenants:type_name -> core.v1.Tenant
-	1,  // 8: core.v1.ListDevicesResponse.devices:type_name -> core.v1.Device
-	3,  // 9: core.v1.ListTelemetryResponse.records:type_name -> core.v1.TelemetryRecord
-	3,  // 10: core.v1.IngestTelemetryResponse.record:type_name -> core.v1.TelemetryRecord
-	3,  // 11: core.v1.RecordTelemetryRequest.telemetry:type_name -> core.v1.TelemetryRecord
-	3,  // 12: core.v1.RecordTelemetryResponse.record:type_name -> core.v1.TelemetryRecord
-	4,  // 13: core.v1.CreateCommandResponse.command:type_name -> core.v1.Command
-	4,  // 14: core.v1.ListCommandsResponse.commands:type_name -> core.v1.Command
-	4,  // 15: core.v1.GetCommandResponse.command:type_name -> core.v1.Command
-	4,  // 16: core.v1.AckCommandResponse.command:type_name -> core.v1.Command
-	5,  // 17: core.v1.CoreService.CreateTenant:input_type -> core.v1.CreateTenantRequest
-	11, // 18: core.v1.CoreService.ListTenants:input_type -> core.v1.ListTenantsRequest
-	6,  // 19: core.v1.CoreService.CreateDevice:input_type -> core.v1.CreateDeviceRequest
-	13, // 20: core.v1.CoreService.ListDevices:input_type -> core.v1.ListDevicesRequest
-	7,  // 21: core.v1.CoreService.GetDevice:input_type -> core.v1.GetDeviceRequest
-	9,  // 22: core.v1.CoreService.GetDeviceStatus:input_type -> core.v1.GetDeviceStatusRequest
-	15, // 23: core.v1.CoreService.ListTelemetry:input_type -> core.v1.ListTelemetryRequest
-	17, // 24: core.v1.CoreService.IngestTelemetry:input_type -> core.v1.IngestTelemetryRequest
-	19, // 25: core.v1.CoreService.RecordTelemetry:input_type -> core.v1.RecordTelemetryRequest
-	21, // 26: core.v1.CoreService.CreateCommand:input_type -> core.v1.CreateCommandRequest
-	23, // 27: core.v1.CoreService.ListCommands:input_type -> core.v1.ListCommandsRequest
-	25, // 28: core.v1.CoreService.GetCommand:input_type -> core.v1.GetCommandRequest
-	27, // 29: core.v1.CoreService.AckCommand:input_type -> core.v1.AckCommandRequest
-	0,  // 30: core.v1.CoreService.CreateTenant:output_type -> core.v1.Tenant
-	12, // 31: core.v1.CoreService.ListTenants:output_type -> core.v1.ListTenantsResponse
-	1,  // 32: core.v1.CoreService.CreateDevice:output_type -> core.v1.Device
-	14, // 33: core.v1.CoreService.ListDevices:output_type -> core.v1.ListDevicesResponse
-	8,  // 34: core.v1.CoreService.GetDevice:output_type -> core.v1.GetDeviceResponse
-	10, // 35: core.v1.CoreService.GetDeviceStatus:output_type -> core.v1.GetDeviceStatusResponse
-	16, // 36: core.v1.CoreService.ListTelemetry:output_type -> core.v1.ListTelemetryResponse
-	18, // 37: core.v1.CoreService.IngestTelemetry:output_type -> core.v1.IngestTelemetryResponse
-	20, // 38: core.v1.CoreService.RecordTelemetry:output_type -> core.v1.RecordTelemetryResponse
-	22, // 39: core.v1.CoreService.CreateCommand:output_type -> core.v1.CreateCommandResponse
-	24, // 40: core.v1.CoreService.ListCommands:output_type -> core.v1.ListCommandsResponse
-	26, // 41: core.v1.CoreService.GetCommand:output_type -> core.v1.GetCommandResponse
-	28, // 42: core.v1.CoreService.AckCommand:output_type -> core.v1.AckCommandResponse
-	30, // [30:43] is the sub-list for method output_type
-	17, // [17:30] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	30, // 0: core.v1.Device.created_at:type_name -> google.protobuf.Timestamp
+	30, // 1: core.v1.DeviceStatus.last_seen_at:type_name -> google.protobuf.Timestamp
+	30, // 2: core.v1.TelemetryRecord.received_at:type_name -> google.protobuf.Timestamp
+	30, // 3: core.v1.Command.created_at:type_name -> google.protobuf.Timestamp
+	30, // 4: core.v1.Command.updated_at:type_name -> google.protobuf.Timestamp
+	4,  // 5: core.v1.Command.result:type_name -> core.v1.CommandResult
+	1,  // 6: core.v1.GetDeviceResponse.device:type_name -> core.v1.Device
+	2,  // 7: core.v1.GetDeviceStatusResponse.status:type_name -> core.v1.DeviceStatus
+	0,  // 8: core.v1.ListTenantsResponse.tenants:type_name -> core.v1.Tenant
+	1,  // 9: core.v1.ListDevicesResponse.devices:type_name -> core.v1.Device
+	30, // 10: core.v1.ListTelemetryRequest.start_time:type_name -> google.protobuf.Timestamp
+	30, // 11: core.v1.ListTelemetryRequest.end_time:type_name -> google.protobuf.Timestamp
+	3,  // 12: core.v1.ListTelemetryResponse.records:type_name -> core.v1.TelemetryRecord
+	3,  // 13: core.v1.IngestTelemetryResponse.record:type_name -> core.v1.TelemetryRecord
+	3,  // 14: core.v1.RecordTelemetryRequest.telemetry:type_name -> core.v1.TelemetryRecord
+	3,  // 15: core.v1.RecordTelemetryResponse.record:type_name -> core.v1.TelemetryRecord
+	5,  // 16: core.v1.CreateCommandResponse.command:type_name -> core.v1.Command
+	30, // 17: core.v1.ListCommandsRequest.start_time:type_name -> google.protobuf.Timestamp
+	30, // 18: core.v1.ListCommandsRequest.end_time:type_name -> google.protobuf.Timestamp
+	5,  // 19: core.v1.ListCommandsResponse.commands:type_name -> core.v1.Command
+	5,  // 20: core.v1.GetCommandResponse.command:type_name -> core.v1.Command
+	4,  // 21: core.v1.AckCommandRequest.result:type_name -> core.v1.CommandResult
+	5,  // 22: core.v1.AckCommandResponse.command:type_name -> core.v1.Command
+	6,  // 23: core.v1.CoreService.CreateTenant:input_type -> core.v1.CreateTenantRequest
+	12, // 24: core.v1.CoreService.ListTenants:input_type -> core.v1.ListTenantsRequest
+	7,  // 25: core.v1.CoreService.CreateDevice:input_type -> core.v1.CreateDeviceRequest
+	14, // 26: core.v1.CoreService.ListDevices:input_type -> core.v1.ListDevicesRequest
+	8,  // 27: core.v1.CoreService.GetDevice:input_type -> core.v1.GetDeviceRequest
+	10, // 28: core.v1.CoreService.GetDeviceStatus:input_type -> core.v1.GetDeviceStatusRequest
+	16, // 29: core.v1.CoreService.ListTelemetry:input_type -> core.v1.ListTelemetryRequest
+	18, // 30: core.v1.CoreService.IngestTelemetry:input_type -> core.v1.IngestTelemetryRequest
+	20, // 31: core.v1.CoreService.RecordTelemetry:input_type -> core.v1.RecordTelemetryRequest
+	22, // 32: core.v1.CoreService.CreateCommand:input_type -> core.v1.CreateCommandRequest
+	24, // 33: core.v1.CoreService.ListCommands:input_type -> core.v1.ListCommandsRequest
+	26, // 34: core.v1.CoreService.GetCommand:input_type -> core.v1.GetCommandRequest
+	28, // 35: core.v1.CoreService.AckCommand:input_type -> core.v1.AckCommandRequest
+	0,  // 36: core.v1.CoreService.CreateTenant:output_type -> core.v1.Tenant
+	13, // 37: core.v1.CoreService.ListTenants:output_type -> core.v1.ListTenantsResponse
+	1,  // 38: core.v1.CoreService.CreateDevice:output_type -> core.v1.Device
+	15, // 39: core.v1.CoreService.ListDevices:output_type -> core.v1.ListDevicesResponse
+	9,  // 40: core.v1.CoreService.GetDevice:output_type -> core.v1.GetDeviceResponse
+	11, // 41: core.v1.CoreService.GetDeviceStatus:output_type -> core.v1.GetDeviceStatusResponse
+	17, // 42: core.v1.CoreService.ListTelemetry:output_type -> core.v1.ListTelemetryResponse
+	19, // 43: core.v1.CoreService.IngestTelemetry:output_type -> core.v1.IngestTelemetryResponse
+	21, // 44: core.v1.CoreService.RecordTelemetry:output_type -> core.v1.RecordTelemetryResponse
+	23, // 45: core.v1.CoreService.CreateCommand:output_type -> core.v1.CreateCommandResponse
+	25, // 46: core.v1.CoreService.ListCommands:output_type -> core.v1.ListCommandsResponse
+	27, // 47: core.v1.CoreService.GetCommand:output_type -> core.v1.GetCommandResponse
+	29, // 48: core.v1.CoreService.AckCommand:output_type -> core.v1.AckCommandResponse
+	36, // [36:49] is the sub-list for method output_type
+	23, // [23:36] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_proto_core_v1_core_proto_init() }
@@ -1950,7 +2132,7 @@ func file_proto_core_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_core_v1_core_proto_rawDesc), len(file_proto_core_v1_core_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

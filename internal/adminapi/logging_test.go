@@ -72,7 +72,7 @@ func testRequestLogging(t *testing.T, mode string) {
 	} else {
 		endpoint = platform.SafeHTTPLoggingMiddleware(endpoint)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices?token=fictional-query-token", strings.NewReader(`{"tenantId":"t","deviceId":"d","productId":"p","secret":"fictional-device-secret"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/t/devices?token=fictional-query-token", strings.NewReader(`{"deviceId":"d","productId":"p","secret":"fictional-device-secret"}`))
 	req.Header.Set("Authorization", "Bearer fictional-admin-token")
 	req.Header.Set("Cookie", "session=fictional-cookie")
 	endpoint.ServeHTTP(httptest.NewRecorder(), req)

@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/service"
@@ -158,16 +155,17 @@ func (s *Server) routes() []rest.Route {
 		{Method: http.MethodGet, Path: "/schemas/mqtt-envelope.json", Handler: s.mqttEnvelopeSchemaHandler},
 		{Method: http.MethodPost, Path: "/api/v1/tenants", Handler: s.createTenantHandler},
 		{Method: http.MethodGet, Path: "/api/v1/tenants", Handler: s.listTenantsHandler},
-		{Method: http.MethodPost, Path: "/api/v1/devices", Handler: s.createDeviceHandler},
-		{Method: http.MethodGet, Path: "/api/v1/devices", Handler: s.listDevicesHandler},
-		{Method: http.MethodGet, Path: "/api/v1/devices/:tenantId/:deviceId", Handler: s.getDeviceHandler},
-		{Method: http.MethodGet, Path: "/api/v1/devices/:tenantId/:deviceId/status", Handler: s.getDeviceStatusHandler},
-		{Method: http.MethodGet, Path: "/api/v1/devices/:tenantId/:deviceId/telemetry", Handler: s.listTelemetryHandler},
-		{Method: http.MethodPost, Path: "/api/v1/telemetry", Handler: s.ingestTelemetryHandler},
-		{Method: http.MethodPost, Path: "/api/v1/commands", Handler: s.createCommandHandler},
-		{Method: http.MethodGet, Path: "/api/v1/commands", Handler: s.listCommandsHandler},
-		{Method: http.MethodGet, Path: "/api/v1/commands/:id", Handler: s.getCommandHandler},
-		{Method: http.MethodPost, Path: "/api/v1/commands/:id/ack", Handler: s.ackCommandHandler},
+		{Method: http.MethodPost, Path: "/api/v1/tenants/:tenantId/devices", Handler: s.createDeviceHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/devices", Handler: s.listDevicesHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/devices/:deviceId", Handler: s.getDeviceHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/status", Handler: s.getDeviceStatusHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/telemetry", Handler: s.listTelemetryHandler},
+		{Method: http.MethodPost, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/telemetry", Handler: s.ingestTelemetryHandler},
+		{Method: http.MethodPost, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/commands", Handler: s.createCommandHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/commands", Handler: s.listCommandsHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/commands", Handler: s.listCommandsHandler},
+		{Method: http.MethodGet, Path: "/api/v1/tenants/:tenantId/commands/:commandId", Handler: s.getCommandHandler},
+		{Method: http.MethodPost, Path: "/api/v1/tenants/:tenantId/devices/:deviceId/commands/:commandId/acknowledgements", Handler: s.ackCommandHandler},
 	}
 }
 
@@ -236,8 +234,11 @@ func (s *Server) listTenantsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createDeviceHandler(w http.ResponseWriter, r *http.Request) {
+	params, ok := requestParameters(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
-		TenantID  string `json:"tenantId"`
 		DeviceID  string `json:"deviceId"`
 		ProductID string `json:"productId"`
 		Secret    string `json:"secret"`
@@ -247,7 +248,7 @@ func (s *Server) createDeviceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := s.rpc.CreateDevice(r.Context(), &corev1.CreateDeviceRequest{
-		TenantId:  req.TenantID,
+		TenantId:  params.TenantID,
 		DeviceId:  req.DeviceID,
 		ProductId: req.ProductID,
 		Secret:    req.Secret,
@@ -260,12 +261,16 @@ func (s *Server) createDeviceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listDevicesHandler(w http.ResponseWriter, r *http.Request) {
+	params, ok := requestParameters(w, r)
+	if !ok {
+		return
+	}
 	pageSize, cursor, err := pageFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := s.rpc.ListDevices(r.Context(), &corev1.ListDevicesRequest{PageSize: int32(pageSize), Cursor: cursor})
+	resp, err := s.rpc.ListDevices(r.Context(), &corev1.ListDevicesRequest{PageSize: int32(pageSize), Cursor: cursor, TenantId: params.TenantID})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -278,12 +283,12 @@ func (s *Server) listDevicesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDeviceHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, deviceID, ok := splitDevicePath(r.URL.Path)
+	params, ok := requestParameters(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	resp, err := s.rpc.GetDevice(r.Context(), &corev1.GetDeviceRequest{TenantId: tenantID, DeviceId: deviceID})
+
+	resp, err := s.rpc.GetDevice(r.Context(), &corev1.GetDeviceRequest{TenantId: params.TenantID, DeviceId: params.DeviceID})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -292,12 +297,12 @@ func (s *Server) getDeviceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDeviceStatusHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, deviceID, ok := splitDevicePath(r.URL.Path)
+	params, ok := requestParameters(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	resp, err := s.rpc.GetDeviceStatus(r.Context(), &corev1.GetDeviceStatusRequest{TenantId: tenantID, DeviceId: deviceID})
+
+	resp, err := s.rpc.GetDeviceStatus(r.Context(), &corev1.GetDeviceStatusRequest{TenantId: params.TenantID, DeviceId: params.DeviceID})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -306,17 +311,22 @@ func (s *Server) getDeviceStatusHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) listTelemetryHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, deviceID, ok := splitDevicePath(r.URL.Path)
+	params, ok := requestParameters(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+
 	pageSize, cursor, err := pageFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := s.rpc.ListTelemetry(r.Context(), &corev1.ListTelemetryRequest{TenantId: tenantID, DeviceId: deviceID, PageSize: int32(pageSize), Cursor: cursor})
+	start, end, err := requestTimes(params.Query.Get("startTime"), params.Query.Get("endTime"))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListTelemetry(r.Context(), &corev1.ListTelemetryRequest{TenantId: params.TenantID, DeviceId: params.DeviceID, PageSize: int32(pageSize), Cursor: cursor, StartTime: start, EndTime: end, Type: params.Query.Get("type"), Sort: params.Query.Get("sort")})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -329,14 +339,16 @@ func (s *Server) listTelemetryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ingestTelemetryHandler(w http.ResponseWriter, r *http.Request) {
+	params, ok := requestParameters(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
-		MsgID    string          `json:"msgId"`
-		TenantID string          `json:"tenantId"`
-		DeviceID string          `json:"deviceId"`
-		Ts       int64           `json:"ts"`
-		Type     string          `json:"type"`
-		Version  string          `json:"version"`
-		Payload  json.RawMessage `json:"payload"`
+		MsgID   string          `json:"msgId"`
+		Ts      int64           `json:"ts"`
+		Type    string          `json:"type"`
+		Version string          `json:"version"`
+		Payload json.RawMessage `json:"payload"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -344,8 +356,8 @@ func (s *Server) ingestTelemetryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	resp, err := s.rpc.IngestTelemetry(r.Context(), &corev1.IngestTelemetryRequest{
 		MsgId:    req.MsgID,
-		TenantId: req.TenantID,
-		DeviceId: req.DeviceID,
+		TenantId: params.TenantID,
+		DeviceId: params.DeviceID,
 		Ts:       req.Ts,
 		Type:     req.Type,
 		Version:  req.Version,
@@ -359,18 +371,20 @@ func (s *Server) ingestTelemetryHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) createCommandHandler(w http.ResponseWriter, r *http.Request) {
+	params, ok := requestParameters(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
-		TenantID string          `json:"tenantId"`
-		DeviceID string          `json:"deviceId"`
-		Payload  json.RawMessage `json:"payload"`
+		Payload json.RawMessage `json:"payload"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	resp, err := s.rpc.CreateCommand(r.Context(), &corev1.CreateCommandRequest{
-		TenantId:       req.TenantID,
-		DeviceId:       req.DeviceID,
+		TenantId:       params.TenantID,
+		DeviceId:       params.DeviceID,
 		Payload:        []byte(req.Payload),
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 	})
@@ -382,13 +396,8 @@ func (s *Server) createCommandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenantId")
-	if tenantID == "" {
-		writeError(w, http.StatusBadRequest, "tenantId is required")
-		return
-	}
-	if !contracts.IsValidTenantID(tenantID) {
-		writeError(w, http.StatusBadRequest, "tenantId contains invalid MQTT topic characters")
+	params, ok := requestParameters(w, r)
+	if !ok {
 		return
 	}
 	pageSize, cursor, err := pageFromRequest(r)
@@ -396,7 +405,12 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{PageSize: int32(pageSize), Cursor: cursor, TenantId: tenantID})
+	start, end, err := requestTimes(params.Query.Get("startTime"), params.Query.Get("endTime"))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	resp, err := s.rpc.ListCommands(r.Context(), &corev1.ListCommandsRequest{PageSize: int32(pageSize), Cursor: cursor, TenantId: params.TenantID, DeviceId: commandDeviceFilter(params), Status: params.Query.Get("status"), StartTime: start, EndTime: end, Sort: params.Query.Get("sort")})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -409,61 +423,86 @@ func (s *Server) listCommandsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func pageFromRequest(r *http.Request) (int, string, error) {
-	query, err := url.ParseQuery(r.URL.RawQuery)
+	params, err := platform.ManagementRequest(r)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid pagination query: %w", err)
+		return 0, "", err
 	}
-	pageSize := 0
-	if raw := query.Get("pageSize"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
+	size := 0
+	if raw := params.Query.Get("pageSize"); raw != "" {
+		size, err = strconv.Atoi(raw)
 		if err != nil {
-			return 0, "", fmt.Errorf("pageSize must be an integer")
+			return 0, "", err
 		}
-		pageSize = parsed
 	}
-	page, err := platform.NormalizePageRequest(pageSize, query.Get("cursor"))
+	page, err := platform.NormalizePageRequest(size, params.Query.Get("cursor"))
 	return page.Size, page.Cursor, err
 }
 
+func requestParameters(w http.ResponseWriter, r *http.Request) (platform.ManagementParameters, bool) {
+	params, err := platform.ManagementRequest(r)
+	if err != nil {
+		code := http.StatusBadRequest
+		if platform.IsNotFound(err) {
+			code = 404
+		}
+		writeError(w, code, err.Error())
+		return params, false
+	}
+	return params, true
+}
+func commandDeviceFilter(p platform.ManagementParameters) string {
+	if p.DeviceID != "" {
+		return p.DeviceID
+	}
+	return p.Query.Get("deviceId")
+}
+
+func requestTimes(start, end string) (*timestamppb.Timestamp, *timestamppb.Timestamp, error) {
+	parse := func(raw string) (*timestamppb.Timestamp, error) {
+		if raw == "" {
+			return nil, nil
+		}
+		stamp, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil || stamp.Nanosecond()%1000000 != 0 {
+			return nil, fmt.Errorf("time filters must be RFC3339 with at most millisecond precision")
+		}
+		value := timestamppb.New(stamp)
+		if err = value.CheckValid(); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
+	a, err := parse(start)
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := parse(end)
+	return a, b, err
+}
+
 func (s *Server) getCommandHandler(w http.ResponseWriter, r *http.Request) {
-	id, ok := splitCommandPath(r.URL.Path)
+	params, ok := requestParameters(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	// tenantId is required: iot-core answers InvalidArgument when it is missing
-	// and NotFound when the command belongs to another tenant, so the gateway
-	// does not duplicate either check.
-	resp, err := s.rpc.GetCommand(r.Context(), &corev1.GetCommandRequest{
-		Id:       id,
-		TenantId: r.URL.Query().Get("tenantId"),
-	})
+	resp, err := s.rpc.GetCommand(r.Context(), &corev1.GetCommandRequest{Id: params.CommandID, TenantId: params.TenantID})
 	if err != nil {
 		writeRPCError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, commandFromPB(resp.GetCommand()))
 }
-
 func (s *Server) ackCommandHandler(w http.ResponseWriter, r *http.Request) {
-	id, ok := splitCommandPath(r.URL.Path)
+	params, ok := requestParameters(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	var req struct {
-		TenantID string `json:"tenantId"`
-		DeviceID string `json:"deviceId"`
-	}
+	var req contracts.CommandResult
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, 400, err.Error())
 		return
 	}
-	resp, err := s.rpc.AckCommand(r.Context(), &corev1.AckCommandRequest{
-		Id:       id,
-		TenantId: req.TenantID,
-		DeviceId: req.DeviceID,
-	})
+	resp, err := s.rpc.AckCommand(r.Context(), &corev1.AckCommandRequest{Id: params.CommandID, TenantId: params.TenantID, DeviceId: params.DeviceID, Result: &corev1.CommandResult{Status: string(req.Status), ErrorCode: req.ErrorCode, Payload: req.Payload}})
 	if err != nil {
 		writeRPCError(w, err)
 		return
@@ -487,24 +526,6 @@ func serveManagementAPIMetrics(handler http.Handler, host string, port int, path
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Printf("management-api metrics server stopped: %v", err)
 	}
-}
-
-func splitDevicePath(path string) (string, string, bool) {
-	path = strings.TrimPrefix(path, "/api/v1/devices/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func splitCommandPath(path string) (string, bool) {
-	path = strings.TrimPrefix(path, "/api/v1/commands/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) == 0 || parts[0] == "" {
-		return "", false
-	}
-	return parts[0], true
 }
 
 func deviceFromPB(device *corev1.Device) platform.Device {
@@ -564,7 +585,15 @@ func commandFromPB(command *corev1.Command) contracts.CommandResponse {
 		Payload:   json.RawMessage(command.GetPayload()),
 		CreatedAt: timestampToTime(command.GetCreatedAt()),
 		UpdatedAt: timestampToTime(command.GetUpdatedAt()),
+		Result:    resultFromPB(command.GetResult()),
 	}
+}
+
+func resultFromPB(result *corev1.CommandResult) *contracts.CommandResult {
+	if result == nil {
+		return nil
+	}
+	return &contracts.CommandResult{Status: contracts.CommandStatus(result.Status), ErrorCode: result.ErrorCode, Payload: json.RawMessage(result.Payload)}
 }
 
 func timestampToTime(ts *timestamppb.Timestamp) time.Time {
@@ -619,18 +648,7 @@ func httpStatusFromGRPC(err error) int {
 	}
 }
 
-func decodeJSON(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return err
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		return fmt.Errorf("request body must contain exactly one JSON value")
-	}
-	return nil
-}
+func decodeJSON(r *http.Request, dst any) error { return contracts.DecodeRequestJSON(r.Body, dst) }
 
 func listenHost() string {
 	return runtimeconfig.ListenHost("LISTEN_ADDR", "0.0.0.0")

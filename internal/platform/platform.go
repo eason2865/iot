@@ -74,12 +74,27 @@ func (a *App) routes() http.Handler {
 	mux.Handle("/metrics", a.metrics.Handler())
 	if a.enableAPI {
 		mux.HandleFunc("/schemas/mqtt-envelope.json", a.mqttEnvelopeSchemaHandler)
-		mux.HandleFunc("/api/v1/tenants", a.handleTenants)
-		mux.HandleFunc("/api/v1/devices", a.handleDevices)
-		mux.HandleFunc("/api/v1/telemetry", a.handleTelemetry)
-		mux.HandleFunc("/api/v1/commands", a.handleCommands)
-		mux.HandleFunc("/api/v1/commands/", a.handleCommandByID)
-		mux.HandleFunc("/api/v1/devices/", a.handleDeviceByID)
+		for pattern, handler := range map[string]http.HandlerFunc{
+			"GET /api/v1/tenants": a.handleTenants, "POST /api/v1/tenants": a.handleTenants,
+			"GET /api/v1/tenants/{tenantId}/devices": a.handleDevices, "POST /api/v1/tenants/{tenantId}/devices": a.handleDevices,
+			"GET /api/v1/tenants/{tenantId}/devices/{deviceId}":                                        a.handleDeviceByID,
+			"GET /api/v1/tenants/{tenantId}/devices/{deviceId}/status":                                 a.handleDeviceByID,
+			"GET /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry":                              a.handleDeviceByID,
+			"POST /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry":                             a.handleTelemetry,
+			"POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands":                              a.handleCommands,
+			"GET /api/v1/tenants/{tenantId}/commands":                                                  a.handleCommands,
+			"GET /api/v1/tenants/{tenantId}/commands/{commandId}":                                      a.handleCommandByID,
+			"POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements": a.handleCommandByID,
+		} {
+			mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+				p, err := ManagementRequest(r)
+				if err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
+				handler(w, withManagementParameters(r, p))
+			})
+		}
 	}
 	return a.observeHTTP(mux)
 }

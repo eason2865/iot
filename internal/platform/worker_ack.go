@@ -1,8 +1,8 @@
 package platform
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -86,7 +86,7 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 	w.acks.mu.Unlock()
 	defer w.acks.pending.Done()
 	var ack CommandAckMessage
-	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
+	if err := contracts.DecodeRequestJSON(bytes.NewReader(msg.Payload()), &ack); err != nil {
 		w.rejectAck(msg, "invalid JSON")
 		return
 	}
@@ -95,11 +95,15 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 		w.rejectAck(msg, "invalid identity or commandId")
 		return
 	}
+	if _, err := contracts.NormalizeCommandResult(contracts.CommandResult{Status: contracts.CommandStatus(ack.Status), ErrorCode: ack.ErrorCode, Payload: ack.Payload}); err != nil {
+		w.rejectAck(msg, "invalid execution result")
+		return
+	}
 	err := errors.New("ACK store is not configured")
 	if w.store != nil {
 		for attempt := 0; attempt < ackStoreAttempts; attempt++ {
 			err = w.applyAck(ack)
-			if err == nil || IsNotFound(err) {
+			if err == nil || IsNotFound(err) || errors.Is(err, ErrAcknowledgementConflict) {
 				break
 			}
 			if attempt+1 < ackStoreAttempts {
@@ -113,7 +117,7 @@ func (w *Worker) handleAckMessage(_ mqtt.Client, msg mqtt.Message) {
 			}
 		}
 	}
-	if IsNotFound(err) {
+	if IsNotFound(err) || errors.Is(err, ErrAcknowledgementConflict) {
 		// Unknown/foreign commands are intentionally rejected, not retried.
 		w.rejectAck(msg, "unknown command")
 		return
@@ -146,6 +150,16 @@ func (w *Worker) rejectAck(msg mqtt.Message, reason string) {
 }
 
 func (w *Worker) applyAck(ack CommandAckMessage) error {
+	if store, ok := w.store.(CommandResultStore); ok {
+		ctx, cancel := context.WithTimeout(w.acks.ctx, 2*time.Second)
+		defer cancel()
+		_, err := store.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, contracts.CommandResult{Status: contracts.CommandStatus(ack.Status), ErrorCode: ack.ErrorCode, Payload: ack.Payload})
+		return err
+	}
+	if ack.Status != "acked" || ack.ErrorCode != "" || len(ack.Payload) > 0 {
+		return errors.New("ACK store does not support execution results")
+	}
+
 	if store, ok := w.store.(interface {
 		AckCommandContext(context.Context, string, string, string) (Command, error)
 	}); ok {

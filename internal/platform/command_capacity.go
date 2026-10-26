@@ -18,7 +18,7 @@ func ValidateCommandInput(tenant, device string, payload json.RawMessage) error 
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
 	}
-	if err := contracts.ValidateJSONB(payload); err != nil {
+	if err := contracts.ValidateCommandPayload(payload); err != nil {
 		return err
 	}
 	// Reserve the longest dispatcher state, timestamp precision and attempt value.

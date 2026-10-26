@@ -81,3 +81,8 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_unwritten ON telemetry_records(id) WHER
 ALTER TABLE commands ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_idempotency
   ON commands(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- Device execution results are independent of dispatcher bookkeeping.
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS result JSONB;
+CREATE INDEX IF NOT EXISTS idx_telemetry_event_page ON telemetry_records(tenant_id,device_id,ts DESC,msg_id DESC);
+CREATE INDEX IF NOT EXISTS idx_commands_filter_page ON commands(tenant_id,created_at DESC,id DESC);

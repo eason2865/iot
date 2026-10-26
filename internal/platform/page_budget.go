@@ -1,6 +1,9 @@
 package platform
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // Leave room below gRPC's default 4 MiB ceiling for the response and cursor.
 // Each entry is charged its stored text/bytes plus a conservative protobuf
@@ -28,7 +31,8 @@ func (b *responsePageBudget) accept(bytes, count, limit int) (bool, error) {
 func tenantListBytes(t Tenant) int { return 512 + len(t.ID) + len(t.Name) }
 func deviceListBytes(d Device) int { return 512 + len(d.TenantID) + len(d.DeviceID) + len(d.ProductID) }
 func commandListBytes(c Command) int {
-	return 512 + len(c.ID) + len(c.TenantID) + len(c.DeviceID) + len(c.Status) + len(c.Payload)
+	result, _ := json.Marshal(c.Result)
+	return len(result) + 512 + len(c.ID) + len(c.TenantID) + len(c.DeviceID) + len(c.Status) + len(c.Payload)
 }
 func telemetryListBytes(t TelemetryRecord) int {
 	return 512 + len(t.MsgID) + len(t.TenantID) + len(t.DeviceID) + len(t.Type) + len(t.Version) + len(t.Payload)

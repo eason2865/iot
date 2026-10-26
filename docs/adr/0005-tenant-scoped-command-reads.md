@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. REST parameter/route and execution-result updates: [ADR 0010](0010-canonical-api-parameters-and-command-results.md), release 2.56. The earlier context below records the prior contract.
 
 ## Context
 

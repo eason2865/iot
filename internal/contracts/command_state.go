@@ -33,6 +33,8 @@ func AdvanceCommandStatus(current CommandStatus, event CommandEvent) (CommandSta
 	switch current {
 	case CommandStatusCreated:
 		switch event {
+		case CommandEventFailed:
+			return CommandStatusFailed, nil
 		case CommandEventPublished:
 			return CommandStatusPublished, nil
 		case CommandEventAcked:

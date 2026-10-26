@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,13 +21,23 @@ const (
 // PageRequest implements opaque, keyset-based pagination. Offset pagination
 // becomes increasingly expensive as an IoT tenant accumulates records.
 type PageRequest struct {
-	Size     int
-	Cursor   string
-	TenantID string
-	DeviceID string
+	Size         int
+	Cursor       string
+	TenantID     string
+	DeviceID     string
+	StartTime    time.Time
+	HasStartTime bool
+	EndTime      time.Time
+	HasEndTime   bool
+	Type         string
+	Status       string
+	Sort         string
 }
 
 func NormalizePageRequest(size int, cursor string) (PageRequest, error) {
+	if len(cursor) > 4096 {
+		return PageRequest{}, errInvalidCursor
+	}
 	if size == 0 {
 		size = defaultPageSize
 	}
@@ -62,22 +71,6 @@ func decodeCursor(cursor string, count int) ([]string, error) {
 	return parts, nil
 }
 
-func encodeCommandCursor(createdAt time.Time, id string) string {
-	return encodeCursor(strconv.FormatInt(createdAt.UTC().UnixNano(), 10), id)
-}
-
-func decodeCommandCursor(cursor string) (time.Time, string, error) {
-	parts, err := decodeCursor(cursor, 2)
-	if err != nil || parts == nil {
-		return time.Time{}, "", err
-	}
-	nanos, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return time.Time{}, "", errInvalidCursor
-	}
-	return time.Unix(0, nanos).UTC(), parts[1], nil
-}
-
 // Device pagination uses a (tenant_id, device_id) keyset cursor.
 func encodeDeviceCursor(tenantID, deviceID string) string {
 	return encodeCursor(tenantID, deviceID)
@@ -89,21 +82,4 @@ func decodeDeviceCursor(cursor string) (string, string, error) {
 		return "", "", err
 	}
 	return parts[0], parts[1], nil
-}
-
-// Telemetry pagination uses a (received_at, msg_id) keyset cursor.
-func encodeTelemetryCursor(receivedAt time.Time, msgID string) string {
-	return encodeCursor(strconv.FormatInt(receivedAt.UTC().UnixNano(), 10), msgID)
-}
-
-func decodeTelemetryCursor(cursor string) (time.Time, string, error) {
-	parts, err := decodeCursor(cursor, 2)
-	if err != nil || parts == nil {
-		return time.Time{}, "", err
-	}
-	nanos, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return time.Time{}, "", errInvalidCursor
-	}
-	return time.Unix(0, nanos).UTC(), parts[1], nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -117,8 +118,7 @@ func (c *httpManagementAPIClient) CreateTenant(ctx context.Context, id, name str
 }
 
 func (c *httpManagementAPIClient) CreateDevice(ctx context.Context, tenantID, deviceID, productID string) error {
-	return c.postJSON(ctx, c.baseURL+"/api/v1/devices", map[string]any{
-		"tenantId":  tenantID,
+	return c.postJSON(ctx, c.baseURL+"/api/v1/tenants/"+url.PathEscape(tenantID)+"/devices", map[string]any{
 		"deviceId":  deviceID,
 		"productId": productID,
 		"secret":    "demo-secret",
@@ -127,10 +127,8 @@ func (c *httpManagementAPIClient) CreateDevice(ctx context.Context, tenantID, de
 
 func (c *httpManagementAPIClient) CreateCommand(ctx context.Context, tenantID, deviceID string, payload json.RawMessage) (platform.Command, error) {
 	var created platform.Command
-	err := c.postJSON(ctx, c.baseURL+"/api/v1/commands", map[string]any{
-		"tenantId": tenantID,
-		"deviceId": deviceID,
-		"payload":  json.RawMessage(payload),
+	err := c.postJSON(ctx, c.baseURL+"/api/v1/tenants/"+url.PathEscape(tenantID)+"/devices/"+url.PathEscape(deviceID)+"/commands", map[string]any{
+		"payload": json.RawMessage(payload),
 	}, &created)
 	return created, err
 }

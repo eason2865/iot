@@ -76,11 +76,25 @@ func TestAckReplayWithDMLOnlyRole(t *testing.T) {
 	}
 	defer store.Close()
 	item := platform.DeadLetter{SourceTopic: "tenant/t/device/d/ack", Stage: platform.StageCommandAck}
-	payload := []byte(fmt.Sprintf(`{"commandId":%q,"tenantId":"t","deviceId":"d"}`, command.ID))
+	payload := []byte(fmt.Sprintf(`{"status":"acked","commandId":%q,"tenantId":"t","deviceId":"d"}`, command.ID))
 	for i := 0; i < 2; i++ {
 		if err = replayAck(t.Context(), item, payload, store); err != nil {
 			t.Fatal(err)
 		}
+	}
+	failedCommand, err := owner.CreateCommand("t", "d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPayload := []byte(fmt.Sprintf(`{"status":"failed","commandId":%q,"tenantId":"t","deviceId":"d","errorCode":"BLOCKED","payload":{"reason":"jammed"}}`, failedCommand.ID))
+	for i := 0; i < 2; i++ {
+		if err = replayAck(t.Context(), item, failedPayload, store); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recovered, ok := owner.GetCommand(failedCommand.ID)
+	if !ok || recovered.Status != contracts.CommandStatusFailed || recovered.Result == nil || recovered.Result.ErrorCode != "BLOCKED" {
+		t.Fatalf("failed ACK replay lost result: %+v", recovered)
 	}
 	got, ok := owner.GetCommand(command.ID)
 	if !ok || got.Status != contracts.CommandStatusAcked {

@@ -103,7 +103,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 				case "tenants":
 					_, err = server.rpc.ListTenants(ctx, &corev1.ListTenantsRequest{})
 				case "devices":
-					_, err = server.rpc.ListDevices(ctx, &corev1.ListDevicesRequest{})
+					_, err = server.rpc.ListDevices(ctx, &corev1.ListDevicesRequest{TenantId: "t"})
 				case "commands":
 					_, err = server.rpc.ListCommands(ctx, &corev1.ListCommandsRequest{TenantId: "t"})
 				case "telemetry_records":
@@ -139,9 +139,9 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			}
 		})
 	}
-	for name, handler := range map[string]http.HandlerFunc{"tenants": server.listTenantsHandler, "devices": server.listDevicesHandler, "commands": server.listCommandsHandler, "devices/t/d/telemetry": server.listTelemetryHandler} {
+	for name, handler := range map[string]http.HandlerFunc{"tenants": server.listTenantsHandler, "tenants/t/devices": server.listDevicesHandler, "tenants/t/commands": server.listCommandsHandler, "tenants/t/devices/d/telemetry": server.listTelemetryHandler} {
 		for _, query := range []string{"cursor=" + url.QueryEscape("%%%"), "cursor=%%%", "cursor=_w", "cursor=AA", "pageSize=101", "pageSize=10abc", "pageSize=1.5"} {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/"+name+"?tenantId=t&"+query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/"+name+"?"+query, nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusBadRequest {
@@ -152,7 +152,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	handler := platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"})(http.HandlerFunc(server.createCommandHandler))
 	post := func(key, payload, tenant string) (int, string) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/commands", bytes.NewBufferString(fmt.Sprintf(`{"tenantId":%q,"deviceId":"d","payload":%s}`, tenant, payload)))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/"+tenant+"/devices/d/commands", bytes.NewBufferString(fmt.Sprintf(`{"payload":%s}`, payload)))
 		req.Header.Set("Idempotency-Key", key)
 		req.Header.Set("Authorization", "Bearer tenant-token")
 		rec := httptest.NewRecorder()
@@ -190,12 +190,12 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			path, body string
 			handler    http.HandlerFunc
 		}{
-			{"/api/v1/devices", `{"tenantId":"t","deviceId":"long-secret","productId":"p","secret":"` + strings.Repeat("x", 73) + `"}`, server.createDeviceHandler},
-			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":"\u0000"}}`, server.createCommandHandler},
-			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":1e1000000}}`, server.createCommandHandler},
-			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{"x":"` + strings.Repeat("x", 1048400) + `"}}`, server.createCommandHandler},
-			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{}} garbage`, server.createCommandHandler},
-			{"/api/v1/commands", `{"tenantId":"t","deviceId":"d","payload":{}} {}`, server.createCommandHandler},
+			{"/api/v1/tenants/t/devices", `{"deviceId":"long-secret","productId":"p","secret":"` + strings.Repeat("x", 73) + `"}`, server.createDeviceHandler},
+			{"/api/v1/tenants/t/devices/d/commands", `{"payload":{"x":"\u0000"}}`, server.createCommandHandler},
+			{"/api/v1/tenants/t/devices/d/commands", `{"payload":{"x":1e1000000}}`, server.createCommandHandler},
+			{"/api/v1/tenants/t/devices/d/commands", `{"payload":{"x":"` + strings.Repeat("x", 1048400) + `"}}`, server.createCommandHandler},
+			{"/api/v1/tenants/t/devices/d/commands", `{"payload":{}} garbage`, server.createCommandHandler},
+			{"/api/v1/tenants/t/devices/d/commands", `{"payload":{}} {}`, server.createCommandHandler},
 		} {
 			req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -207,7 +207,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			}
 		}
 	}
-	testByteBoundedRPCPages(t, store, server)
+	testByteBoundedRPCPages(t, store, server, admin, schema)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 	}
 }
 
-func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server *Server) {
+func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server *Server, admin *sql.DB, schema string) {
 	large := strings.Repeat("x", 900000)
 	for i := 0; i < 6; i++ {
 		if _, err := store.CreateCommand("t", "d", json.RawMessage(`{"x":"`+large+`"}`)); err != nil {
@@ -226,10 +226,16 @@ func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server
 		if _, err := store.RecordTelemetry(contracts.Envelope{MsgID: fmt.Sprintf("large-%d", i), TenantID: "t", DeviceID: "d", Ts: time.Now().UnixMilli(), Type: "temp", Version: "v1", Payload: json.RawMessage(`{"x":"` + large + `"}`)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.CreateTenant(platform.Tenant{ID: fmt.Sprintf("page-%d", i), Name: large}); err != nil {
+		if _, err := store.CreateTenant(platform.Tenant{ID: fmt.Sprintf("page-%d", i), Name: "historical tenant"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.CreateDevice(platform.Device{TenantID: "t", DeviceID: fmt.Sprintf("large-%d", i), ProductID: large, Secret: "secret"}); err != nil {
+		if _, err := store.CreateDevice(platform.Device{TenantID: "t", DeviceID: fmt.Sprintf("large-%d", i), ProductID: "historical-product", Secret: "secret"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.Exec("UPDATE "+schema+".tenants SET name=$1 WHERE id=$2", large, fmt.Sprintf("page-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.Exec("UPDATE "+schema+".devices SET product_id=$1 WHERE tenant_id='t' AND device_id=$2", large, fmt.Sprintf("large-%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -289,7 +295,7 @@ func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server
 		return ids, r.GetNextCursor(), r, e
 	})
 	check("devices", 7, func(c string) ([]string, string, proto.Message, error) {
-		r, e := server.rpc.ListDevices(t.Context(), &corev1.ListDevicesRequest{Cursor: c})
+		r, e := server.rpc.ListDevices(t.Context(), &corev1.ListDevicesRequest{TenantId: "t", Cursor: c})
 		var ids []string
 		for _, v := range r.GetDevices() {
 			ids = append(ids, v.GetDeviceId())
@@ -297,7 +303,7 @@ func testByteBoundedRPCPages(t *testing.T, store *platform.PostgresStore, server
 		return ids, r.GetNextCursor(), r, e
 	})
 	rec := httptest.NewRecorder()
-	server.listCommandsHandler(rec, httptest.NewRequest("GET", "/api/v1/commands?tenantId=t", nil))
+	server.listCommandsHandler(rec, httptest.NewRequest("GET", "/api/v1/tenants/t/commands", nil))
 	if rec.Code != 200 {
 		t.Fatalf("large command HTTP list status %d", rec.Code)
 	}

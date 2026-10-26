@@ -65,7 +65,7 @@
   <!-- 1. 管理后台 -> management-api -->
   <circle class="msg-circle" cx="103" cy="112" r="9"/><text class="msg-num" x="103" y="116" text-anchor="middle">1</text>
   <path class="msg" d="M112,112 L232,112" marker-end="url(#arr)"/>
-  <text class="msg-label" x="172" y="102" text-anchor="middle">POST /api/v1/commands</text>
+  <text class="msg-label" x="172" y="102" text-anchor="middle">POST …/commands</text>
 
   <!-- 2. management-api -> iot-core -->
   <circle class="msg-circle" cx="248" cy="154" r="9"/><text class="msg-num" x="248" y="158" text-anchor="middle">2</text>

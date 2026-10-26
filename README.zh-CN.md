@@ -159,22 +159,25 @@ make build
 
 - `POST /api/v1/tenants`
 - `GET /api/v1/tenants`
-- `POST /api/v1/devices`
-- `GET /api/v1/devices`
-- `GET /api/v1/devices/{tenantId}/{deviceId}`
-- `GET /api/v1/devices/{tenantId}/{deviceId}/status`
-- `GET /api/v1/devices/{tenantId}/{deviceId}/telemetry`
-- `POST /api/v1/telemetry`
-- `POST /api/v1/commands`
-- `GET /api/v1/commands?tenantId=<tenant-id>`
-- `GET /api/v1/commands/{id}?tenantId=<tenant-id>`
-- `POST /api/v1/commands/{id}/ack`
+- `POST /api/v1/tenants/{tenantId}/devices`
+- `GET /api/v1/tenants/{tenantId}/devices`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/status`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands`
+- `GET /api/v1/tenants/{tenantId}/devices/{deviceId}/commands`
+- `GET /api/v1/tenants/{tenantId}/commands`
+- `GET /api/v1/tenants/{tenantId}/commands/{commandId}`
+- `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements`
 
-列表接口支持 `pageSize` 和不透明 `cursor`，响应格式为 `{ "items": [], "nextCursor": "" }`；服务端使用 keyset pagination，单页最大 100 条。
+2.56 统一使用租户资源路径，旧路由已移除。`tenantId` 不再放 Query/Body，已有设备的 `deviceId` 也只从路径读取；创建设备时 Body 提供新 `deviceId`。鉴权和业务共用同一份路径参数，租户 Token 可以列出本租户设备。
 
-命令相关接口统一按租户隔离：列表与详情都必须指定 `tenantId`，ACK 还要求 `deviceId`。跨租户读取返回 not found 而不是 forbidden，避免响应泄露"该命令存在"。列表在 gRPC 和 PostgreSQL 查询层都按租户过滤；`pageSize` 和不透明 `cursor` 用于租户内分页。
+列表使用 `pageSize`（默认50，显式1–100）和不透明 `cursor`，响应 `{ "items": [], "nextCursor": "" }`。遥测支持 `startTime/endTime/type/sort`；命令支持 `deviceId/status/startTime/endTime/sort`。时间为带时区的 RFC3339、最多毫秒精度，范围左闭右开；遥测按设备事件时间、命令按创建时间，默认倒序。重复、未知、空值或编码错误的 Query 返回400；游标必须沿用原过滤范围。
 
-REST 接口以上方路由表与 `internal/adminapi` 为准，不再单独维护 OpenAPI 文档。
+ACK Body 为 `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`，状态仅允许 `acked/failed`，结果写入后可在命令的 `result` 读取。相同结果幂等，冲突结果409。MQTT ACK 同样必须带状态，DLQ重放保留结果。升级前先迁移数据库，并协调升级所有调用方及Demo。
+
+完整路由、JSON字段、限制、时间边界和升级说明见 [API契约](docs/api-contract.md)。REST以`internal/adminapi`为准，不单独维护OpenAPI。
 
 ## 架构速览
 
@@ -368,7 +371,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.53`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.56`。
 
 Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
@@ -509,7 +512,7 @@ CHECK_EXTERNAL_DEPS=0 scripts/helm-deploy-local.sh
 
 ### 可靠性补偿与租户访问
 
-`MANAGEMENT_API_TOKEN` 是跨租户管理 Token；可通过 Secret 中的 `MANAGEMENT_API_TOKENS` JSON 对象（例如 `{"token-a":"tenant-a"}`）增加租户 Token。租户 Token 仅可访问对应设备、命令及遥测接口，不能访问全局租户或设备列表；写接口按 body 中的 tenantId 鉴权。本地部署脚本接受 `IOT_MANAGEMENT_API_TOKENS`。
+`MANAGEMENT_API_TOKEN` 是跨租户管理 Token；可通过 Secret 中的 `MANAGEMENT_API_TOKENS` JSON 对象（例如 `{"token-a":"tenant-a"}`）增加租户 Token。租户 Token 可列出本租户设备，并访问对应设备、命令及遥测接口；不能管理全局租户。所有业务接口均按路径中的 tenantId 鉴权。本地部署脚本接受 `IOT_MANAGEMENT_API_TOKENS`。
 
 worker 每 30 秒按 ID 游标扫描最多 500 条、接收时间超过两分钟的未完成遥测，补写 TDengine 并更新标记。租户过滤在 LIMIT 前完成。`command.ack` 死信重放需要 `POSTGRES_DSN`，直接补写 ACK；`mqtt.kafka` 重放转换为 Kafka 遥测记录，非法 MQTT 消息不可直接重放。已 sent 或进入终态的命令重放跳过 MQTT 下发，设备仍需按 commandId 去重，详细语义见 ADR 0007。
 
@@ -595,7 +598,7 @@ JSONB 存储范围的数字，这些输入返回 HTTP 400。分页必须完整�
 有效hash保持原值。
 
 JSONB 校验在构造大十进制字符串前，用字节预算保守估算数字及文本展开成本。遥测
-payload预算为1MiB减4096字节，其他JSONB输入和单个元数据字段限制为1MiB；遥测
+payload预算为1MiB减4096字节，其他JSONB输入限制为1MiB；新建租户name为1–256 UTF-8字节且非空白，productId为1–64字符ASCII标识；遥测
 写库前再次检查PG规范化结果。超预算返回HTTP400，已有超大历史行不自动改写。
 租户、设备、命令和遥测列表同时受条数及2MiB响应预算约束，游标指向最后实际返回
 的记录，因此单页可能少于pageSize。gRPC默认4MiB接收上限不变；单条历史记录仍

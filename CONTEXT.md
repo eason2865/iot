@@ -6,7 +6,7 @@
 - Device: 租户下的设备，用 `tenantId` + `deviceId` 唯一标识。
 - Telemetry: 设备上行遥测，先进入 MQTT，再进入 Kafka，最终写入业务状态和 TDengine。
 - Command: 平台下行命令，先写入 PostgreSQL 状态，再通过 Kafka/device-worker 投递到 MQTT。
-- ACK: 设备对命令的回执，运行时 topic 为 `tenant/{tenantId}/device/{deviceId}/ack`。
+- ACK: 设备对命令的执行结果（acked/failed、errorCode、payload），状态、结果和审计原子持久化，运行时 topic 为 `tenant/{tenantId}/device/{deviceId}/ack`。
 - Envelope: MQTT 上行消息的 JSON 外壳，包含 `msgId`、`tenantId`、`deviceId`、`ts`、`type`、`version` 和 `payload`。
 - IoT Core: 核心业务 gRPC 服务，负责租户、设备、遥测、命令和 ACK 的业务行为。
 - Management API: 对外 REST 网关，通过固定 gRPC endpoint 调用 IoT Core；在 Kubernetes 内使用 `iot-core` Service DNS。

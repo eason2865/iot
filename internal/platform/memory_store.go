@@ -47,7 +47,7 @@ func deviceKey(tenantID, deviceID string) string {
 }
 
 func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
-	if err := contracts.ValidateMetadataText(t.Name); err != nil {
+	if err := contracts.ValidateTenantName(t.Name); err != nil {
 		return Tenant{}, err
 	}
 	if !contracts.IsValidTenantID(t.ID) {
@@ -73,7 +73,7 @@ func (s *memoryStore) ListTenants() []Tenant {
 }
 
 func (s *memoryStore) CreateDevice(d Device) (Device, error) {
-	if err := contracts.ValidateMetadataText(d.ProductID); err != nil {
+	if err := contracts.ValidateProductID(d.ProductID); err != nil {
 		return Device{}, err
 	}
 	if err := contracts.ValidateDeviceSecret(d.Secret); err != nil {
@@ -176,21 +176,48 @@ func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawM
 }
 
 func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
+	return s.AckCommandResultContext(context.Background(), id, tenantID, deviceID, contracts.CommandResult{Status: contracts.CommandStatusAcked})
+}
+func (s *memoryStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (Command, error) {
+	if err := ctx.Err(); err != nil {
+		return Command{}, err
+	}
+	if err := contracts.ValidateDeviceIdentity(tenantID, deviceID); err != nil {
+		return Command{}, err
+	}
+	if err := contracts.ValidateCommandID(id); err != nil {
+		return Command{}, err
+	}
+	result, err := contracts.NormalizeCommandResult(input)
+	if err != nil {
+		return Command{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cmd, exists := s.commands[id]
-	if !exists {
-		return Command{}, fmt.Errorf("command %w", ErrNotFound)
+	cmd, ok := s.commands[id]
+	if !ok || cmd.TenantID != tenantID || cmd.DeviceID != deviceID {
+		return Command{}, ErrNotFound
 	}
-	if cmd.TenantID != tenantID || cmd.DeviceID != deviceID {
-		return Command{}, fmt.Errorf("command %w", ErrNotFound)
+	if commandAlreadyDelivered(cmd.Status) && cmd.Status != contracts.CommandStatusSent {
+		if cmd.Result != nil {
+			a, _ := json.Marshal(cmd.Result)
+			b, _ := json.Marshal(result)
+			var av, bv any
+			_ = json.Unmarshal(a, &av)
+			_ = json.Unmarshal(b, &bv)
+			if !reflect.DeepEqual(av, bv) {
+				return Command{}, ErrAcknowledgementConflict
+			}
+		}
+		return cmd, nil
 	}
-	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEventAcked)
+	next, err := contracts.AdvanceCommandStatus(cmd.Status, contracts.CommandEvent(result.Status))
 	if err != nil {
 		return Command{}, err
 	}
 	cmd.Status = next
 	cmd.UpdatedAt = time.Now().UTC()
+	cmd.Result = &result
 	s.commands[id] = cmd
 	return cmd, nil
 }

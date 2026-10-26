@@ -20,7 +20,7 @@ type countedAckMessage struct {
 
 func (m *countedAckMessage) Ack() { m.acks.Add(1) }
 func validAckMessage() *countedAckMessage {
-	return &countedAckMessage{fakeMQTTMessage: fakeMQTTMessage{topic: "tenant/t/device/d/ack", payload: []byte(`{"commandId":"cmd","tenantId":"t","deviceId":"d"}`)}}
+	return &countedAckMessage{fakeMQTTMessage: fakeMQTTMessage{topic: "tenant/t/device/d/ack", payload: []byte(`{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`)}}
 }
 
 type ackKafkaTransport struct {
@@ -97,9 +97,9 @@ func TestWorkerConfirmsOnlyAfterDLQPersistence(t *testing.T) {
 func TestWorkerConfirmsRejectedAckWithoutRetryLoop(t *testing.T) {
 	for _, test := range []struct{ topic, payload string }{
 		{"tenant/t/device/d/ack", "invalid"},
-		{"tenant/foreign/device/d/ack", `{"commandId":"cmd","tenantId":"t","deviceId":"d"}`},
+		{"tenant/foreign/device/d/ack", `{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`},
 		{"tenant/t/device/d/ack", `{"tenantId":"t","deviceId":"d"}`},
-		{"tenant/t/device/d/telemetry", `{"commandId":"cmd","tenantId":"t","deviceId":"d"}`},
+		{"tenant/t/device/d/telemetry", `{"status":"acked","commandId":"cmd","tenantId":"t","deviceId":"d"}`},
 	} {
 		w := NewWorker(WorkerConfig{}, nil, nil, nil)
 		msg := &countedAckMessage{fakeMQTTMessage: fakeMQTTMessage{topic: test.topic, payload: []byte(test.payload)}}

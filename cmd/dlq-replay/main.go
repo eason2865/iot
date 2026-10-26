@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -194,14 +195,25 @@ type ackReplayStore interface {
 
 func replayAck(ctx context.Context, item platform.DeadLetter, value []byte, store ackReplayStore) error {
 	var ack platform.CommandAckMessage
-	if err := json.Unmarshal(value, &ack); err != nil {
+	if err := contracts.DecodeRequestJSON(bytes.NewReader(value), &ack); err != nil {
 		return err
 	}
 	tenant, device, suffix, ok := contracts.ParseDeviceTopic(item.SourceTopic)
 	if !ok || suffix != contracts.TopicSuffixAck || tenant != ack.TenantID || device != ack.DeviceID || ack.CommandID == "" {
 		return fmt.Errorf("ACK identity does not match source topic")
 	}
-	_, err := store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
+	result, err := contracts.NormalizeCommandResult(contracts.CommandResult{Status: contracts.CommandStatus(ack.Status), ErrorCode: ack.ErrorCode, Payload: ack.Payload})
+	if err != nil {
+		return err
+	}
+	if resultStore, ok := store.(platform.CommandResultStore); ok {
+		_, err = resultStore.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, result)
+		return err
+	}
+	if ack.Status != "acked" || ack.ErrorCode != "" || len(ack.Payload) > 0 {
+		return fmt.Errorf("ACK replay store does not support execution results")
+	}
+	_, err = store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
 	return err
 }
 

@@ -79,3 +79,10 @@ type CommandCreator interface {
 type TelemetryInbox interface {
 	RecordTelemetryContext(context.Context, contracts.Envelope) (TelemetryRecord, error)
 }
+
+// CommandResultStore persists the first terminal device result atomically.
+type CommandResultStore interface {
+	AckCommandResultContext(context.Context, string, string, string, contracts.CommandResult) (Command, error)
+}
+
+var ErrAcknowledgementConflict = errors.New("command already has a different execution result")

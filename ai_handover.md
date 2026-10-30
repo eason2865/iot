@@ -2,20 +2,29 @@
 
 > 本文件是当前状态和维护入口。历史修复、旧部署快照及当时的验证结论已归档至 [截至 2.54 的交接历史](docs/history/ai-handover-through-2.54.md)。历史版本中的“当前”不代表现状。
 
-## 版本与部署状态（2026-10-26）
+## Deployment state (2026-10-30)
 
-| 项目 | 当前值 | 核实来源 |
+| Item | Verified value | Evidence |
 | --- | --- | --- |
-| 本次 Git 发布 | `2.56`；统一 API 路由、参数及设备执行结果 | 本次 main 提交与同名 tag |
-| 前置 Git 基线 | `2.55` / `1732a0e`（文档），前置运行代码为 `2.53` / `5fd323a` | Git；2.54 为测试修复 |
-| 仓库默认应用镜像 | `iot-app:2.56` | Helm 两份 values、Compose demo 和本地部署脚本 |
-| 仓库 Chart | `0.2.11`，appVersion `2.56` | `charts/iot/Chart.yaml` |
-| 最近核实的业务部署 | `2.53`，release/namespace `iot`，revision `5`，Chart `0.2.10` | 2026-10-23 13:01（UTC+8）的只读快照；本轮未部署 |
-| 最近核实的 Pod 状态 | `iot-app:local-bfb73fb37eaa`，四服务各 `2/2 Ready` | 同上历史快照；不代表 2026-10-26 实时状态 |
-| 本轮集群复核范围 | 旧 `docker-desktop` context 已不存在；当前连接账号被 RBAC 拒绝列出 `iot` Deployment | 2026-10-26 只读查询失败，未绕过权限或修改集群 |
-| Host 镜像 / demo | 已构建 `iot-app:2.56`，digest `sha256:b2620114a9d98458a6e82b4cf40869324ce480f73f012a6c5de810636d463b89`；运行中的 `iot-demo` 仍声明 `iot-app:2.53` | 本轮 `docker build` / `docker ps`；没有重建运行容器 |
+| Git documentation release | 2.57, deployment record only | main commit and tag |
+| Running application | 2.56 / 041fe10 | imported image and Pod specs |
+| Helm release | iot, namespace iot, revision 6, Chart 0.2.11 | docker-desktop cluster |
+| Business Pods | four services, each 2/2 Ready; 8 Pods, zero restarts | checked after active-worker failover |
+| Runtime image | iot-app:local-b2620114a9d9 | digest sha256:b2620114a9d98458a6e82b4cf40869324ce480f73f012a6c5de810636d463b89 |
+| Host image / Demo | iot-app:2.56 / iot-app:2.56 | Docker inspect; Demo traffic resumed |
+| Monitoring | Prometheus 9/9 targets up | live targets API |
+| Cluster access | docker-desktop context is available again | deployment and reads succeeded on 2026-10-30 |
 
-Git tag、仓库默认镜像和实际部署分别记录。2.56 是不兼容的 API 路由升级；必须先执行迁移，再协调升级调用方、gateway/core/worker 和 Demo。发布 Git 或构建镜像不代表已部署。
+2.56 is now deployed locally with the database migration and updated Demo. 2.57 records this operation only; it does not create a new runtime image. Data, runtime credentials and gRPC mTLS certificates were preserved.
+
+## Local deployment validation (2026-10-30)
+
+- 20 deployed checks passed: MQTT authentication/ACL, Kafka publication, telemetry PG/TD completion, duplicate telemetry, command idempotency, successful/failed ACK results, 409 result conflict, tenant lists, strict parameters, malformed MQTT DLQ, timestamp checks, compensation, poison-row skipping and timeout audit.
+- Before migration: verified a PostgreSQL custom-format backup (~653 MiB), paused Demo and the four services, ran the 2.56 migration, imported the immutable image, then upgraded Helm. Recreated the API forward and Demo using the preserved environment.
+- Active-worker Pod deletion: 30/30 telemetry records completed PG/TD; the test command was ACKed; two workers recovered Ready. Demo has 5 tenants/50 devices; observed topology, telemetry, command and ACK error counters were zero.
+- Remaining limitation: retained telemetry backlog was about 578669 messages, later 520154; command lag was 0. The first 45-second wait timed out; the final run allowed compensation to complete. This is not proof of realtime telemetry latency or a drained Kafka backlog. No offsets were skipped/reset and no business volumes were deleted.
+- Evidence: outputs/deployment-20261030-256/report.md, report.json, runtime-validation.log, initial-* and *-lag.txt. Directory 700, files 600, Git-ignored. Credentials and database backup are private local artifacts.
+- Validation tenant `closed-20261030-150141` is retained for review; the disposable poison telemetry row was removed.
 
 ## 本次有效变更与升级入口（2.56）
 
@@ -27,12 +36,12 @@ Git tag、仓库默认镜像和实际部署分别记录。2.56 是不兼容的 A
 - `migrations/001_init.sql` 增加幂等的 `commands.result JSONB` 列及事件时间/命令列表索引，由原有 embed/事务锁流程执行；没有伪造历史执行结果。生产 DML-only 启动前用迁移角色执行新版 migrate。
 - Demo、测试 harness、低基数 metrics/trace 路由模板、双语 README 同步新契约。完整路径、Body、Query、错误及升级说明见 [API契约](docs/api-contract.md) 与 [ADR0010](docs/adr/0010-canonical-api-parameters-and-command-results.md)。
 
-## 验证记录与适用范围
+## Code validation (2026-10-26) and scope
 
 - 本轮使用独立 PostgreSQL 容器 `iot-api256-pg`（验证结束后清理），每个测试创建独立 schema；真实 Kafka 使用私有 topic/group，TDengine 使用测试自建库。验证不读写运行服务业务数据，也不启动会抢占生产 ClientID 的新业务服务。
 - 验证覆盖实际 go-zero REST→真实gRPC→隔离PG：租户列表隔离、旧路由404、重复参数/JSON拒绝、过滤/排序/多页无遗漏、半开时间边界和显式最小时间、结果持久化/查询/幂等/409冲突。另覆盖 MQTT失败结果、审计故障整体回滚、DML-only DLQ成功/失败结果重放。
 - 全量测试（真实PG/Kafka/TD）、全量race（Kafka IP bootstrap）、定向最终race、vet、fmt/diff、7个Linux arm64二进制、Helm双profile lint/template、Compose config、部署脚本语法、固定插件protobuf重生与正式镜像连续迁移两次均通过，证据见 `outputs/fixes-256/`；outputs受Git ignore，不提交凭据或私有运行快照。
-- 本轮只发布修复和构建镜像，没有对运行集群部署或执行产品迁移。Pod Ready、监控 targets 和真实已部署E2E未在本轮重新确认；最新历史部署证据仍为 `outputs/deployment-20261022-253/report.md`。
+- The code-only release on 2026-10-26 was not deployed then. The current local deployment and deployed validation evidence are now recorded above (2026-10-30).
 - 本地复验设置独立测试资源 `IOT_POSTGRES_TEST_DSN`、`IOT_KAFKA_TEST_BROKERS`、`IOT_TDENGINE_TEST_DSN` 后执行 `go test -count=1 ./...`。未设置时对应集成测试跳过。CI启用PG和Kafka双bootstrap矩阵，未提供真实TDengine service。
 
 ## 当前架构
@@ -110,7 +119,7 @@ Git tag、仓库默认镜像和实际部署分别记录。2.56 是不兼容的 A
 - Docker Desktop 集群重建或 CA 轮换后，检查 port-forward 使用的静态 kubeconfig 和 Prometheus token/CA 是否仍有效；必要时按 README 更新，不直接重用旧集群快照。监控入口为 `scripts/port-forward-local-monitoring.sh`。
 - 常用本地地址：Management API `http://localhost:18080`，Demo `http://localhost:18084`，Prometheus `http://localhost:9090`，Grafana `http://localhost:3000`，EMQX Dashboard `http://localhost:18083`，MQTT `localhost:1883`。端口以实际部署为准。
 
-## 当前本地资源（Docker容器2026-10-26核实）
+## 当前本地资源（Docker容器2026-10-30核实）
 
 - 应用镜像、demo及最近核实的Helm状态统一见顶部；运行集群状态必须注明核实日期和权限范围，不能把历史Ready或仓库默认值视为实时状态。
 - `docker ps` 可见 `postgres`、`kafka`、`tdengine`、`prometheus`、`grafana`、`iot-demo` 和两个 k8s-forward 容器运行；PostgreSQL 显示 healthy，其余容器 Up 不代表业务链路验证通过。

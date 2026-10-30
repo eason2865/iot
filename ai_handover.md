@@ -2,29 +2,42 @@
 
 > 本文件是当前状态和维护入口。历史修复、旧部署快照及当时的验证结论已归档至 [截至 2.54 的交接历史](docs/history/ai-handover-through-2.54.md)。历史版本中的“当前”不代表现状。
 
-## Deployment state (2026-10-30)
+## Deployment state (2026-10-30, 已清理并停服)
 
 | Item | Verified value | Evidence |
 | --- | --- | --- |
-| Git documentation release | 2.57, deployment record only | main commit and tag |
-| Running application | 2.56 / 041fe10 | imported image and Pod specs |
-| Helm release | iot, namespace iot, revision 6, Chart 0.2.11 | docker-desktop cluster |
-| Business Pods | four services, each 2/2 Ready; 8 Pods, zero restarts | checked after active-worker failover |
+| Git documentation release | 2.58, cleanup/shutdown record only | main commit and tag |
+| Application | stopped; configured image is 2.56 / 041fe10 | no business Pods remain |
+| Helm release | iot, namespace iot, revision 6, Chart 0.2.11 | live Deployment replicas are 0; Helm values still specify 2 |
+| Business Pods | four Deployments at 0 replicas; 0 Pods | docker-desktop cluster |
+| EMQX | Core StatefulSet and operator Deployment at 0 replicas; 0 Pods | CR retains its original desired Core count of 1 |
 | Runtime image | iot-app:local-b2620114a9d9 | digest sha256:b2620114a9d98458a6e82b4cf40869324ce480f73f012a6c5de810636d463b89 |
-| Host image / Demo | iot-app:2.56 / iot-app:2.56 | Docker inspect; Demo traffic resumed |
-| Monitoring | Prometheus 9/9 targets up | live targets API |
+| Host image / Demo | iot-app:2.56 / stopped | Docker inspect |
+| Dependencies / monitoring | PostgreSQL, Kafka, TDengine, Prometheus, Grafana and both port-forwards stopped | Docker inspect |
 | Cluster access | docker-desktop context is available again | deployment and reads succeeded on 2026-10-30 |
 
-2.56 is now deployed locally with the database migration and updated Demo. 2.57 records this operation only; it does not create a new runtime image. Data, runtime credentials and gRPC mTLS certificates were preserved.
+2.56 completed local deployment and validation, then all local IoT services and dependencies were stopped at the user's request. 2.58 records cleanup/shutdown only; no new runtime image was built. Business history and test data were cleared; configuration, credentials, gRPC mTLS certificates and the existing private backup were preserved. Docker Desktop's Kubernetes infrastructure remains running.
 
-## Local deployment validation (2026-10-30)
+## 历史数据清理、空库验证与停服（2026-10-30）
+
+- 用户明确要求清除历史数据，验证通过后停止全部本地 IoT 服务及依赖，包括数据库、Kafka、EMQX 和监控。
+- 暂停 Demo 并将四个业务 Deployment 缩到 0 后清理。清理前有 9 个租户、57 个设备、5,015,787 条遥测、3,346,349 条命令、3,345,594 条 ACK、13,376,564 条命令事件；七张业务表全部 TRUNCATE，保留表结构、索引和权限。
+- 删除 `iot.telemetry`、`iot.command`、`iot.dlq` 及两个 worker 消费组；TDengine 删除 `iot` 库下的超级表和子表，保留库配置和用户；清理 EMQX retained messages。未删除数据库卷、Kafka 内部 topic、Grafana 配置或已有备份。
+- 从空库重新启动 2.56，20 项部署闭环检查全部通过，包括 API、MQTT 鉴权/ACL、PG/TDengine 入库、成功/失败命令结果、幂等、409 冲突、租户隔离、DLQ、补偿、超时和活跃 worker 故障接替。首条 MQTT 遥测完整链路约 0.30 秒完成；接替期间 30/30 条遥测完成双库写入，命令 ACK 成功。
+- Demo 重建 5 租户/50 设备并造流，采样的 topology/telemetry/command/ack 错误计数均为 0；监控 9/9 up；停写后两个 Kafka 消费组 lag 均为 0。空库并发建表时一个 worker 曾因 TDengine `Conflict transaction not completed` 重启一次并自动恢复，之后八个业务 Pod Ready；该现象已留证，未修改应用代码。
+- 验证后再次暂停所有写入并重复清理：七张业务表均为 0 行，TDengine 业务表为 0，三个业务 topic 和两个消费组均不存在，EMQX 无客户端、retained messages 为 0。测试租户和 Demo 数据也已删除。
+- 停服顺序：先 Demo 和四个业务 Deployment，再 EMQX operator，然后 EMQX Core StatefulSet，最后停止两个转发容器、PostgreSQL、Kafka、TDengine、Prometheus、Grafana。暂停 operator 是为了避免它把手工缩到 0 的 EMQX StatefulSet 恢复。保留 CR、PVC、Secret 及 Helm release；停服后两个 namespace 的业务组件和 operator namespace 均无 Pod。
+- 私有证据：`outputs/reset-stop-20261030/report.md`、`report.json`、`runtime-validation.log`、`before-data.json`、`final-empty.json`、`*-lag.txt`、`containers-stopped.json` 和 namespace 停服快照。目录 700、文件 600，均受 Git ignore；原 PostgreSQL 备份仍在 `outputs/deployment-20261030-256/postgres-backup.dump`。
+- 恢复时先启动 Docker 依赖及转发容器，再恢复 EMQX operator 到 1 副本（由 CR 恢复 Core 到 1），恢复业务副本。空 TDengine 库建议先启动一个 device-worker 完成建表、Ready 后再扩到 2，以避开本次观察到的并发 DDL 冲突；Demo 按需最后启动，启动后会重新生成演示数据。不要直接使用会覆盖现有凭据和证书的本地一键部署脚本。
+
+## Local deployment validation (2026-10-30, 清理前的部署记录)
 
 - 20 deployed checks passed: MQTT authentication/ACL, Kafka publication, telemetry PG/TD completion, duplicate telemetry, command idempotency, successful/failed ACK results, 409 result conflict, tenant lists, strict parameters, malformed MQTT DLQ, timestamp checks, compensation, poison-row skipping and timeout audit.
 - Before migration: verified a PostgreSQL custom-format backup (~653 MiB), paused Demo and the four services, ran the 2.56 migration, imported the immutable image, then upgraded Helm. Recreated the API forward and Demo using the preserved environment.
 - Active-worker Pod deletion: 30/30 telemetry records completed PG/TD; the test command was ACKed; two workers recovered Ready. Demo has 5 tenants/50 devices; observed topology, telemetry, command and ACK error counters were zero.
-- Remaining limitation: retained telemetry backlog was about 578669 messages, later 520154; command lag was 0. The first 45-second wait timed out; the final run allowed compensation to complete. This is not proof of realtime telemetry latency or a drained Kafka backlog. No offsets were skipped/reset and no business volumes were deleted.
+- Before the requested reset, retained telemetry backlog was about 578669 messages, later 520154; command lag was 0. The first 45-second wait timed out; the final run allowed compensation to complete. That deployment run did not prove realtime telemetry latency or a drained Kafka backlog. The later user-authorized cleanup removed this backlog; the fresh validation and final empty state are recorded above.
 - Evidence: outputs/deployment-20261030-256/report.md, report.json, runtime-validation.log, initial-* and *-lag.txt. Directory 700, files 600, Git-ignored. Credentials and database backup are private local artifacts.
-- Validation tenant `closed-20261030-150141` is retained for review; the disposable poison telemetry row was removed.
+- Validation tenant `closed-20261030-150141` was retained at deployment time and has now been deleted by the user-authorized cleanup; deployment evidence remains in the private report.
 
 ## 本次有效变更与升级入口（2.56）
 

@@ -192,7 +192,10 @@ func dialKafkaSetup(ctx context.Context, address string) (*kafka.Conn, func(), e
 // partition count or replication factor cannot be fixed safely here, so it is
 // returned as an error until an operator changes the assignment.
 func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.TopicConfig) error {
-	client := &kafka.Client{Addr: addr}
+	return reconcileKafkaTopicsWithClient(ctx, &kafka.Client{Addr: addr}, desired)
+}
+
+func reconcileKafkaTopicsWithClient(ctx context.Context, client *kafka.Client, desired []kafka.TopicConfig) error {
 
 	names := make([]string, 0, len(desired))
 	for _, tc := range desired {
@@ -277,11 +280,46 @@ func reconcileKafkaTopics(ctx context.Context, addr net.Addr, desired []kafka.To
 		if failure := alter.Resources[0].Error; failure != nil {
 			return fmt.Errorf("kafka topic %s: incremental alter configs: %w", tc.Topic, failure)
 		}
+		// A successful alteration acknowledges the controller update, not its
+		// visibility to subsequent requests. In particular, an immediate DLQ
+		// write can still encounter the previous message-size limit.
+		if err := waitForKafkaConfigVisibility(ctx, client, tc.Topic, entryNames, tc.ConfigEntries); err != nil {
+			return err
+		}
 		for _, entry := range drift {
 			log.Printf("kafka topic %s: reconciled %s=%s", tc.Topic, entry.ConfigName, entry.ConfigValue)
 		}
 	}
 	return nil
+}
+
+func waitForKafkaConfigVisibility(ctx context.Context, client *kafka.Client, topic string, names []string, desired []kafka.ConfigEntry) error {
+	for {
+		response, err := client.DescribeConfigs(ctx, &kafka.DescribeConfigsRequest{
+			Resources: []kafka.DescribeConfigRequestResource{{
+				ResourceType: kafka.ResourceTypeTopic, ResourceName: topic, ConfigNames: names,
+			}},
+		})
+		if err != nil {
+			return fmt.Errorf("kafka topic %s: waiting for config visibility: %w", topic, err)
+		}
+		if len(response.Resources) != 1 || response.Resources[0].ResourceName != topic {
+			return fmt.Errorf("kafka topic %s: missing config response", topic)
+		}
+		if err := response.Resources[0].Error; err != nil {
+			return fmt.Errorf("kafka topic %s: describe configs: %w", topic, err)
+		}
+		if len(driftedConfigEntries(response.Resources[0].ConfigEntries, desired)) == 0 {
+			return nil
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("kafka topic %s: waiting for config visibility: %w", topic, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 // driftedConfigEntries returns the desired entries whose live value differs or

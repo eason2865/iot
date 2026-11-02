@@ -33,7 +33,9 @@ for a in sys.argv[1:]:
 if 'apply' in sys.argv: sys.stdin.read()
 print('{}')
 `
-	for name, body := range map[string]string{"kubectl": kubectl, "docker": "#!/bin/sh\nexit 1\n", "helm": "#!/bin/sh\nexit 0\n"} {
+	// Isolate every deployment tool, including kind when it is installed on
+	// the host (as on GitHub runners). This test needs no real app image.
+	for name, body := range map[string]string{"kubectl": kubectl, "docker": "#!/bin/sh\nexit 1\n", "helm": "#!/bin/sh\nexit 0\n", "kind": "#!/bin/sh\nexit 0\n"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
 			t.Fatal(err)
 		}

@@ -2,6 +2,16 @@
 
 > 本文件是当前状态和维护入口。历史修复、旧部署快照及当时的验证结论已归档至 [截至 2.54 的交接历史](docs/history/ai-handover-through-2.54.md)。历史版本中的“当前”不代表现状。
 
+## CI 修复（2.59，2026-11-02）
+
+- 源码修复版本为 2.59；下方 2.58 是上一次本地清理停服记录。未构建或部署新的本地运行镜像，配置的运行镜像仍为 2.56，业务数据和服务保持清空、停止状态。
+- GitHub CI #79 的两组任务均因 `TestDeploymentScriptUsesEncodedHeaders` 调用了宿主机真实 `kind` 而失败（缺少 `iot-app:2.56` 镜像）；localhost 组还出现 `TestDeadLetterPreservesLargeOriginal/worker` 的 Kafka `Message Size Too Large`。
+- 部署脚本测试补齐 `kind` 模拟，避免依赖 CI 预装工具及本地镜像；用一个必定失败的宿主机 kind 替身复现原错误，修复后测试通过。
+- Kafka 对账在 IncrementalAlterConfigs 成功后，增加有界 DescribeConfigs 轮询，等待受管配置实际可见，再返回初始化成功。沿用原 5 秒单次尝试、60 秒启动总预算；不重复修改配置，不降低更大的消息容量。新增协议回归覆盖延迟可见、超时失败及保留更大容量。
+- 原版真实 Kafka 大消息测试在本地连续 52 次未复现 CI 失败，不能据此声称已完整复现云端时序；协议测试稳定复现了旧实现“配置未可见即返回成功”的缺口。验证记录见 `outputs/ci-fix-259/`，云端完整 CI 结果以该提交的 Actions 运行页面为准。
+- 本地已通过：真实 PostgreSQL/Kafka 的 localhost 全量测试、127.0.0.1 全量 internal race 测试、定向回归重复检查、全量 vet、fmt/diff、7 个 Linux arm64 二进制构建及 Helm 双 profile lint/template；TDengine 真实集成测试未配置，本轮未运行。
+- 本地验证使用临时 PostgreSQL/Kafka 容器和独立端口 15432/19092，不启动已有业务服务、不复用业务数据卷；结束后删除临时容器并恢复 Docker Desktop 原有停止状态。
+
 ## Deployment state (2026-10-30, 已清理并停服)
 
 | Item | Verified value | Evidence |

@@ -92,6 +92,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: "36.2"
+          repo-token: ${{ github.token }}
 
       - name: Install protoc plugins
         run: make proto-tools

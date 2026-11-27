@@ -68,6 +68,12 @@ This is open-source infrastructure with the key IoT loops already wired end to e
   - `OTEL_ENDPOINT=/tmp/iot-traces.log`
   - `OTEL_SAMPLER=0.1` (default; use `1.0` for full root sampling, range 0–1)
 
+Sampled command traces carry the span attribute `iot.command.id`. The creation transaction persists a W3C `traceparent`, dispatch resumes it, and the worker extracts the parent from Kafka headers. Devices return the existing `commandId`. An ACK or timeout handler on any replica can recover the creation context from PostgreSQL. Command and ACK payloads stay out of span attributes.
+
+On `command.dispatch`, `iot.command.age_at_dispatch_ms` measures age since creation, including earlier attempts. On `command.kafka.consume`, `iot.command.kafka_age_ms` measures age since the Kafka message timestamp. `command.mqtt.publish` measures the wait for the broker acknowledgement. Once the sent transition is recorded, `command.ack` or `command.timeout` reports `iot.command.ack_wait_ms`. An ACK racing ahead of the sent transition records the ACK alone. Recovery emits `command.requeued` or `command.failed`.
+
+The Helm values `tracing.batcher`, `tracing.endpoint`, `tracing.sampler` and `tracing.httpSecure` apply to all four deployments. To export to an existing OTLP/HTTP receiver set the batcher to `otlphttp`, the endpoint to `host:port` and `httpSecure=true` for HTTPS. Roll the pods after changing the configuration. The defaults use local files and 10% root sampling. Set the sampler to 1 for a focused test. For installations using a migration role, run the current `cmd/migrate` before rolling out the applications.
+
 ## Quick Start
 
 ### 1. Start dependencies

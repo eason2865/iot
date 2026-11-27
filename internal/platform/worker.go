@@ -12,6 +12,8 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"iot/internal/contracts"
 )
@@ -440,6 +442,7 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		// device would execute it twice. 'created'/'published' still publish:
 		// a requeue resets to 'created' on purpose, and a 'published' row
 		// means the first downlink never completed.
+		consumedAt := time.Now()
 		storedCommand, deliver, lookupErr := w.commandForDelivery(ctx, cmd)
 		if lookupErr != nil {
 			return fmt.Errorf("command delivery lookup: %w", lookupErr)
@@ -455,105 +458,107 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 		}
 		// Kafka is a delivery notification, not the authoritative command body or
 		// retry counter. Use the persisted fields after identity/state checks.
-		cmd = storedCommand
-
-		log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
-		if w.mqtt == nil {
-			// No MQTT downlink configured: the command can never be delivered,
-			// so treat it like a delivery failure instead of falling through
-			// to the success path (which used to count "ok" and commit the
-			// offset while the command never left the broker). The store has
-			// no single-command mark-failed transition — only the batch
-			// RecoverStaleCommands repair — so the tradeoff is: log the cause,
-			// count an error, and commit. Committing avoids a poison-message
-			// redelivery loop; the command keeps its current status and the
-			// dispatcher's recovery scan remains responsible for requeue/fail.
-			log.Printf("command undeliverable: mqtt downlink not configured: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
-			if w.metrics != nil {
-				w.metrics.IncDeviceWorker("command", "error")
-			}
-			if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
-				return err
-			}
-			continue
-		}
-		if w.mqtt != nil {
-			topic, err := contracts.BuildCommandTopic(cmd.TenantID, cmd.DeviceID)
-			if err != nil {
-				log.Printf("command topic error: tenant=%s device=%s id=%s err=%v", cmd.TenantID, cmd.DeviceID, cmd.ID, err)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("command", "error")
-				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandTopic, err, w.metrics); dlqErr != nil {
-					return dlqErr
-				}
-				continue
-			}
-			payload, err := json.Marshal(CommandDownlink{
-				ID:        cmd.ID,
-				TenantID:  cmd.TenantID,
-				DeviceID:  cmd.DeviceID,
-				Status:    cmd.Status,
-				Payload:   cmd.Payload,
-				CreatedAt: cmd.CreatedAt,
-				UpdatedAt: cmd.UpdatedAt,
-			})
-			if err != nil {
-				log.Printf("command marshal error: %v", err)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("command", "error")
-				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandEncode, err, w.metrics); dlqErr != nil {
-					return dlqErr
-				}
-				continue
-			}
-			token := w.mqtt.Publish(topic, 1, false, payload)
-			if !token.WaitTimeout(mqttPublishTimeout) {
-				err = errors.New("mqtt publish timeout")
-			} else {
-				err = token.Error()
-			}
-			if err != nil {
-				log.Printf("mqtt publish error: %v", err)
-				if w.metrics != nil {
-					w.metrics.IncDeviceWorker("command", "error")
-				}
-				// Requeue immediately so a transient MQTT outage redelivers
-				// within seconds (bounded by dispatch attempts) instead of
-				// waiting up to 5 minutes for the stale-command recovery scan.
-				// The DLQ copy below still preserves the event for
-				// observability. Same backoff formula as the dispatcher.
-				if requeuer, ok := w.store.(interface {
-					RequeueCommandContext(ctx context.Context, id string, retryAfter time.Duration) error
-				}); ok {
-					backoff := commandRetryBackoff(cmd.DispatchAttempts)
-					if rqErr := requeuer.RequeueCommandContext(ctx, cmd.ID, backoff); rqErr != nil {
-						log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
-					}
-				}
-				if dlqErr := commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandMQTT, err, w.metrics); dlqErr != nil {
-					return dlqErr
-				}
-				continue
-			}
-			// MQTT downlink succeeded: transition published -> sent and start the
-			// ACK deadline now, so the command status reflects real delivery.
-			if marker, ok := w.store.(interface {
-				MarkCommandSentContext(ctx context.Context, id string, deadline time.Time) error
-			}); ok {
-				if err := marker.MarkCommandSentContext(ctx, cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
-					return fmt.Errorf("command mark sent: id=%s: %w", cmd.ID, err)
-				}
-			}
-		}
-		if w.metrics != nil {
-			w.metrics.IncDeviceWorker("command", "ok")
-		}
-		if err := w.commandReader.CommitMessages(ctx, msg); err != nil {
+		if err := w.deliverCommand(ctx, msg, storedCommand, consumedAt); err != nil {
 			return err
 		}
 	}
+}
+
+func (w *Worker) deliverCommand(ctx context.Context, msg kafka.Message, cmd Command, consumedAt time.Time) (retErr error) {
+	ctx = commandDeliveryContext(ctx, msg.Headers, cmd.traceParent)
+	ctx, span := startCommandSpan(ctx, "command.kafka.consume", cmd.ID, trace.SpanKindConsumer, trace.WithTimestamp(consumedAt))
+	defer func() { endCommandSpan(span, retErr) }()
+	commandElapsed(span, "iot.command.kafka_age_ms", msg.Time, consumedAt)
+	log.Printf("command consumed: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
+	if w.mqtt == nil {
+		// No MQTT downlink configured: the command can never be delivered,
+		// so treat it like a delivery failure instead of falling through
+		// to the success path (which used to count "ok" and commit the
+		// offset while the command never left the broker). The store has
+		// no single-command mark-failed transition — only the batch
+		// RecoverStaleCommands repair — so the tradeoff is: log the cause,
+		// count an error, and commit. Committing avoids a poison-message
+		// redelivery loop; the command keeps its current status and the
+		// dispatcher's recovery scan remains responsible for requeue/fail.
+		span.SetStatus(codes.Error, "mqtt unavailable")
+		log.Printf("command undeliverable: mqtt downlink not configured: tenant=%s device=%s id=%s", cmd.TenantID, cmd.DeviceID, cmd.ID)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("command", "error")
+		}
+		return w.commandReader.CommitMessages(ctx, msg)
+	}
+
+	topic, err := contracts.BuildCommandTopic(cmd.TenantID, cmd.DeviceID)
+	if err != nil {
+		span.SetStatus(codes.Error, "invalid command topic")
+		log.Printf("command topic error: tenant=%s device=%s id=%s err=%v", cmd.TenantID, cmd.DeviceID, cmd.ID, err)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("command", "error")
+		}
+		return commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandTopic, err, w.metrics)
+	}
+	payload, err := json.Marshal(CommandDownlink{
+		ID:        cmd.ID,
+		TenantID:  cmd.TenantID,
+		DeviceID:  cmd.DeviceID,
+		Status:    cmd.Status,
+		Payload:   cmd.Payload,
+		CreatedAt: cmd.CreatedAt,
+		UpdatedAt: cmd.UpdatedAt,
+	})
+	if err != nil {
+		span.SetStatus(codes.Error, "encoding failed")
+		log.Printf("command marshal error: %v", err)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("command", "error")
+		}
+		return commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandEncode, err, w.metrics)
+	}
+	err = w.publishMQTTCommand(ctx, cmd.ID, topic, payload)
+	if err != nil {
+		span.SetStatus(codes.Error, "mqtt publish failed")
+		log.Printf("mqtt publish error: %v", err)
+		if w.metrics != nil {
+			w.metrics.IncDeviceWorker("command", "error")
+		}
+		// Requeue immediately so a transient MQTT outage redelivers
+		// within seconds (bounded by dispatch attempts) instead of
+		// waiting up to 5 minutes for the stale-command recovery scan.
+		// The DLQ copy below still preserves the event for
+		// observability. Same backoff formula as the dispatcher.
+		if requeuer, ok := w.store.(interface {
+			RequeueCommandContext(ctx context.Context, id string, retryAfter time.Duration) error
+		}); ok {
+			backoff := commandRetryBackoff(cmd.DispatchAttempts)
+			if rqErr := requeuer.RequeueCommandContext(ctx, cmd.ID, backoff); rqErr != nil {
+				log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
+			}
+		}
+		return commitAfterDeadLetter(ctx, w.dlqWriter, w.commandReader, msg, StageCommandMQTT, err, w.metrics)
+	}
+	// MQTT downlink succeeded: transition published -> sent and start the
+	// ACK deadline now, so the command status reflects real delivery.
+	if marker, ok := w.store.(interface {
+		MarkCommandSentContext(ctx context.Context, id string, deadline time.Time) error
+	}); ok {
+		if err := marker.MarkCommandSentContext(ctx, cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
+			return fmt.Errorf("command mark sent: id=%s: %w", cmd.ID, err)
+		}
+	}
+	if w.metrics != nil {
+		w.metrics.IncDeviceWorker("command", "ok")
+	}
+	return w.commandReader.CommitMessages(ctx, msg)
+}
+
+func (w *Worker) publishMQTTCommand(ctx context.Context, id, topic string, payload []byte) (err error) {
+	_, span := startCommandSpan(ctx, "command.mqtt.publish", id, trace.SpanKindProducer)
+	defer func() { endCommandSpan(span, err) }()
+	token := w.mqtt.Publish(topic, 1, false, payload)
+	if !token.WaitTimeout(mqttPublishTimeout) {
+		return errors.New("mqtt publish timeout")
+	}
+	return token.Error()
 }
 
 // compensateUnwrittenTelemetry periodically rewrites PostgreSQL telemetry rows

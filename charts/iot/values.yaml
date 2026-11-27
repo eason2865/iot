@@ -55,6 +55,13 @@ kafka:
   # reconciled for existing topics on startup.
   dlqRetentionMs: 604800000
 
+# Set an OTLP receiver address (host:port) for cross-pod trace searches.
+tracing:
+  batcher: file
+  endpoint: ""
+  sampler: 0.1
+  httpSecure: false
+
 deviceWorker:
   # Optional tenant isolation. Empty (the default) means the worker processes
   # every tenant, which matches the behaviour before the allowlist existed.

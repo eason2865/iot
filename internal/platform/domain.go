@@ -55,6 +55,7 @@ func DecodeTelemetryRecord(value []byte) (TelemetryRecord, error) {
 }
 
 type Command struct {
+	traceParent      string                   // Durable server context, excluded from wire formats.
 	ID               string                   `json:"id"`
 	TenantID         string                   `json:"tenantId"`
 	DeviceID         string                   `json:"deviceId"`

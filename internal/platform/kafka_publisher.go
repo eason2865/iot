@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type KafkaPublisher struct {
@@ -125,10 +126,12 @@ func (p *KafkaPublisher) PublishTelemetry(ctx context.Context, record TelemetryR
 	return nil
 }
 
-func (p *KafkaPublisher) PublishCommand(ctx context.Context, cmd Command) error {
+func (p *KafkaPublisher) PublishCommand(ctx context.Context, cmd Command) (retErr error) {
 	if p == nil || p.commandWriter == nil {
 		return nil
 	}
+	ctx, span := startCommandSpan(ctx, "command.kafka.publish", cmd.ID, trace.SpanKindProducer)
+	defer func() { endCommandSpan(span, retErr) }()
 	value, err := json.Marshal(cmd)
 	if err != nil {
 		if p.metrics != nil {
@@ -136,10 +139,11 @@ func (p *KafkaPublisher) PublishCommand(ctx context.Context, cmd Command) error 
 		}
 		return err
 	}
-	err = writeKafkaMessageWithRetry(ctx, p.commandWriter, kafka.Message{
-		Key:   []byte(cmd.DeviceID),
-		Value: value,
-	})
+	msg := kafka.Message{Key: []byte(cmd.DeviceID), Value: value}
+	if parent := commandTraceParent(ctx); parent != "" {
+		msg.Headers = []kafka.Header{{Key: "traceparent", Value: []byte(parent)}}
+	}
+	err = writeKafkaMessageWithRetry(ctx, p.commandWriter, msg)
 	if err != nil {
 		if p.metrics != nil {
 			p.metrics.IncKafkaPublish("command", "error")

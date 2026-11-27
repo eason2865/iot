@@ -68,6 +68,12 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
   - `OTEL_ENDPOINT=/tmp/iot-traces.log`
   - `OTEL_SAMPLER=0.1`（默认，设为 `1.0` 全量采样根 span，合法范围 0–1）
 
+命令追踪使用 span 属性 `iot.command.id` 关联采样到的命令。创建事务保存 W3C `traceparent`，dispatcher 领取命令后继续该 trace，并通过 Kafka 消息头传给 worker。设备按照原协议回传 `commandId`，服务端从 PostgreSQL 恢复创建时的上下文，所以不同副本处理下发、ACK 或超时也能关联。设备命令内容与 ACK payload 均不写入 span。
+
+查询一条命令时，`command.dispatch` 的 `iot.command.age_at_dispatch_ms` 为创建到本次派发的总时间（重试时包含此前尝试），`command.kafka.consume` 的 `iot.command.kafka_age_ms` 为消息时间戳到消费的时长。`command.mqtt.publish` 衡量发布至 broker 确认的耗时。对于已进入 sent 的命令，`command.ack` 或 `command.timeout` 的 `iot.command.ack_wait_ms` 表示从服务端记录已发送到收到回执或判定超时的时长。设备在 sent 写入前回执时只记录 ACK。早期故障恢复会产生 `command.requeued` 或 `command.failed`。
+
+四个业务 Deployment 共用 Helm 的 `tracing.batcher`、`tracing.endpoint`、`tracing.sampler` 和 `tracing.httpSecure`。已有 OTLP 接收端时把 batcher 设为 `otlphttp`，endpoint 填 `主机:端口`，HTTPS 设 `httpSecure=true`。更新配置后滚动重启 Pod。默认仍写本地文件，根采样率为 10%；联调时可临时将 sampler 设为 1。使用独立迁移角色的部署需在更新服务前运行本版本的 `cmd/migrate`。
+
 ## 快速开始
 
 ### 1. 启动依赖

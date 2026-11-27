@@ -11,6 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"iot/internal/contracts"
 	"iot/migrations"
@@ -523,7 +526,14 @@ func requireDevice(ctx context.Context, tx *sql.Tx, tenantID, deviceID string) e
 
 // CreateCommandWithKey atomically reuses a tenant-scoped request key. A changed
 // device or payload conflicts instead of executing a second device action.
-func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (Command, error) {
+func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, deviceID, key string, payload json.RawMessage) (created Command, retErr error) {
+	ctx, span := startCommandSpan(ctx, "command.create", "", trace.SpanKindInternal)
+	defer func() {
+		if created.ID != "" {
+			span.SetAttributes(attribute.String("iot.command.id", created.ID))
+		}
+		endCommandSpan(span, retErr)
+	}()
 	if err := ValidateCommandInput(tenantID, deviceID, payload); err != nil {
 		return Command{}, err
 	}
@@ -560,9 +570,9 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 	now := time.Now().UTC()
 	cmd := Command{ID: id.String(), TenantID: tenantID, DeviceID: deviceID, Status: contracts.CommandStatusCreated, Payload: payload, CreatedAt: now, UpdatedAt: now}
 	var storedID string
-	err = tx.QueryRowContext(ctx, `INSERT INTO commands (id,tenant_id,device_id,status,payload,next_dispatch_at,created_at,updated_at,idempotency_key)
- VALUES ($1,$2,$3,$4,$5,$6,$6,$6,NULLIF($7,''))
- ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, cmd.ID, tenantID, deviceID, cmd.Status, []byte(payload), now, key).Scan(&storedID)
+	err = tx.QueryRowContext(ctx, `INSERT INTO commands (id,tenant_id,device_id,status,payload,next_dispatch_at,created_at,updated_at,idempotency_key,trace_parent)
+ VALUES ($1,$2,$3,$4,$5,$6,$6,$6,NULLIF($7,''),$8)
+ ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, cmd.ID, tenantID, deviceID, cmd.Status, []byte(payload), now, key, commandTraceParent(ctx)).Scan(&storedID)
 	if err == sql.ErrNoRows {
 		var raw []byte
 		var deadline sql.NullTime
@@ -596,7 +606,8 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 	return cmd, nil
 }
 
-func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (Command, error) {
+func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (acked Command, retErr error) {
+	receivedAt := time.Now()
 	if err := contracts.ValidateDeviceIdentity(tenantID, deviceID); err != nil {
 		return Command{}, err
 	}
@@ -622,7 +633,8 @@ func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantI
 	var payload []byte
 	var deadline sql.NullTime
 	var result []byte
-	err = tx.QueryRowContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at, result FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result)
+	var observedAt time.Time
+	err = tx.QueryRowContext(ctx, `SELECT id, tenant_id, device_id, status, payload, created_at, updated_at, dispatch_attempts, deadline_at, result, trace_parent, statement_timestamp() FROM commands WHERE id = $1 FOR UPDATE`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result, &cmd.traceParent, &observedAt)
 	if err == sql.ErrNoRows {
 		return Command{}, fmt.Errorf("command %w", ErrNotFound)
 	}
@@ -643,6 +655,12 @@ func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantI
 		// confirming that the ID belongs to another tenant or device would leak
 		// that tenant's data to the caller.
 		return Command{}, fmt.Errorf("command %w", ErrNotFound)
+	}
+	ctx, span := startCommandSpan(withCommandParent(ctx, cmd.traceParent), "command.ack", cmd.ID, trace.SpanKindInternal, trace.WithTimestamp(receivedAt))
+	defer func() { endCommandSpan(span, retErr) }()
+	span.SetAttributes(attribute.String("iot.command.ack.status", string(normalized.Status)))
+	if cmd.Status == contracts.CommandStatusSent {
+		commandElapsed(span, "iot.command.ack_wait_ms", cmd.UpdatedAt, observedAt)
 	}
 	// ACK delivery is at-least-once. Duplicate or late ACKs are harmless and
 	// must not turn a healthy consumer into an error loop.
@@ -683,6 +701,9 @@ func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantI
 	if err = tx.Commit(); err != nil {
 		return Command{}, err
 	}
+	if normalized.Status == contracts.CommandStatusFailed {
+		span.SetStatus(codes.Error, "device reported failure")
+	}
 	return cmd, nil
 }
 
@@ -701,7 +722,7 @@ func (s *PostgresStore) ClaimCommandsForDispatchContext(ctx context.Context, lim
   ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT $1
 ) UPDATE commands c SET dispatch_attempts = c.dispatch_attempts + 1, next_dispatch_at = NOW() + $2::interval, updated_at = NOW()
 FROM claimed WHERE c.id = claimed.id
-RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at, c.result`, limit, lease.String(), maxDispatchAttempts)
+RETURNING c.id, c.tenant_id, c.device_id, c.status, c.payload, c.created_at, c.updated_at, c.dispatch_attempts, c.deadline_at, c.result, c.trace_parent`, limit, lease.String(), maxDispatchAttempts)
 	if err != nil {
 		return nil, err
 	}
@@ -808,9 +829,37 @@ func (s *PostgresStore) RecoverStaleCommandsContext(ctx context.Context, staleBe
 // Skip locked commands and bound each sweep. State and audit remain one atomic
 // statement, so a slow ACK cannot hold up dispatch of an unrelated command.
 func (s *PostgresStore) updateCommandBatchWithEvent(ctx context.Context, assignment, predicate, event string, args ...any) (int64, error) {
-	return s.updateCommandsWithEvent(ctx, `UPDATE commands SET `+assignment+` WHERE id IN (
- SELECT id FROM commands WHERE `+predicate+` ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED
- ) RETURNING id`, event, args...)
+	args = append(args, event)
+	rows, err := s.db.QueryContext(ctx, `WITH picked AS (
+ SELECT id, updated_at FROM commands WHERE `+predicate+` ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED
+ ), changed AS (
+ UPDATE commands SET `+assignment+` WHERE id IN (SELECT id FROM picked) RETURNING id,trace_parent,updated_at
+ ), audited AS (
+ INSERT INTO command_events(command_id,event_type) SELECT id,$`+strconv.Itoa(len(args))+` FROM changed RETURNING command_id
+ ) SELECT changed.id,changed.trace_parent,picked.updated_at,changed.updated_at FROM changed JOIN picked USING(id) JOIN audited ON audited.command_id=changed.id`, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int64
+	for rows.Next() {
+		var id, parent string
+		var since, transitionedAt time.Time
+		if err := rows.Scan(&id, &parent, &since, &transitionedAt); err != nil {
+			return 0, err
+		}
+		_, span := startCommandSpan(withCommandParent(ctx, parent), "command."+event, id, trace.SpanKindInternal)
+		switch event {
+		case "timeout":
+			commandElapsed(span, "iot.command.ack_wait_ms", since, transitionedAt)
+			span.SetStatus(codes.Error, "ACK deadline exceeded")
+		case "failed":
+			span.SetStatus(codes.Error, "dispatch attempts exhausted")
+		}
+		span.End()
+		count++
+	}
+	return count, rows.Err()
 }
 
 func (s *PostgresStore) updateCommandsWithEvent(ctx context.Context, query, event string, args ...any) (int64, error) {
@@ -839,7 +888,7 @@ func (s *PostgresStore) ListCommandsPageContext(ctx context.Context, page PageRe
 	if page.Sort == "asc" {
 		direction, operator = "ASC", ">"
 	}
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result,trace_parent
  FROM commands WHERE tenant_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id) %s ($2,$3))
  AND ($4='' OR device_id=$4) AND ($5='' OR status=$5)
  AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at < $7)
@@ -933,7 +982,7 @@ func (s *PostgresStore) GetCommandContext(ctx context.Context, id string) (Comma
 	var payload []byte
 	var deadline sql.NullTime
 	var result []byte
-	err := s.db.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result FROM commands WHERE id=$1`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result)
+	err := s.db.QueryRowContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result,trace_parent FROM commands WHERE id=$1`, id).Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result, &cmd.traceParent)
 	if err == sql.ErrNoRows {
 		return Command{}, ErrNotFound
 	}
@@ -957,7 +1006,7 @@ func scanCommandRow(rows interface{ Scan(...any) error }) (Command, error) {
 	var payload []byte
 	var deadline sql.NullTime
 	var result []byte
-	if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result); err != nil {
+	if err := rows.Scan(&cmd.ID, &cmd.TenantID, &cmd.DeviceID, &cmd.Status, &payload, &cmd.CreatedAt, &cmd.UpdatedAt, &cmd.DispatchAttempts, &deadline, &result, &cmd.traceParent); err != nil {
 		return Command{}, err
 	}
 	cmd.Payload = json.RawMessage(payload)

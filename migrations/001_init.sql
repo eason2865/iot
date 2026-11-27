@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS commands (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- The dispatcher and ACK handler resume the creation trace across restarts.
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS trace_parent TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS command_ack (
   id BIGSERIAL PRIMARY KEY,
   command_id TEXT NOT NULL REFERENCES commands(id) ON DELETE CASCADE,

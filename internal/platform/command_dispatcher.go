@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"log"
 	"time"
 )
@@ -108,20 +110,28 @@ func (d *CommandDispatcher) dispatchPending(ctx context.Context) {
 		if len(commands) == 0 {
 			return
 		}
-		command := commands[0]
-		publishCtx, cancel := context.WithTimeout(ctx, d.lease/2)
-		err = d.publisher.PublishCommand(publishCtx, command)
-		cancel()
-		if err != nil {
-			backoff := commandRetryBackoff(command.DispatchAttempts)
-			log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
-			if retryErr := d.store.RescheduleCommandContext(ctx, command.ID, command.DispatchAttempts, backoff); retryErr != nil {
-				log.Printf("command reschedule error: id=%s err=%v", command.ID, retryErr)
-			}
-			continue
+		d.dispatchClaimed(ctx, commands[0])
+	}
+}
+
+func (d *CommandDispatcher) dispatchClaimed(ctx context.Context, command Command) {
+	ctx, span := startCommandSpan(withCommandParent(ctx, command.traceParent), "command.dispatch", command.ID, trace.SpanKindInternal)
+	span.SetAttributes(attribute.Int("iot.command.attempt", command.DispatchAttempts))
+	commandElapsed(span, "iot.command.age_at_dispatch_ms", command.CreatedAt, time.Now())
+	var err error
+	defer func() { endCommandSpan(span, err) }()
+	publishCtx, cancel := context.WithTimeout(ctx, d.lease/2)
+	err = d.publisher.PublishCommand(publishCtx, command)
+	cancel()
+	if err != nil {
+		backoff := commandRetryBackoff(command.DispatchAttempts)
+		log.Printf("command dispatch error: id=%s err=%v", command.ID, err)
+		if retryErr := d.store.RescheduleCommandContext(ctx, command.ID, command.DispatchAttempts, backoff); retryErr != nil {
+			log.Printf("command reschedule error: id=%s err=%v", command.ID, retryErr)
 		}
-		if err := d.store.MarkCommandPublishedContext(ctx, command.ID, command.DispatchAttempts); err != nil {
-			log.Printf("command mark published error: id=%s err=%v", command.ID, err)
-		}
+		return
+	}
+	if err = d.store.MarkCommandPublishedContext(ctx, command.ID, command.DispatchAttempts); err != nil {
+		log.Printf("command mark published error: id=%s err=%v", command.ID, err)
 	}
 }

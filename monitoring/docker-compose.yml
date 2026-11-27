@@ -1,6 +1,15 @@
 name: iot
 
 services:
+  k8s-forward-ops-agent:
+    profiles: ["ops-alerts"]
+    image: rancher/kubectl:v1.34.9
+    restart: unless-stopped
+    command: ["--kubeconfig=/root/.kube/config", "--server=https://desktop-control-plane:6443", "--tls-server-name=localhost", "port-forward", "--address=0.0.0.0", "svc/ops-agent", "8084:8084", "-n", "iot"]
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+    networks: [default, kind]
+
   k8s-forward-management-api:
     image: rancher/kubectl:v1.34.9
     container_name: iot-k8s-forward-management-api
@@ -146,7 +155,7 @@ services:
       - "${TEMPO_BIND_IP:-127.0.0.1}:4317:4317"
 
   demo:
-    image: iot-app:3.0
+    image: iot-app:3.1
     container_name: iot-demo
     restart: unless-stopped
     command: ["/usr/local/bin/demo"]

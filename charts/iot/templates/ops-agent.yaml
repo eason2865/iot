@@ -65,6 +65,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.opsAgent.existingSecret | quote }}
                   key: OPS_TENANTS
+                  optional: {{ .Values.opsAgent.alerts.enabled }}
+            {{- if .Values.opsAgent.alerts.enabled }}
+            {{- range $key := list "OPS_ALERT_DSN" "OPS_GRAFANA_TOKEN" "OPS_DINGTALK_URL" "OPS_DINGTALK_SECRET" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.opsAgent.existingSecret | quote }}
+                  key: {{ $key }}
+                  optional: {{ eq $key "OPS_DINGTALK_SECRET" }}
+            {{- end }}
+            {{- end }}
             - name: OPS_MODEL_KEY
               valueFrom:
                 secretKeyRef:

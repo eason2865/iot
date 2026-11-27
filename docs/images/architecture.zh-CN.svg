@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 682" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
-<title id="title">IoT 3.0 系统架构</title><desc id="desc">设备流量和可选的运维诊断服务独立运行。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 754" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
+<title id="title">IoT 3.1 系统架构</title><desc id="desc">设备流量和可选的运维诊断服务独立运行。</desc>
 <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#476379"/></marker></defs>
-<rect width="1220" height="682" rx="12" fill="#f7fafb"/>
-<text x="28" y="44" text-anchor="start" font-size="28" font-weight="700" fill="#183248">IoT 3.0  /  系统架构</text>
+<rect width="1220" height="754" rx="12" fill="#f7fafb"/>
+<text x="28" y="44" text-anchor="start" font-size="28" font-weight="700" fill="#183248">IoT 3.1  /  系统架构</text>
 <text x="28" y="84" text-anchor="start" font-size="18" font-weight="650" fill="#183248">设备遥测</text>
 <rect x="28" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
 <text x="111.0" y="123" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">Device</text>
@@ -78,4 +78,6 @@
 <text x="34" y="568" text-anchor="start" font-size="14" font-weight="400" fill="#183248">四个业务服务配置 OTLP 后，可将 OpenTelemetry 链路导出到 Tempo。</text>
 <text x="32" y="619" text-anchor="start" font-size="17" font-weight="650" fill="#183248">配套服务</text>
 <text x="32" y="647" text-anchor="start" font-size="14" font-weight="400" fill="#183248">EMQX → iot-core 设备认证  ·  异常消息 → Kafka 死信队列  ·  Grafana → Prometheus / Tempo  ·  Demo → REST / MQTT</text>
+<text x="32" y="691" font-size="17" font-weight="650" fill="#183248">Grafana 告警分析</text>
+<text x="32" y="720" font-size="15" fill="#183248">Grafana → 钉钉原始告警　｜　Grafana → Agent 专用队列 → 服务指标与链路 → 钉钉补充通知</text>
 </svg>

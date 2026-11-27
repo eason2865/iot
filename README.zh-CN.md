@@ -1,9 +1,9 @@
-# IoT Platform 3.0
+# IoT Platform 3.1
 
 [English](README.md) | 简体中文
 
 <p align="center">
-  <img src="docs/images/architecture.zh-CN.svg" alt="IoT 3.0 系统架构与独立运维服务" />
+  <img src="docs/images/architecture.zh-CN.svg" alt="IoT 3.1 系统架构与独立运维服务" />
 </p>
 
 <p align="center">
@@ -23,6 +23,8 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - `demo` 负责多租户多设备造流和 ACK 回执，适合联调和压测
 
 ## 运维诊断
+
+3.1 支持 Grafana 告警自动分析。触发或恢复时，Agent 按服务和时间窗查询指标及错误链路，异步发送钉钉补充通知；原始告警继续由 Grafana 直接发送。[启用与验证](docs/production-deployment.zh-CN.md#grafana-自动告警分析)
 
 3.0 新增独立的 `ops-agent`。运维人员提交租户、命令 ID 和可选问题，Agent 通过 management-api 查询持久化状态，通过 Prometheus 查询命令最后更新时间的 worker 抓取状态，并通过 Tempo 查询同一命令的阶段与耗时。接口分别返回已确认事实、来源状态和可选的模型建议。开启诊断无需修改设备固件。
 
@@ -395,7 +397,7 @@ scripts/helm-deploy-local.sh
 
 该脚本会强制 apps-only 部署，默认安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:3.0`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:3.1`。
 
 Helm Chart 定义四个业务服务和可选的 ops-agent。PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 

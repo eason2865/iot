@@ -24,6 +24,7 @@ type tenantAccess struct {
 }
 
 type Server struct {
+	alerts     *alertQueue
 	tenants    map[string]tenantAccess
 	management string
 	prometheus string
@@ -61,8 +62,10 @@ func FromEnv() (*Server, error) {
 	if (s.modelURL == "") != (s.model == "") || (s.modelURL == "" && s.modelKey != "") {
 		return nil, errors.New("configure OPS_MODEL_URL and OPS_MODEL together")
 	}
-	if err := contracts.DecodeRequestJSON(strings.NewReader(os.Getenv("OPS_TENANTS")), &s.tenants); err != nil || len(s.tenants) == 0 {
-		return nil, errors.New("OPS_TENANTS must contain tenant credentials")
+	if raw := os.Getenv("OPS_TENANTS"); raw != "" {
+		if err := contracts.DecodeRequestJSON(strings.NewReader(raw), &s.tenants); err != nil || len(s.tenants) == 0 {
+			return nil, errors.New("OPS_TENANTS must contain tenant credentials")
+		}
 	}
 	used := map[string]bool{}
 	for id, keys := range s.tenants {
@@ -75,6 +78,14 @@ func FromEnv() (*Server, error) {
 			}
 			used[key] = true
 		}
+	}
+	var err error
+	s.alerts, err = newAlertQueue(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(s.tenants) == 0 && s.alerts == nil {
+		return nil, errors.New("configure OPS_TENANTS or alert analysis")
 	}
 	return s, nil
 }
@@ -99,7 +110,12 @@ type report struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("POST /api/v1/tenants/{tenant}/commands/{id}/diagnoses", s.diagnose)
+	if len(s.tenants) > 0 {
+		mux.HandleFunc("POST /api/v1/tenants/{tenant}/commands/{id}/diagnoses", s.diagnose)
+	}
+	if s.alerts != nil {
+		mux.HandleFunc("POST /api/v1/webhooks/grafana", s.alerts.receive)
+	}
 	return mux
 }
 

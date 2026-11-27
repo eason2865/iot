@@ -105,7 +105,7 @@ worker 对合法 ACK 仅在 PostgreSQL 或 DLQ 保存成功后确认，双失败
 
 ## 运维 Agent 3.0
 
-构建当前版本（`make build && docker build -t iot-app:3.0 .`），生产环境将镜像推送到集群可用的仓库并设置 `images.app`。Agent 使用独立 ClusterIP 服务，端口 8084。四个业务服务可独立部署。
+构建当前版本（`make build && docker build -t iot-app:3.1 .`），生产环境将镜像推送到集群可用的仓库并设置 `images.app`。Agent 使用独立 ClusterIP 服务，端口 8084。四个业务服务可独立部署。
 
 1. 为每个租户分别生成运维令牌和命令只读令牌。在 management-api 使用的现有 Secret 中添加 `MANAGEMENT_COMMAND_READ_TOKENS`，值为 `{"<只读令牌>":"factory"}`，并滚动更新 management-api。本地脚本接受 `IOT_MANAGEMENT_COMMAND_READ_TOKENS`。只读凭据仅能 GET 该租户的一条命令。
 2. 在同一命名空间创建专用 Secret `iot-ops-agent`。键 `OPS_TENANTS` 的值为 `{"factory":{"operatorToken":"<运维令牌>","managementToken":"<只读令牌>"}}`。模型要求鉴权时增加键 `OPS_MODEL_KEY`。轮换 Secret 后滚动更新使用它的 Deployment。
@@ -128,3 +128,17 @@ tracing:
 使用现有 Helm 环境参数发布，或本地通过 `IOT_VALUES_FILE=/path/to/ops-values.yaml scripts/helm-deploy-local.sh` 部署。若只改 tracing 配置，请滚动更新业务 Pod。联调可临时将采样率设为 1。Tempo 导出与索引存在延迟，查不到 span 时仍可根据持久化状态诊断。Grafana 可添加类型 Tempo 的数据源，使用同一查询地址。本地 Compose profile `tracing` 使用单实例、24 小时保留期；跨 Pod 访问时，使用受控网络上的可达地址，按需显式设置 `TEMPO_BIND_IP`。
 
 诊断只会向模型发送用户自填的问题、已确认结论、阶段和指标；问题原文会发送给配置的模型，请勿在其中包含设备密钥。模型输出仅用于建议。Agent 不挂载 Kubernetes 服务账号令牌。部署时为凭据和数据流配置内部 TLS 或服务网格；Prometheus 与 Tempo 查询 URL 适用于可信内部网络或已鉴权的内部代理。
+
+## Grafana 自动告警分析
+
+3.1 的告警分析按服务和时间窗取证。现有 Grafana 联系人继续直接发送原始告警。同一联系人增加一个独立的 Webhook 集成后，Agent 会在稍后发送标为「IoT 告警补充分析」的钉钉消息。
+
+1. 给告警队列准备独立 PostgreSQL 数据库。库所有者运行 `psql "$QUEUE_OWNER_DSN" -v ON_ERROR_STOP=1 -f deploy/ops-agent/alert-queue.sql`。给运行账号授予连接数据库、使用对应 schema 以及对 `ops_alert_jobs` 的 SELECT、INSERT、UPDATE、DELETE 权限。运行账号仅访问队列，不需要业务表权限。
+2. 在 Agent 专用 Secret（默认 `iot-ops-agent`）中增加 `OPS_ALERT_DSN`（运行账号 DSN）、`OPS_GRAFANA_TOKEN`（独立随机 Bearer 凭据）、`OPS_DINGTALK_URL`（包含机器人 access_token 的完整 URL）。加签机器人另外设置 `OPS_DINGTALK_SECRET`。若启用关键词校验，放行「IoT 告警补充分析」。通过 Secret 管理工具写入这些值；轮换后滚动更新 Agent。
+3. 设置 `opsAgent.enabled=true`、`opsAgent.alerts.enabled=true` 和 Pod 可访问的 `opsAgent.prometheusURL`。沿用可选的 `opsAgent.tempoURL`、`modelURL`、`model` 和模型凭据。仅启用告警时可省略 `OPS_TENANTS`。使用原有 Helm 环境参数升级到 3.1。
+4. 在 Grafana 的「告警 → 联系人 → 钉钉」中**添加** Webhook 集成，保留原来的机器人集成。使用默认 Grafana JSON、POST、Bearer，凭据填 `OPS_GRAFANA_TOKEN`，启用恢复通知。集群内地址为 `http://ops-agent.iot.svc:8084/api/v1/webhooks/grafana`。本地 Compose 的 Grafana 可先启动 `docker compose -f monitoring/docker-compose.yml --profile ops-alerts up -d k8s-forward-ops-agent`，地址见[联系人样例](../monitoring/grafana/notifications/ops-agent-contact.json)。样例省略凭据；API 配置时在内存中补入 `settings.authorization_credentials`。跨信任边界使用 HTTPS 或服务网格。保留 Max Alerts 为 0，按告警规则分组，每组最多 128 个实例。
+5. 用仓库的 healthz QPS 规则做联调。提高测试请求速率后，先检查原始通知，再检查包含服务、UTC 时间窗和证据的补充通知。Grafana 的通用 TestAlert 不属于这四条规则，会返回 204。恢复通知按恢复时刻重新取证。
+
+规则由 `rule_uid` 标签识别。已有同名规则可直接使用；自定义过标题的实例请添加对应的规则 UID 标签。支持管理 API 的 5xx、healthz QPS、成功写入死信及死信写入失败。Agent 取触发或恢复时刻之前五分钟的 Prometheus 平均速率，并查询同一服务与时间窗的 Tempo 错误链路，最多五条。死信有已识别的 job、stage 时缩小指标范围。原始注解、业务载荷和任意标签不会送入模型。
+
+HTTP 202 表示整组已入队。共享队列按「规则、指纹、本次开始时间、触发/恢复」去重，处理记录在结束后保留七天。机器人响应 `errcode=0` 确认送达；失败最多尝试六次，重试复用已有分析。进程退出后其他副本可在租约到期后接手。远端已收取消息但回包丢失时可能重复送达。检查队列中 `finished_at IS NOT NULL AND NOT delivered` 的记录及 Agent 日志可定位最终失败。

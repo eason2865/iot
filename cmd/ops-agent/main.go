@@ -25,6 +25,8 @@ func main() {
 	server := &http.Server{Addr: addr, Handler: agent.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); agent.RunAlerts(ctx) }()
 	done := make(chan struct{})
 	go func() {
 		<-ctx.Done()
@@ -37,4 +39,5 @@ func main() {
 		log.Fatal(err)
 	}
 	<-done
+	<-workerDone
 }

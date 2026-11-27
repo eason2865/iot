@@ -1,8 +1,8 @@
 # IoT Platform Context
 
-## Release 3.0
+## Release 3.1
 
-The [architecture](docs/images/architecture.svg) and [command lifecycle](docs/images/command-cycle.svg) show the device and operations paths. The optional `ops-agent` is an independent Helm Deployment and ClusterIP service. A command diagnosis combines tenant-authorized command state, worker scrape health and sampled command spans; model advice is optional. Prometheus, Tempo and inference run outside the application release.
+The [architecture](docs/images/architecture.svg) and [command lifecycle](docs/images/command-cycle.svg) show the device and operations paths. The optional `ops-agent` is an independent Helm Deployment and ClusterIP service. A command diagnosis combines tenant-authorized command state, worker scrape health and sampled command spans; model advice is optional. Grafana can also send service alerts to the agent. A dedicated PostgreSQL queue drives time-window evidence collection and a supplementary DingTalk notification. Grafana sends the original notification independently. Prometheus, Tempo and inference run outside the application release.
 
 ## Domain Terms
 
@@ -27,7 +27,7 @@ The [architecture](docs/images/architecture.svg) and [command lifecycle](docs/im
 
 - `internal/contracts`: 外部契约和领域约束，包括 topic、Envelope、命令状态机、REST 响应形状（`CommandResponse`）和 MQTT Schema。
 - `internal/core`: IoT Core 服务实现，承载核心业务用例。
-- `internal/opsagent`: 租户鉴权、固定只读诊断工具、证据汇总及可选模型建议。
+- `internal/opsagent`: 租户鉴权、固定只读诊断工具、证据汇总、可选模型建议，以及 Grafana 告警队列和钉钉补充通知。
 - `internal/adminapi`: Management API 的 REST 网关，负责 HTTP 到 IoT Core 的协议转换。
 - `internal/platform`: 运行时适配和平台能力，包含仓储、消息、指标、device-worker、MQTT bridge、TDengine writer 等实现。
 - `internal/bootstrap`: `telemetry-ingestor` 和 `device-worker` 的运行时装配。

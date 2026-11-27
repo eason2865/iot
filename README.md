@@ -1,4 +1,4 @@
-# IoT Platform 3.0
+# IoT Platform 3.1
 
 English | [简体中文](README.zh-CN.md)
 
@@ -23,6 +23,8 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - `demo`: multi-tenant, multi-device traffic generation with ACK receipts, ideal for integration testing and load testing
 
 ## Operations agent
+
+3.1 adds automatic Grafana alert analysis. On firing or recovery, the agent queries service metrics and error traces and sends a separate DingTalk supplement. Grafana sends the original notification directly. [Setup and verification](docs/production-deployment.md#automatic-grafana-alert-analysis)
 
 Version 3.0 adds an independently deployed `ops-agent`. An operator supplies a tenant, command ID and optional question. The agent reads persisted command state from management-api, checks worker scrape health in Prometheus at the last status update, and searches Tempo for that command’s stages and timings. Verified findings, source availability and optional model advice are separate response fields.
 
@@ -395,7 +397,7 @@ scripts/helm-deploy-local.sh
 
 The script enforces an apps-only deployment: by default it installs `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:3.0`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:3.1`.
 
 The Helm chart defines the four business services and an optional ops-agent. PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
@@ -465,7 +467,7 @@ curl --fail-with-body -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
 
 To update an existing rule, use `PUT /api/v1/provisioning/alert-rules/iot-management-api-http-5xx` instead. The template never overwrites edits made in the Grafana UI. A paused rule produces no new firing marks; historical marks are recorded only from the moment the panel association is created — earlier events are not backfilled.
 
-There is also `monitoring/grafana/alerts/management-api-healthz-qps.json`: it only watches the `/healthz`, `2xx` series, using the same 5-minute average QPS, and fires on the next evaluation when strictly `> 0.3 req/s` (`for: 0s`, notification `group_wait: 0s`). The local `Management API HTTP` group evaluates every 60 seconds; notifications use the existing "钉钉" (DingTalk) contact point. The panel shows an orange dashed threshold, the rule links to the same HTTP panel, and it does not change the 5xx rule. For first-time import reuse the POST command above with the new filename; for updates use UID `iot-management-api-healthz-qps`.
+There is also `monitoring/grafana/alerts/management-api-healthz-qps.json`: it only watches the `/healthz`, `2xx` series, using the same 5-minute average QPS, and fires on the next evaluation when strictly `> 1 req/s` (`for: 0s`, notification `group_wait: 0s`). The local `Management API HTTP` group evaluates every 60 seconds; notifications use the existing "钉钉" (DingTalk) contact point. The panel shows an orange dashed threshold, the rule links to the same HTTP panel, and it does not change the 5xx rule. For first-time import reuse the POST command above with the new filename; for updates use UID `iot-management-api-healthz-qps`.
 
 Two more rules cover the dead-letter path rather than a single service. `monitoring/grafana/alerts/dlq-writes.json` (UID `iot-dlq-writes`, warning, `for: 1m`) fires when `sum by (job, stage) (rate(iot_dlq_publish_total{result="ok"}[5m]))` is `> 0`, meaning messages are being dead-lettered; `monitoring/grafana/alerts/dlq-write-failures.json` (UID `iot-dlq-write-failures`, critical, `for: 0s`) fires on the same expression with `result="error"`, which means the message reached neither the normal path nor the DLQ: the consumer stays blocked on that offset and `device-worker` exits and restarts (see `docs/adr/0004`). Both live in the `IoT DLQ` group, notify through the same contact point, and link to the `iot-pipeline` dashboard without a panel id because that dashboard has no DLQ panel yet — the link opens the dashboard, not a chart of the firing series. The metric is seeded for every stage, so the expressions evaluate against series that exist before the first dead letter. How long a dead letter stays replayable is set by `KAFKA_DLQ_RETENTION_MS` (default 7 days), applied only when this release creates `iot.dlq`. Import with the same POST command, replacing the filename.
 

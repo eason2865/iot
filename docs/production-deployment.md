@@ -128,7 +128,7 @@ alone does not supply broker persistence.
 
 ## Operations agent 3.0
 
-Build the current application image with `make build && docker build -t iot-app:3.0 .`. Push to a registry accessible to the cluster and set `images.app`. The agent has a separate ClusterIP service on port 8084. The four business deployments can operate independently.
+Build the current application image with `make build && docker build -t iot-app:3.1 .`. Push to a registry accessible to the cluster and set `images.app`. The agent has a separate ClusterIP service on port 8084. The four business deployments can operate independently.
 
 1. Generate separate operator and command-reader credentials for each tenant. Add `MANAGEMENT_COMMAND_READ_TOKENS` with value `{"<read-token>":"factory"}` to the management-api runtime Secret and roll management-api. The local deployment script accepts `IOT_MANAGEMENT_COMMAND_READ_TOKENS`. A reader can only GET an individual command in its tenant.
 2. Create a dedicated Secret named `iot-ops-agent` in the release namespace. Set `OPS_TENANTS` to `{"factory":{"operatorToken":"<operator-token>","managementToken":"<read-token>"}}`. Add `OPS_MODEL_KEY` if the model requires authentication. Roll the consuming Deployments after rotating credentials.
@@ -151,3 +151,15 @@ tracing:
 Deploy with the existing release values, or run `IOT_VALUES_FILE=/path/to/ops-values.yaml scripts/helm-deploy-local.sh` locally. Roll the business pods after a tracing configuration change. Use sampler 1 temporarily for verification. Export and indexing take time; persisted status is available even when trace search is empty. Grafana can use the same query URL as a Tempo data source. The local Compose profile `tracing` has one Tempo instance with 24-hour retention. When reaching it from pods, choose a routable address on a trusted network and set `TEMPO_BIND_IP` explicitly if necessary.
 
 The model receives the operator’s question as written, the verified finding, stage evidence and scrape health. Keep credentials out of questions. Model output is advisory. The agent disables Kubernetes service account token mounting. Use internal TLS or a service mesh for credential-bearing traffic, and trusted internal endpoints or an authenticating internal proxy for Prometheus and Tempo.
+
+## Automatic Grafana alert analysis
+
+3.1 adds an optional second webhook integration to the existing DingTalk contact point. Grafana delivers the direct notification independently. The agent posts a later evidence summary for firing and recovery.
+
+1. Install [the queue schema](../deploy/ops-agent/alert-queue.sql) as the owner of a dedicated PostgreSQL database. Give the runtime role CONNECT, schema USAGE and SELECT, INSERT, UPDATE, DELETE on `ops_alert_jobs`. It needs no business database access.
+2. Add `OPS_ALERT_DSN`, `OPS_GRAFANA_TOKEN` (dedicated bearer credential), and `OPS_DINGTALK_URL` (complete robot webhook URL) to the agent Secret. Add `OPS_DINGTALK_SECRET` for a signed robot. If keyword filtering is active, allow “IoT 告警补充分析”. Roll the agent after rotating credentials.
+3. Enable `opsAgent.enabled` and `opsAgent.alerts.enabled`, configure `opsAgent.prometheusURL`, and optionally configure Tempo and a model. An alert-only deployment can omit `OPS_TENANTS`.
+4. Add a Webhook integration to the existing Grafana contact point. Keep the original robot integration. Use POST, the default Grafana payload, Bearer authentication, and send resolved notifications. In-cluster URL: `http://ops-agent.iot.svc:8084/api/v1/webhooks/grafana`. For local Compose, run `docker compose -f monitoring/docker-compose.yml --profile ops-alerts up -d k8s-forward-ops-agent`. The [contact point example](../monitoring/grafana/notifications/ops-agent-contact.json) uses its internal address. Supply `settings.authorization_credentials` securely. Use TLS across trust boundaries. Set Max Alerts to zero and group alerts into batches of at most 128.
+5. Exercise the shipped healthz QPS rule with test traffic. Verify the direct notification and a separately labeled supplement. A generic Grafana TestAlert is ignored. The four shipped rule UIDs are recognized via `rule_uid`; existing rules with their original titles also work.
+
+The agent queries five-minute Prometheus rates and up to five sampled error traces for the service at firing or recovery time. Missing observations remain distinct from a measured zero. Each replica shares the durable queue. Events are deduplicated by rule, fingerprint, start time and status for seven days after completion. Delivery retries reuse the saved summary, up to six attempts. An accepted message whose acknowledgement was lost may be delivered again. Inspect `finished_at IS NOT NULL AND NOT delivered` for exhausted jobs.

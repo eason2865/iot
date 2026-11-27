@@ -51,7 +51,7 @@
     "summary": "grafana：{{ $labels.route }} / {{ $labels.status }} QPS 检测（阈值 1 req/s）",
     "description": "路由 {{ $labels.route }}、状态 {{ $labels.status }} 最近 5 分钟平均请求速率为 {{ $values.A.Value }} req/s。触发条件：严格大于 1 req/s，不额外等待 pending 周期。请打开关联图表查看触发时间。"
   },
-  "labels": { "service": "management-api", "severity": "warning" },
+  "labels": { "rule_uid": "iot-management-api-healthz-qps", "service": "management-api", "severity": "warning" },
   "isPaused": false,
   "notification_settings": {
     "receiver": "钉钉",

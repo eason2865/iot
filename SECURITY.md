@@ -6,11 +6,11 @@ Security updates are provided for the latest released version.
 
 | Version | Supported |
 | --- | --- |
-| 3.0 | Yes |
+| 3.1 | Yes |
 
 ## Operations agent credentials
 
-Issue a separate operator token and single-command read credential for each tenant. Store model credentials in the dedicated agent Secret. A configured model receives the operator’s question and sanitized evidence. Treat its output as advice. Report cross-tenant access, evidence leaks or any ability to write through the agent through the channel below.
+Issue a separate operator token and single-command read credential for each tenant. Store model credentials in the dedicated agent Secret. A configured model receives the operator’s question and sanitized evidence. Treat its output as advice. Grafana authenticates using a separate webhook token. Grant the alert worker access only to its dedicated queue and store the DingTalk robot credentials in the agent Secret. Alert analysis sends the model allowlisted service and time-window evidence. Report cross-tenant access, evidence leaks or any ability to write through the agent through the channel below.
 
 ## Reporting a Vulnerability
 

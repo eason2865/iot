@@ -51,7 +51,7 @@
     "summary": "grafana：Management API HTTP 5xx 检测{{ if $labels.route }} | {{ $labels.route }} / {{ $labels.status }}{{ end }}",
     "description": "{{ if $labels.route }}路由 {{ $labels.route }} 最近 5 分钟 HTTP 5xx 平均速率为 {{ $values.A.Value }} req/s。{{ else }}当前未查询到 HTTP 5xx 序列，检测值回退为 0；此规则不检测服务离线。{{ end }}触发条件：5xx QPS 大于 0 持续 1 分钟。请打开关联 HTTP 图表查看状态变化和曲线。"
   },
-  "labels": { "service": "management-api", "severity": "warning" },
+  "labels": { "rule_uid": "iot-management-api-http-5xx", "service": "management-api", "severity": "warning" },
   "isPaused": false,
   "notification_settings": { "receiver": "钉钉" }
 }

@@ -1,5 +1,5 @@
 images:
-  app: iot-app:3.0
+  app: iot-app:3.1
 
 replicas:
   managementAPI: 2
@@ -123,6 +123,8 @@ postgres:
 # Opt in after provisioning tenant credentials in a dedicated Secret.
 opsAgent:
   enabled: false
+  alerts:
+    enabled: false
   replicas: 1
   existingSecret: iot-ops-agent
   managementURL: http://management-api:8080

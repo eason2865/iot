@@ -1,0 +1,11 @@
+{
+  "uid": "iot-ops-agent-alerts",
+  "name": "钉钉",
+  "type": "webhook",
+  "disableResolveMessage": false,
+  "settings": {
+    "httpMethod": "POST",
+    "url": "http://k8s-forward-ops-agent:8084/api/v1/webhooks/grafana",
+    "authorization_scheme": "Bearer"
+  }
+}

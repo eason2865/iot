@@ -80,7 +80,7 @@ jobs:
 
       - name: Validate Helm profiles
         run: |
-          helm lint charts/iot --set opsAgent.enabled=true
+          helm lint charts/iot --set opsAgent.enabled=true,opsAgent.alerts.enabled=true
           helm lint charts/iot
           helm lint charts/iot -f charts/iot/values-production.yaml
           helm template iot charts/iot > /dev/null

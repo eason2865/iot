@@ -138,3 +138,9 @@ An empty body or `{}` requests the default diagnosis. The optional question acce
 Source states are `ok`, `disabled`, `unavailable`, and (for queries) `no_data`. Trace results can also be `partial` when the search window or result cap was exceeded. Tempo searches up to 24 hours around the command, eight traces and 64 spans per span set. Export latency, sampling and retention can yield no data. Prometheus uses the fixed `min(up{job="device-worker"})` instant query. A successful scrape does not establish device connectivity.
 
 HTTP 401 covers an invalid operator credential or tenant mismatch. An authorized lookup of a missing command returns 404. HTTP 502 indicates that command evidence could not be verified. HTTP 429 indicates eight diagnoses are already in flight on that replica. Optional upstream failures return 200 with the available evidence. The unauthenticated `GET /healthz` checks the agent process.
+
+## Grafana webhook
+
+`POST /api/v1/webhooks/grafana` accepts Grafana's standard grouped notification with the dedicated `OPS_GRAFANA_TOKEN` in the Authorization Bearer header. Each supported alert needs `fingerprint`, `startsAt`, `status` and labels identifying a shipped rule. Resolved alerts also need `endsAt`. The endpoint accepts up to 128 instances and 1 MiB per untruncated group. A tenant credential cannot enqueue an alert. No command ID is required.
+
+HTTP 202 confirms durable acceptance of the supported instances, including already accepted duplicates. HTTP 204 indicates that the group has no supported instances. Grafana’s DatasourceNoData and DatasourceError notifications follow the original notification path even when they carry a supported rule label. Invalid notifications return 400, invalid credentials return 401, and a queue write failure returns 503. Optional evidence and model failures are reported in the asynchronous supplement. See the [deployment guide](production-deployment.md#automatic-grafana-alert-analysis).

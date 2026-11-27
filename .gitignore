@@ -1,5 +1,6 @@
 # Local handover and agent scratch files
 ai_handover.md
+/docs/history/
 
 # Environment and secrets
 .env

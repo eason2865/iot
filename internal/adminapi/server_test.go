@@ -2,7 +2,6 @@ package adminapi
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"iot/internal/contracts"
 	"iot/internal/core"
 	"iot/internal/platform"
 	corev1 "iot/proto/core/v1"
@@ -191,33 +189,8 @@ func TestRealCoreStatusCodesThroughGateway(t *testing.T) {
 }
 
 // commandLookupRepo serves one command owned by tenant-a.
-type commandLookupRepo struct{}
+type commandLookupRepo struct{ core.Repository }
 
-func (commandLookupRepo) CreateTenant(platform.Tenant) (platform.Tenant, error) {
-	return platform.Tenant{}, nil
-}
-func (commandLookupRepo) ListTenants() []platform.Tenant { return nil }
-func (commandLookupRepo) CreateDevice(platform.Device) (platform.Device, error) {
-	return platform.Device{}, nil
-}
-func (commandLookupRepo) ListDevices() []platform.Device { return nil }
-func (commandLookupRepo) GetDevice(string, string) (platform.Device, bool) {
-	return platform.Device{}, false
-}
-func (commandLookupRepo) RecordTelemetry(contracts.Envelope) (platform.TelemetryRecord, error) {
-	return platform.TelemetryRecord{}, nil
-}
-func (commandLookupRepo) ListTelemetry(string, string) []platform.TelemetryRecord { return nil }
-func (commandLookupRepo) GetDeviceStatus(string, string) (platform.DeviceStatus, bool) {
-	return platform.DeviceStatus{}, false
-}
-func (commandLookupRepo) CreateCommand(string, string, json.RawMessage) (platform.Command, error) {
-	return platform.Command{}, nil
-}
-func (commandLookupRepo) AckCommand(string, string, string) (platform.Command, error) {
-	return platform.Command{}, nil
-}
-func (commandLookupRepo) ListCommands() []platform.Command { return nil }
 func (commandLookupRepo) GetCommand(id string) (platform.Command, bool) {
 	if id != "cmd-a" {
 		return platform.Command{}, false
@@ -246,5 +219,39 @@ func TestCreateCommandForwardsIdempotencyKey(t *testing.T) {
 	}
 	if client.request.GetIdempotencyKey() != "retry-1" {
 		t.Fatalf("key lost at gateway: %q", client.request.GetIdempotencyKey())
+	}
+}
+
+func TestGatewayWriteMetrics(t *testing.T) {
+	metrics := platform.NewMetrics()
+	api := Server{metrics: metrics, rpc: &captureCommandClient{}}
+	for _, route := range api.routes() {
+		if route.Method != http.MethodPost {
+			continue
+		}
+		path := strings.NewReplacer(":tenantId", "t", ":deviceId", "d", ":commandId", "cmd").Replace(route.Path)
+		rec := httptest.NewRecorder()
+		route.Handler(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{")))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: HTTP %d, want 400", path, rec.Code)
+		}
+		if strings.HasSuffix(path, "/commands") {
+			rec = httptest.NewRecorder()
+			route.Handler(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"payload":{}}`)))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("%s: %d", path, rec.Code)
+			}
+		}
+	}
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, sample := range []string{
+		`iot_tenants_total{result="error"} 1`, `iot_devices_total{result="error"} 1`,
+		`iot_telemetry_ingested_total{result="error"} 1`, `iot_commands_total{kind="created",result="error"} 1`,
+		`iot_commands_total{kind="acked",result="error"} 1`, `iot_commands_total{kind="created",result="ok"} 1`,
+	} {
+		if !strings.Contains(rec.Body.String(), sample+"\n") {
+			t.Errorf("missing %s", sample)
+		}
 	}
 }

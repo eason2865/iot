@@ -11,11 +11,6 @@ import (
 	"iot/internal/contracts"
 )
 
-// memoryStore is the in-memory Repository used only when New is given no Store.
-// Production always injects the PostgreSQL store (see internal/bootstrap and
-// internal/core); this type exists so the platform unit tests and the E2E
-// harness can run without a database. Keep it behaviourally aligned with
-// PostgresStore, but do not rely on it for durability or concurrency semantics.
 type memoryStore struct {
 	mu sync.RWMutex
 
@@ -62,16 +57,6 @@ func (s *memoryStore) CreateTenant(t Tenant) (Tenant, error) {
 	return t, nil
 }
 
-func (s *memoryStore) ListTenants() []Tenant {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]Tenant, 0, len(s.tenants))
-	for _, tenant := range s.tenants {
-		out = append(out, tenant)
-	}
-	return out
-}
-
 func (s *memoryStore) CreateDevice(d Device) (Device, error) {
 	if err := contracts.ValidateProductID(d.ProductID); err != nil {
 		return Device{}, err
@@ -95,16 +80,6 @@ func (s *memoryStore) CreateDevice(d Device) (Device, error) {
 	s.devices[key] = d
 	s.statuses[key] = DeviceStatus{TenantID: d.TenantID, DeviceID: d.DeviceID, Online: false}
 	return d, nil
-}
-
-func (s *memoryStore) ListDevices() []Device {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]Device, 0, len(s.devices))
-	for _, device := range s.devices {
-		out = append(out, device)
-	}
-	return out
 }
 
 func (s *memoryStore) GetDevice(tenantID, deviceID string) (Device, bool) {
@@ -222,16 +197,6 @@ func (s *memoryStore) AckCommandResultContext(ctx context.Context, id, tenantID,
 	return cmd, nil
 }
 
-func (s *memoryStore) ListCommands() []Command {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]Command, 0, len(s.commands))
-	for _, command := range s.commands {
-		out = append(out, command)
-	}
-	return out
-}
-
 func (s *memoryStore) GetCommand(id string) (Command, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -251,16 +216,6 @@ func (s *memoryStore) GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, 
 		status.Online = false
 	}
 	return status, true
-}
-
-func (s *memoryStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := deviceKey(tenantID, deviceID)
-	src := s.telemetry[key]
-	out := make([]TelemetryRecord, len(src))
-	copy(out, src)
-	return out
 }
 
 // The memory implementation is only a test harness; PostgreSQL owns production
@@ -302,3 +257,8 @@ func (s *memoryStore) CreateCommandWithKey(ctx context.Context, tenantID, device
 	}
 	return cmd, err
 }
+
+type noopPublisher struct{}
+
+func (noopPublisher) PublishTelemetry(context.Context, TelemetryRecord) error { return nil }
+func (noopPublisher) PublishCommand(context.Context, Command) error           { return nil }

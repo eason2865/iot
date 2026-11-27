@@ -10,15 +10,6 @@ import (
 	"iot/internal/contracts"
 )
 
-// BearerTokenMiddleware keeps operational endpoints public for Kubernetes and
-// Prometheus while requiring a service token for every management API route.
-// The MQTT envelope schema stays public because device vendors integrate
-// against it; the previous /openapi.json exemption was removed along with the
-// endpoint, so the full REST route map is no longer readable without a token.
-func BearerTokenMiddleware(token string) func(http.Handler) http.Handler {
-	return BearerTokenMiddlewareWithTenants(token, nil)
-}
-
 // ParseTenantBoundTokens parses the MANAGEMENT_API_TOKENS value: a JSON object
 // mapping a bearer token to the tenant ID it is restricted to, e.g.
 // {"token-a":"tenant-1"}. An empty input yields an empty map.

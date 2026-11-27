@@ -1,4 +1,4 @@
-package platform_test
+package adminapi
 
 import (
 	"encoding/json"
@@ -10,8 +10,7 @@ import (
 )
 
 func TestDocsEndpoints(t *testing.T) {
-	app := newBusinessAPIApp(t, nil)
-	ts := httptest.NewServer(app.Router())
+	ts := httptest.NewServer(http.HandlerFunc((&Server{}).mqttEnvelopeSchemaHandler))
 	defer ts.Close()
 
 	// The served contract must be the published document on disk:

@@ -7,7 +7,6 @@ CGO_ENABLED ?= 0
 
 # Pinned to the versions recorded in proto/core/v1/*.pb.go headers; bumping
 # either regenerates the header comment and fails the CI drift check.
-PROTOC_VERSION ?= 36.2
 PROTOC_GEN_GO_VERSION ?= v1.36.8
 PROTOC_GEN_GO_GRPC_VERSION ?= v1.5.1
 

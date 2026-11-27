@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -26,16 +26,9 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	metrics := platform.NewMetrics()
 
-	postgresDSN := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	kafkaBrokers := splitCSV(envOr("KAFKA_BROKERS", "localhost:9092"))
 	emqxURL := envOr("EMQX_URL", "tcp://127.0.0.1:1883")
 	tdengineDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
-
-	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
-	if err != nil {
-		t.Fatalf("NewPostgresStore() error = %v", err)
-	}
-	defer store.Close()
 
 	publisher, err := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
 		Brokers:        kafkaBrokers,
@@ -50,29 +43,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	}
 	defer publisher.Close()
 
-	tdWriter, err := platform.NewTDengineWriter(platform.TDengineConfig{
-		DSN:   tdengineDSN,
-		Table: "telemetry_v2",
-	}, metrics)
-	if err != nil {
-		t.Fatalf("NewTDengineWriter() error = %v", err)
-	}
-	if tdWriter == nil {
-		t.Fatal("NewTDengineWriter() returned nil")
-	}
-	defer tdWriter.Close()
-
-	app := platform.New(platform.Config{
-		ServiceName: "management-api",
-		Store:       store,
-		Publisher:   publisher,
-		Metrics:     metrics,
-		// Business REST is opt-in; these routes have no auth middleware.
-		EnableBusinessAPI: true,
-	})
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
+	baseURL := e2eManagementURL()
 	tenantID := fmt.Sprintf("tenant-%d", time.Now().UnixNano())
 	deviceID := fmt.Sprintf("device-%d", time.Now().UnixNano())
 	clientIDPrefix := fmt.Sprintf("iot-e2e-%d", time.Now().UnixNano())
@@ -84,8 +55,8 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 		return mqttReachable(emqxURL)
 	})
 
-	e2eCreateTenant(t, ts.URL, tenantID, "Tenant E2E")
-	e2eCreateDevice(t, ts.URL, tenantID, deviceID, "product-x")
+	e2eCreateTenant(t, baseURL, tenantID, "Tenant E2E")
+	e2eCreateDevice(t, baseURL, tenantID, deviceID, "product-x")
 
 	telemetryClient := mustMQTTDeviceClient(t, emqxURL, clientIDPrefix+"-telemetry", tenantID, deviceID)
 	defer telemetryClient.Disconnect(250)
@@ -105,18 +76,20 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var status platform.DeviceStatus
-		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/status", &status); err != nil {
+		if err := e2eGetJSON(baseURL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/status", &status); err != nil {
 			return false
 		}
 		return status.Online && !status.LastSeenAt.IsZero()
 	})
 
 	waitFor(t, 60*time.Second, func() bool {
-		var records []platform.TelemetryRecord
-		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/telemetry", &records); err != nil {
+		var page struct {
+			Items []platform.TelemetryRecord `json:"items"`
+		}
+		if err := e2eGetJSON(baseURL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/telemetry", &page); err != nil {
 			return false
 		}
-		return len(records) >= 1
+		return len(page.Items) >= 1
 	})
 
 	waitFor(t, 60*time.Second, func() bool {
@@ -142,7 +115,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 	}
 
 	var created platform.Command
-	e2ePostJSON(t, ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
+	e2ePostJSON(t, baseURL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
 		"payload": map[string]any{
 			"switch": "on",
 		},
@@ -171,7 +144,7 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 	waitFor(t, 60*time.Second, func() bool {
 		var got platform.Command
-		if err := e2eGetJSON(ts.URL+"/api/v1/tenants/"+tenantID+"/commands/"+created.ID, &got); err != nil {
+		if err := e2eGetJSON(baseURL+"/api/v1/tenants/"+tenantID+"/commands/"+created.ID, &got); err != nil {
 			return false
 		}
 		return got.Status == platform.CommandStatusAcked
@@ -301,21 +274,6 @@ func mqttReachable(url string) bool {
 	return true
 }
 
-func mustMQTTClient(t *testing.T, brokerURL, clientID string) mqtt.Client {
-	t.Helper()
-	opts := mqtt.NewClientOptions().AddBroker(brokerURL)
-	opts.SetClientID(clientID)
-	opts.SetConnectTimeout(5 * time.Second)
-	opts.SetAutoReconnect(false)
-	client := mqtt.NewClient(opts)
-	token := client.Connect()
-	token.Wait()
-	if err := token.Error(); err != nil {
-		t.Fatalf("MQTT connect error = %v", err)
-	}
-	return client
-}
-
 func mustMQTTDeviceClient(t *testing.T, brokerURL, clientID, tenantID, deviceID string) mqtt.Client {
 	t.Helper()
 	opts := mqtt.NewClientOptions().AddBroker(brokerURL)
@@ -385,13 +343,29 @@ func e2eCreateDevice(t *testing.T, baseURL, tenantID, deviceID, productID string
 	})
 }
 
+func e2eManagementURL() string {
+	return strings.TrimRight(envOr("IOT_E2E_API_URL", "http://127.0.0.1:8080"), "/")
+}
+
+func e2eRequest(method, url string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+envOr("MANAGEMENT_API_TOKEN", "local-development-token"))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return (&http.Client{Timeout: 10 * time.Second}).Do(req)
+}
+
 func e2ePostJSON(t *testing.T, url string, body map[string]any, out ...any) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	resp, err := http.Post(url, "application/json", strings.NewReader(string(payload)))
+	resp, err := e2eRequest(http.MethodPost, url, strings.NewReader(string(payload)))
 	if err != nil {
 		t.Fatalf("http.Post() error = %v", err)
 	}
@@ -407,7 +381,7 @@ func e2ePostJSON(t *testing.T, url string, body map[string]any, out ...any) {
 }
 
 func e2eGetJSON(url string, out any) error {
-	resp, err := http.Get(url)
+	resp, err := e2eRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}

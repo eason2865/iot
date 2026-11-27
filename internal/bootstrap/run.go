@@ -21,12 +21,11 @@ import (
 )
 
 type runtimeResources struct {
-	store     platform.Repository
-	publisher platform.MessagePublisher
-	worker    *platform.Worker
-	bridge    *platform.MQTTBridge
-	metrics   *platform.Metrics
-	closers   []func() error
+	store   platform.Repository
+	worker  *platform.Worker
+	bridge  *platform.MQTTBridge
+	metrics *platform.Metrics
+	closers []func() error
 }
 
 func Run(serviceName string) error {
@@ -106,11 +105,9 @@ func Run(serviceName string) error {
 
 func newRuntimeApp(serviceName string, resources *runtimeResources) *platform.App {
 	return platform.New(platform.Config{
-		ServiceName:        serviceName,
-		DeviceHeartbeatTTL: 5 * time.Minute,
-		Store:              resources.store,
-		Publisher:          resources.publisher,
-		Metrics:            resources.metrics,
+		ServiceName: serviceName,
+		Store:       resources.store,
+		Metrics:     resources.metrics,
 		ReadinessCheck: func(ctx context.Context) error {
 			if serviceName == "telemetry-ingestor" && resources.bridge == nil {
 				return fmt.Errorf("MQTT bridge is not configured")
@@ -128,12 +125,6 @@ func newRuntimeApp(serviceName string, resources *runtimeResources) *platform.Ap
 			}
 			return nil
 		},
-		// EnableBusinessAPI is intentionally left false. bootstrap only launches
-		// telemetry-ingestor and device-worker, which must expose health/metrics
-		// only; their business REST routes have no auth middleware, so enabling
-		// them here would create an unauthenticated write API in-cluster.
-		// Public REST is served by management-api via internal/adminapi, which
-		// requires a bearer token.
 	})
 }
 
@@ -160,17 +151,16 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 		res.closers = append(res.closers, closer)
 	}
 
-	publisher, closer, err := buildPublisher(res.metrics)
-	if err != nil {
-		return nil, err
-	}
-	res.publisher = publisher
-	if closer != nil {
-		res.closers = append(res.closers, closer)
-	}
-
 	switch serviceName {
 	case "telemetry-ingestor":
+		publisher, closer, err := buildPublisher(res.metrics)
+		if err != nil {
+			return nil, err
+		}
+		if closer != nil {
+			res.closers = append(res.closers, closer)
+		}
+
 		inbox, ok := store.(platform.TelemetryInbox)
 		if !ok {
 			return nil, fmt.Errorf("telemetry-ingestor requires a durable telemetry inbox")
@@ -184,7 +174,6 @@ func buildRuntime(serviceName string) (*runtimeResources, error) {
 			TopicFilter:  runtimeconfig.EnvOrDefault("EMQX_TOPIC_FILTER", contracts.SharedTelemetryTopicFilter),
 			KafkaBrokers: runtimeconfig.SplitCSV(runtimeconfig.EnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
 			DLQTopic:     runtimeconfig.EnvOrDefault("KAFKA_DLQ_TOPIC", "iot.dlq"),
-			TopicConfig:  topicConfigFromEnv(),
 			// The bridge only ever writes the DLQ, so its retention policy is the
 			// one that applies here.
 			DLQTopicConfig: dlqTopicConfigFromEnv(),

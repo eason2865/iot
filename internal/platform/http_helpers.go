@@ -2,15 +2,12 @@ package platform
 
 import (
 	"encoding/json"
-	"iot/internal/contracts"
 	"net/http"
 )
 
 type apiError struct {
 	Error string `json:"error"`
 }
-
-func decodeJSON(r *http.Request, dst any) error { return contracts.DecodeRequestJSON(r.Body, dst) }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

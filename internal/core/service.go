@@ -15,13 +15,21 @@ import (
 	corev1 "iot/proto/core/v1"
 )
 
+type Repository interface {
+	platform.Repository
+	ListTenantsPageContext(context.Context, platform.PageRequest) ([]platform.Tenant, string, error)
+	ListDevicesPageContext(context.Context, platform.PageRequest) ([]platform.Device, string, error)
+	ListCommandsPageContext(context.Context, platform.PageRequest) ([]platform.Command, string, error)
+	ListTelemetryPageContext(context.Context, platform.PageRequest) ([]platform.TelemetryRecord, string, error)
+}
+
 type Service struct {
 	corev1.UnimplementedCoreServiceServer
-	repo      platform.Repository
+	repo      Repository
 	publisher platform.MessagePublisher
 }
 
-func NewService(repo platform.Repository, publisher platform.MessagePublisher) *Service {
+func NewService(repo Repository, publisher platform.MessagePublisher) *Service {
 	return &Service{repo: repo, publisher: publisher}
 }
 
@@ -51,29 +59,13 @@ func (s *Service) CreateTenant(ctx context.Context, req *corev1.CreateTenantRequ
 }
 
 func (s *Service) ListTenants(ctx context.Context, req *corev1.ListTenantsRequest) (*corev1.ListTenantsResponse, error) {
-	if _, err := platform.NormalizePageRequest(int(req.GetPageSize()), req.GetCursor()); err != nil {
+	page, err := platform.NormalizePageRequest(int(req.GetPageSize()), req.GetCursor())
+	if err != nil {
 		return nil, mapRepoError(err)
 	}
-	var tenants []platform.Tenant
-	nextCursor := ""
-	if paged, ok := s.repo.(interface {
-		ListTenantsPageContext(context.Context, platform.PageRequest) ([]platform.Tenant, string, error)
-	}); ok {
-		var err error
-		tenants, nextCursor, err = paged.ListTenantsPageContext(ctx, platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else if paged, ok := s.repo.(interface {
-		ListTenantsPage(platform.PageRequest) ([]platform.Tenant, string, error)
-	}); ok {
-		var err error
-		tenants, nextCursor, err = paged.ListTenantsPage(platform.PageRequest{Size: int(req.GetPageSize()), Cursor: req.GetCursor()})
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else {
-		tenants = s.repo.ListTenants()
+	tenants, nextCursor, err := s.repo.ListTenantsPageContext(ctx, page)
+	if err != nil {
+		return nil, mapRepoError(err)
 	}
 	out := make([]*corev1.Tenant, 0, len(tenants))
 	for _, tenant := range tenants {
@@ -125,30 +117,9 @@ func (s *Service) ListDevices(ctx context.Context, req *corev1.ListDevicesReques
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
-	var devices []platform.Device
-	nextCursor := ""
-	if paged, ok := s.repo.(interface {
-		ListDevicesPageContext(context.Context, platform.PageRequest) ([]platform.Device, string, error)
-	}); ok {
-		var err error
-		devices, nextCursor, err = paged.ListDevicesPageContext(ctx, page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else if paged, ok := s.repo.(interface {
-		ListDevicesPage(platform.PageRequest) ([]platform.Device, string, error)
-	}); ok {
-		var err error
-		devices, nextCursor, err = paged.ListDevicesPage(page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else {
-		for _, device := range s.repo.ListDevices() {
-			if device.TenantID == page.TenantID {
-				devices = append(devices, device)
-			}
-		}
+	devices, nextCursor, err := s.repo.ListDevicesPageContext(ctx, page)
+	if err != nil {
+		return nil, mapRepoError(err)
 	}
 	out := make([]*corev1.Device, 0, len(devices))
 	for _, device := range devices {
@@ -208,26 +179,9 @@ func (s *Service) ListTelemetry(ctx context.Context, req *corev1.ListTelemetryRe
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
-	var records []platform.TelemetryRecord
-	nextCursor := ""
-	if paged, ok := s.repo.(interface {
-		ListTelemetryPageContext(context.Context, platform.PageRequest) ([]platform.TelemetryRecord, string, error)
-	}); ok {
-		var err error
-		records, nextCursor, err = paged.ListTelemetryPageContext(ctx, page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else if paged, ok := s.repo.(interface {
-		ListTelemetryPage(platform.PageRequest) ([]platform.TelemetryRecord, string, error)
-	}); ok {
-		var err error
-		records, nextCursor, err = paged.ListTelemetryPage(page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else {
-		records = s.repo.ListTelemetry(req.GetTenantId(), req.GetDeviceId())
+	records, nextCursor, err := s.repo.ListTelemetryPageContext(ctx, page)
+	if err != nil {
+		return nil, mapRepoError(err)
 	}
 	out := make([]*corev1.TelemetryRecord, 0, len(records))
 	for _, record := range records {
@@ -327,30 +281,9 @@ func (s *Service) ListCommands(ctx context.Context, req *corev1.ListCommandsRequ
 	if !contracts.IsValidTenantID(req.GetTenantId()) {
 		return nil, status.Error(codes.InvalidArgument, "tenantId contains invalid MQTT topic characters")
 	}
-	var commands []platform.Command
-	nextCursor := ""
-	if paged, ok := s.repo.(interface {
-		ListCommandsPageContext(context.Context, platform.PageRequest) ([]platform.Command, string, error)
-	}); ok {
-		var err error
-		commands, nextCursor, err = paged.ListCommandsPageContext(ctx, page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else if paged, ok := s.repo.(interface {
-		ListCommandsPage(platform.PageRequest) ([]platform.Command, string, error)
-	}); ok {
-		var err error
-		commands, nextCursor, err = paged.ListCommandsPage(page)
-		if err != nil {
-			return nil, mapRepoError(err)
-		}
-	} else {
-		for _, command := range s.repo.ListCommands() {
-			if command.TenantID == req.GetTenantId() {
-				commands = append(commands, command)
-			}
-		}
+	commands, nextCursor, err := s.repo.ListCommandsPageContext(ctx, page)
+	if err != nil {
+		return nil, mapRepoError(err)
 	}
 	out := make([]*corev1.Command, 0, len(commands))
 	for _, command := range commands {

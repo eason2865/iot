@@ -222,7 +222,7 @@ func rpcServerConf() zrpc.RpcServerConf {
 	}
 }
 
-func buildStore(ttl time.Duration) (platform.Repository, func() error, error) {
+func buildStore(ttl time.Duration) (Repository, func() error, error) {
 	dsn := runtimeconfig.EnvOrDefault("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
 	autoMigrate, err := strconv.ParseBool(runtimeconfig.EnvOrDefault("POSTGRES_AUTO_MIGRATE", "true"))
 	if err != nil {

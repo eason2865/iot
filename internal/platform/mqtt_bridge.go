@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"iot/internal/contracts"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/segmentio/kafka-go"
-	"iot/internal/contracts"
 )
 
 var errPublishBacklogFull = errors.New("mqtt bridge publish backlog full")
@@ -25,7 +26,6 @@ type MQTTBridgeConfig struct {
 	PublishSlotTimeout time.Duration
 	KafkaBrokers       []string
 	DLQTopic           string
-	TopicConfig        KafkaTopicConfig
 	DLQTopicConfig     KafkaTopicConfig
 	// Production injects PostgreSQL as a durable inbox. Kafka failures are then
 	// recoverable by the worker even if the ingestor is replaced during publishing.
@@ -202,9 +202,6 @@ func (b *MQTTBridge) fail(err error) {
 	}
 }
 
-func acquirePublishSlot(slots chan struct{}, timeout time.Duration) bool {
-	return acquirePublishSlotContext(context.Background(), slots, timeout)
-}
 func acquirePublishSlotContext(ctx context.Context, slots chan struct{}, timeout time.Duration) bool {
 	if timeout <= 0 {
 		select {

@@ -158,7 +158,8 @@ func (m *Metrics) HTTPMiddleware() func(http.Handler) http.Handler {
 			start := time.Now()
 			rw := &observedResponseWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r)
-			m.ObserveHTTPRequest(routeLabel(r.URL.Path), r.Method, rw.status, time.Since(start))
+			route := routeLabel(r.URL.Path)
+			m.ObserveHTTPRequest(route, r.Method, rw.status, time.Since(start))
 		})
 	}
 }
@@ -189,20 +190,35 @@ func (m *Metrics) ObserveHTTPRequest(route, method string, status int, duration 
 	m.httpRequestDuration.With(labels).Observe(duration.Seconds())
 }
 
-func (m *Metrics) IncTenant(result string) {
-	incCounterVec(m.tenantsTotal, result)
+// ManagementWriteHandler counts outcomes of the gateway's registered write routes.
+func (m *Metrics) ManagementWriteHandler(handler http.HandlerFunc) http.HandlerFunc {
+	if m == nil {
+		return handler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		rw := &observedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		handler(rw, r)
+		m.observeManagementWrite(routeLabel(r.URL.Path), rw.status)
+	}
 }
 
-func (m *Metrics) IncDevice(result string) {
-	incCounterVec(m.devicesTotal, result)
-}
-
-func (m *Metrics) IncTelemetry(result string) {
-	incCounterVec(m.telemetryIngestedTotal, result)
-}
-
-func (m *Metrics) IncCommand(kind, result string) {
-	incCounterVec(m.commandsTotal, kind, result)
+func (m *Metrics) observeManagementWrite(route string, status int) {
+	result := "ok"
+	if status >= 400 {
+		result = "error"
+	}
+	switch route {
+	case "/api/v1/tenants":
+		incCounterVec(m.tenantsTotal, result)
+	case "/api/v1/tenants/{tenantId}/devices":
+		incCounterVec(m.devicesTotal, result)
+	case "/api/v1/tenants/{tenantId}/devices/{deviceId}/telemetry":
+		incCounterVec(m.telemetryIngestedTotal, result)
+	case "/api/v1/tenants/{tenantId}/devices/{deviceId}/commands":
+		incCounterVec(m.commandsTotal, "created", result)
+	case "/api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements":
+		incCounterVec(m.commandsTotal, "acked", result)
+	}
 }
 
 func (m *Metrics) IncKafkaPublish(kind, result string) {

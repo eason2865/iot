@@ -1,297 +1,16 @@
 package platform_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-
-	"google.golang.org/grpc"
 
 	"iot/internal/platform"
 )
 
-func TestDeviceTelemetryAndStatusFlow(t *testing.T) {
-	app := newBusinessAPIApp(t, nil)
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	createTenant(t, ts.URL, "tenant-a", "Tenant A")
-	createDevice(t, ts.URL, "tenant-a", "device-42", "product-x")
-
-	postJSON(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/telemetry", map[string]any{
-		"msgId":   "msg-1",
-		"ts":      1717670000000,
-		"type":    "telemetry",
-		"version": "v1",
-		"payload": map[string]any{
-			"temp": 23.4,
-		},
-	})
-
-	var status platform.DeviceStatus
-	getJSON(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/status", &status)
-
-	if !status.Online {
-		t.Fatalf("device should be online after telemetry")
-	}
-	if status.LastSeenAt.IsZero() {
-		t.Fatalf("LastSeenAt should be set")
-	}
-
-	var records []platform.TelemetryRecord
-	getJSON(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/telemetry", &records)
-	if len(records) != 1 {
-		t.Fatalf("telemetry records = %d, want 1", len(records))
-	}
-}
-
-func TestCommandAckFlow(t *testing.T) {
-	app := newBusinessAPIApp(t, nil)
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	createTenant(t, ts.URL, "tenant-a", "Tenant A")
-	createDevice(t, ts.URL, "tenant-a", "device-42", "product-x")
-
-	var created platform.Command
-	postJSON(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/commands", map[string]any{
-		"payload": map[string]any{
-			"switch": "on",
-		},
-	}, &created)
-
-	if created.Status != platform.CommandStatusPublished {
-		t.Fatalf("created status = %q, want %q", created.Status, platform.CommandStatusPublished)
-	}
-
-	postJSON(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/commands/"+created.ID+"/acknowledgements", map[string]any{"status": "acked"})
-
-	var got platform.Command
-	getJSON(t, ts.URL+"/api/v1/tenants/tenant-a/commands/"+created.ID, &got)
-	if got.Status != platform.CommandStatusAcked {
-		t.Fatalf("command status = %q, want %q", got.Status, platform.CommandStatusAcked)
-	}
-
-	// Command reads are tenant-scoped like ListCommands and AckCommand: the
-	// detail endpoint must demand a tenant, and a foreign tenant must see
-	// not-found rather than being told the command exists.
-	getJSONStatus(t, ts.URL+"/api/v1/commands/"+created.ID, http.StatusNotFound)
-	getJSONStatus(t, ts.URL+"/api/v1/tenants/tenant-b/commands/"+created.ID, http.StatusNotFound)
-}
-
-func TestMQTTTopicIdentifiersAreRejectedAtAPIIngress(t *testing.T) {
-	app := newBusinessAPIApp(t, nil)
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	postJSONStatus(t, ts.URL+"/api/v1/tenants", http.StatusBadRequest, map[string]any{
-		"id":   "tenant/bad",
-		"name": "Tenant Bad",
-	})
-
-	createTenant(t, ts.URL, "tenant-a", "Tenant A")
-	postJSONStatus(t, ts.URL+"/api/v1/tenants/tenant-a/devices", http.StatusBadRequest, map[string]any{
-		"deviceId":  "device/#",
-		"productId": "product-x",
-		"secret":    "secret-1",
-	})
-
-	createDevice(t, ts.URL, "tenant-a", "device-42", "product-x")
-	postJSONStatus(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/telemetry", http.StatusBadRequest, map[string]any{
-		"msgId":    "msg-invalid-topic",
-		"deviceId": "device/42",
-		"ts":       1717670000000,
-		"type":     "telemetry",
-		"version":  "v1",
-		"payload":  map[string]any{},
-	})
-	postJSONStatus(t, ts.URL+"/api/v1/tenants/tenant-a/devices/device-42/commands", http.StatusBadRequest, map[string]any{
-		"deviceId": "device/42",
-		"payload":  map[string]any{"switch": "on"},
-	})
-}
-
-func TestMQTTTopicIdentifierRejectionsAreCountedAsErrors(t *testing.T) {
-	metrics := platform.NewMetrics()
-	app := newBusinessAPIApp(t, metrics)
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	postJSONStatus(t, ts.URL+"/api/v1/tenants", http.StatusBadRequest, map[string]any{
-		"id":   "tenant/#",
-		"name": "Tenant Bad",
-	})
-
-	resp, err := http.Get(ts.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("io.ReadAll() error = %v", err)
-	}
-	text := string(body)
-	if !strings.Contains(text, `iot_tenants_total{result="error"} 1`) {
-		t.Fatalf("metrics body missing tenant error count:\n%s", text)
-	}
-}
-
-func TestMetricsEndpointExposesTraffic(t *testing.T) {
-	metrics := platform.NewMetrics()
-	app := newBusinessAPIApp(t, metrics)
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	createTenant(t, ts.URL, "tenant-m", "Tenant M")
-	createDevice(t, ts.URL, "tenant-m", "device-m", "product-m")
-	postJSON(t, ts.URL+"/api/v1/tenants/tenant-m/devices/device-m/telemetry", map[string]any{
-		"msgId":   "msg-m",
-		"ts":      1717670000000,
-		"type":    "telemetry",
-		"version": "v1",
-		"payload": map[string]any{
-			"temp": 25,
-		},
-	})
-
-	_, _ = metrics.UnaryServerInterceptor()(context.Background(), nil, &grpc.UnaryServerInfo{
-		FullMethod: "/iot.core.v1.CoreService/CreateTenant",
-	}, func(ctx context.Context, req any) (any, error) {
-		return nil, nil
-	})
-
-	resp, err := http.Get(ts.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("io.ReadAll() error = %v", err)
-	}
-	text := string(body)
-	if !strings.Contains(text, "iot_http_requests_total") {
-		t.Fatalf("metrics body missing iot_http_requests_total")
-	}
-	if !strings.Contains(text, "iot_telemetry_ingested_total") {
-		t.Fatalf("metrics body missing iot_telemetry_ingested_total")
-	}
-	if !strings.Contains(text, "iot_grpc_requests_total") {
-		t.Fatalf("metrics body missing iot_grpc_requests_total")
-	}
-}
-
-func createTenant(t *testing.T, baseURL, id, name string) {
-	t.Helper()
-	postJSON(t, baseURL+"/api/v1/tenants", map[string]any{
-		"id":   id,
-		"name": name,
-	})
-}
-
-func createDevice(t *testing.T, baseURL, tenantID, deviceID, productID string) {
-	t.Helper()
-	postJSON(t, baseURL+"/api/v1/tenants/"+tenantID+"/devices", map[string]any{
-		"deviceId":  deviceID,
-		"productId": productID,
-		"secret":    "secret-1",
-	})
-}
-
-func postJSON(t *testing.T, url string, body map[string]any, out ...any) {
-	t.Helper()
-	payload, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("http.Post() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		t.Fatalf("status code = %d", resp.StatusCode)
-	}
-	if len(out) > 0 {
-		if err := json.NewDecoder(resp.Body).Decode(out[0]); err != nil {
-			t.Fatalf("Decode() error = %v", err)
-		}
-	}
-}
-
-func postJSONStatus(t *testing.T, url string, wantStatus int, body map[string]any) {
-	t.Helper()
-	payload, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("http.Post() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != wantStatus {
-		t.Fatalf("status code = %d, want %d", resp.StatusCode, wantStatus)
-	}
-}
-
-func getJSONStatus(t *testing.T, url string, wantStatus int) {
-	t.Helper()
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != wantStatus {
-		t.Fatalf("GET %s: status code = %d, want %d", url, resp.StatusCode, wantStatus)
-	}
-}
-
-func getJSON(t *testing.T, url string, out any) {
-	t.Helper()
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		t.Fatalf("status code = %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-}
-
-// newBusinessAPIApp builds the in-process REST surface used by these tests and
-// by the live E2E harness. The business endpoints are strictly opt-in via
-// EnableBusinessAPI: they carry no auth middleware, so they are never inferred
-// from the service name.
-func newBusinessAPIApp(t *testing.T, metrics *platform.Metrics) *platform.App {
-	t.Helper()
-	return platform.New(platform.Config{
-		ServiceName:       "management-api",
-		Metrics:           metrics,
-		EnableBusinessAPI: true,
-	})
-}
-
-// TestBusinessAPIIsOptIn locks in the hardening that dropped the implicit
-// `|| ServiceName == "management-api"` default. These routes have no bearer
-// token check, so a service must opt in explicitly; being *named*
-// management-api must never be enough, otherwise any service wired through
-// bootstrap under that name would expose unauthenticated tenant/device/
-// telemetry/command writes.
-func TestBusinessAPIIsOptIn(t *testing.T) {
+func TestOperationalRouterExcludesBusinessAPI(t *testing.T) {
 	for _, serviceName := range []string{"management-api", "device-worker", "telemetry-ingestor", "iot-core"} {
 		app := platform.New(platform.Config{ServiceName: serviceName})
 		ts := httptest.NewServer(app.Router())
@@ -304,10 +23,9 @@ func TestBusinessAPIIsOptIn(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusNotFound {
 			ts.Close()
-			t.Fatalf("service %q: GET /api/v1/tenants status = %d, want %d (business API must be opt-in)", serviceName, resp.StatusCode, http.StatusNotFound)
+			t.Fatalf("service %q: GET /api/v1/tenants status = %d, want %d", serviceName, resp.StatusCode, http.StatusNotFound)
 		}
 
-		// Operational endpoints stay available regardless of the flag.
 		health, err := http.Get(ts.URL + "/healthz")
 		if err != nil {
 			ts.Close()
@@ -318,20 +36,6 @@ func TestBusinessAPIIsOptIn(t *testing.T) {
 		if health.StatusCode != http.StatusOK {
 			t.Fatalf("service %q: GET /healthz status = %d, want %d", serviceName, health.StatusCode, http.StatusOK)
 		}
-	}
-
-	// Opting in is still the supported path, including for a service that is not
-	// called management-api.
-	app := platform.New(platform.Config{ServiceName: "not-management-api", EnableBusinessAPI: true})
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/api/v1/tenants")
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("EnableBusinessAPI=true: status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }
 
@@ -361,7 +65,7 @@ func TestReadyzFailsClosedOnStoreOutage(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("in-memory store: GET /readyz status = %d, want %d", resp.StatusCode, http.StatusOK)
+		t.Fatalf("healthy: GET /readyz status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
 	degraded := platform.New(platform.Config{ServiceName: "device-worker", Store: failingPingStore{}})

@@ -22,7 +22,8 @@ coverage.out
 coverage.html
 
 # Generated presentation/report workspaces
-outputs/
+/outputs/*
+!/outputs/go.mod
 
 # Logs and runtime data
 *.log

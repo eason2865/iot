@@ -49,13 +49,20 @@ func TestHistoricalKafkaTelemetryDoesNotRefreshLiveness(t *testing.T) {
 	defer func() { cancel(); <-done }()
 	var stored []TelemetryRecord
 	for ctx.Err() == nil {
-		stored = s.ListTelemetry("t", "d")
+		stored, _, err = s.ListTelemetryPageContext(ctx, PageRequest{TenantID: "t", DeviceID: "d"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(stored) == 2 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(stored) != 2 || !stored[0].ReceivedAt.Equal(legacyTime) || !stored[1].ReceivedAt.Equal(received) {
+	receivedByID := make(map[string]time.Time)
+	for _, rec := range stored {
+		receivedByID[rec.MsgID] = rec.ReceivedAt
+	}
+	if len(stored) != 2 || !receivedByID["legacy"].Equal(legacyTime) || !receivedByID["historical"].Equal(received) {
 		t.Fatalf("historical receive time was replaced: %+v, want %s", stored, received)
 	}
 	status, err := s.GetDeviceStatusContext(ctx, "t", "d")

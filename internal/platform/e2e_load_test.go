@@ -1,21 +1,16 @@
 package platform_test
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http/httptest"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/segmentio/kafka-go"
 
 	"iot/internal/contracts"
 	"iot/internal/platform"
@@ -32,167 +27,41 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 		telemetryPerDevice = 6
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	metrics := platform.NewMetrics()
-
+	baseURL := e2eManagementURL()
 	postgresDSN := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
-	kafkaBrokers := splitCSV(envOr("KAFKA_BROKERS", "localhost:9092"))
 	emqxURL := envOr("EMQX_URL", "tcp://127.0.0.1:1883")
 	tdengineDSN := envOr("TDENGINE_DSN", "root:taosdata@http(127.0.0.1:6041)/iot")
 	runPrefix := fmt.Sprintf("load-%d", time.Now().UnixNano())
 	clientIDPrefix := "iot-" + runPrefix
 	tenantIDs := make([]string, 0, tenantCount)
-	ackTopicFilters := make([]string, 0, tenantCount)
 	for ti := 0; ti < tenantCount; ti++ {
 		tenantID := fmt.Sprintf("%s-tenant-%d", runPrefix, ti)
 		tenantIDs = append(tenantIDs, tenantID)
-		ackTopicFilters = append(ackTopicFilters, fmt.Sprintf("tenant/%s/device/+/ack", tenantID))
 	}
 
-	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
-	if err != nil {
-		t.Fatalf("NewPostgresStore() error = %v", err)
-	}
-	defer store.Close()
-
-	publisher, err := platform.NewKafkaPublisher(platform.KafkaPublisherConfig{
-		Brokers:        kafkaBrokers,
-		TelemetryTopic: "iot.telemetry",
-		CommandTopic:   "iot.command",
-	}, metrics)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if publisher == nil {
-		t.Fatal("NewKafkaPublisher() returned nil")
-	}
-	defer publisher.Close()
-
-	tdWriter, err := platform.NewTDengineWriter(platform.TDengineConfig{
-		DSN:   tdengineDSN,
-		Table: "telemetry_v2",
-	}, metrics)
-	if err != nil {
-		t.Fatalf("NewTDengineWriter() error = %v", err)
-	}
-	if tdWriter == nil {
-		t.Fatal("NewTDengineWriter() returned nil")
-	}
-	defer tdWriter.Close()
-
-	app := platform.New(platform.Config{
-		ServiceName: "management-api",
-		Store:       store,
-		Publisher:   publisher,
-		Metrics:     metrics,
-		// Business REST is opt-in; these routes have no auth middleware.
-		EnableBusinessAPI: true,
-	})
-	ts := httptest.NewServer(app.Router())
-	defer ts.Close()
-
-	bridge := platform.NewMQTTBridge(platform.MQTTBridgeConfig{
-		BrokerURL:   emqxURL,
-		ClientID:    clientIDPrefix + "-bridge",
-		TopicFilter: contracts.TelemetryTopicFilter,
-	}, publisher, metrics)
-	worker := platform.NewWorker(platform.WorkerConfig{
-		KafkaBrokers:     kafkaBrokers,
-		KafkaGroupID:     fmt.Sprintf("iot-load-%d", time.Now().UnixNano()),
-		KafkaStartOffset: kafka.LastOffset,
-		TelemetryTopic:   "iot.telemetry",
-		CommandTopic:     "iot.command",
-		AckTopicFilters:  ackTopicFilters,
-		TenantIDs:        tenantIDs,
-		MQTTBrokerURL:    emqxURL,
-		MQTTClientID:     clientIDPrefix + "-device-worker",
-	}, store, tdWriter, metrics)
-
-	runErr := make(chan error, 2)
-	go func() {
-		if err := bridge.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			runErr <- fmt.Errorf("bridge: %w", err)
-		}
-	}()
-	go func() {
-		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			runErr <- fmt.Errorf("worker: %w", err)
-		}
-	}()
-	defer func() {
-		cancel()
-		select {
-		case err := <-runErr:
-			if err != nil {
-				t.Fatalf("background service error: %v", err)
-			}
-		default:
-		}
-	}()
-
-	waitFor(t, 10*time.Second, func() bool {
-		return mqttReachable(emqxURL)
-	})
-
-	telemetryClient := mustMQTTClient(t, emqxURL, clientIDPrefix+"-telemetry")
-	defer telemetryClient.Disconnect(250)
-	agents := make([]func(), 0, tenantCount)
-
-	deviceIDs := make([]string, 0, tenantCount*devicesPerTenant)
-	for ti, tenantID := range tenantIDs {
-		e2eCreateTenant(t, ts.URL, tenantID, "Load Tenant "+strconv.Itoa(ti))
+	devices := make(map[string]mqtt.Client, tenantCount*devicesPerTenant)
+	for ti, tenant := range tenantIDs {
+		e2eCreateTenant(t, baseURL, tenant, "Load Tenant "+strconv.Itoa(ti))
 		for di := 0; di < devicesPerTenant; di++ {
-			deviceID := fmt.Sprintf("%s-device-%d-%d", runPrefix, ti, di)
-			deviceIDs = append(deviceIDs, deviceID)
-			e2eCreateDevice(t, ts.URL, tenantID, deviceID, "product-load")
-		}
-	}
-
-	for _, tenantID := range tenantIDs {
-		tenantID := tenantID
-		client := mustMQTTClient(t, emqxURL, clientIDPrefix+"-agent-"+tenantID)
-		commandTopic, err := contracts.BuildTenantCommandTopicFilter(tenantID)
-		if err != nil {
-			t.Fatalf("BuildTenantCommandTopicFilter() error = %v", err)
-		}
-		ackCh := make(chan commandEnvelope, 16)
-		sub := client.Subscribe(commandTopic, 1, func(c mqtt.Client, msg mqtt.Message) {
-			var env commandEnvelope
-			if err := json.Unmarshal(msg.Payload(), &env); err != nil {
-				return
-			}
-			ackTopic, err := contracts.BuildAckTopic(env.TenantID, env.DeviceID)
-			if err != nil {
-				return
-			}
-			go func() {
-				ackPayload := map[string]any{
-					"commandId": env.ID,
-					"tenantId":  env.TenantID,
-					"deviceId":  env.DeviceID,
-					"status":    "acked",
-				}
-				if err := publishMQTTJSONNoT(c, ackTopic, ackPayload); err != nil {
+			id := fmt.Sprintf("%s-device-%d-%d", runPrefix, ti, di)
+			e2eCreateDevice(t, baseURL, tenant, id, "product-load")
+			client := mustMQTTDeviceClient(t, emqxURL, clientIDPrefix+"-"+id, tenant, id)
+			defer client.Disconnect(250)
+			devices[id] = client
+			ackTopic := contractsMustTopic(t, tenant, id, contracts.TopicSuffixAck)
+			token := client.Subscribe(contractsMustTopic(t, tenant, id, contracts.TopicSuffixCommand), 1, func(c mqtt.Client, msg mqtt.Message) {
+				var env commandEnvelope
+				if err := json.Unmarshal(msg.Payload(), &env); err != nil {
 					return
 				}
-				select {
-				case ackCh <- env:
-				default:
-				}
-			}()
-		})
-		sub.Wait()
-		if err := sub.Error(); err != nil {
-			t.Fatalf("subscribe command topic error = %v", err)
+				go publishMQTTJSONNoT(c, ackTopic, map[string]any{"commandId": env.ID, "tenantId": tenant, "deviceId": id, "status": "acked"})
+			})
+			token.Wait()
+			if err := token.Error(); err != nil {
+				t.Fatal(err)
+			}
 		}
-		agents = append(agents, func() { client.Disconnect(250) })
 	}
-	defer func() {
-		for _, closeFn := range agents {
-			closeFn()
-		}
-	}()
 
 	start := time.Now()
 	baseTelemetryTs := time.Now().UnixMilli()
@@ -201,7 +70,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	telemetrySent := 0
 	for ti, tenantID := range tenantIDs {
 		for di := 0; di < devicesPerTenant; di++ {
-			deviceID := deviceIDs[ti*devicesPerTenant+di]
+			deviceID := fmt.Sprintf("%s-device-%d-%d", runPrefix, ti, di)
 			for seq := 0; seq < telemetryPerDevice; seq++ {
 				currentTs := baseTelemetryTs + telemetryIndex
 				telemetryIndex++
@@ -218,7 +87,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 					},
 				}
 				telemetryTopic := contractsMustTopic(t, tenantID, deviceID, contracts.TopicSuffixTelemetry)
-				publishMQTTJSON(t, telemetryClient, telemetryTopic, payload)
+				publishMQTTJSON(t, devices[deviceID], telemetryTopic, payload)
 				telemetrySent++
 			}
 		}
@@ -231,8 +100,8 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 			return false
 		}
 		for ti, tenantID := range tenantIDs {
-			deviceID := deviceIDs[ti*devicesPerTenant]
-			gotTD, err := tdengineTelemetryCountExact(tdengineDSN, tenantID, deviceID)
+			deviceID := fmt.Sprintf("%s-device-%d-0", runPrefix, ti)
+			gotTD, err := tdengineTelemetryCount(tdengineDSN, tenantID, deviceID)
 			if err != nil || gotTD < telemetryPerDevice {
 				return false
 			}
@@ -242,9 +111,9 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 
 	for ti, tenantID := range tenantIDs {
 		for di := 0; di < devicesPerTenant; di++ {
-			deviceID := deviceIDs[ti*devicesPerTenant+di]
+			deviceID := fmt.Sprintf("%s-device-%d-%d", runPrefix, ti, di)
 			var cmd platform.Command
-			e2ePostJSON(t, ts.URL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
+			e2ePostJSON(t, baseURL+"/api/v1/tenants/"+tenantID+"/devices/"+deviceID+"/commands", map[string]any{
 				"payload": map[string]any{
 					"switch": "toggle",
 					"idx":    di,
@@ -267,7 +136,7 @@ func TestE2ELoadMultiTenantMultiDevice(t *testing.T) {
 	})
 
 	waitFor(t, 20*time.Second, func() bool {
-		_, err := e2eGetJSONBody(ts.URL + "/api/v1/tenants/" + tenantIDs[0] + "/devices/" + deviceIDs[0] + "/status")
+		_, err := e2eGetJSONBody(baseURL + "/api/v1/tenants/" + tenantIDs[0] + "/devices/" + fmt.Sprintf("%s-device-0-0", runPrefix) + "/status")
 		return err == nil
 	})
 
@@ -308,24 +177,6 @@ func pgOnlineDeviceCount(dsn, tenantPrefix string) (int, error) {
 	defer db.Close()
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM device_state WHERE tenant_id LIKE $1 AND connected = true`, tenantPrefix).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func tdengineTelemetryCountExact(dsn, tenantID, deviceID string) (int, error) {
-	db, err := sql.Open("taosRestful", dsn)
-	if err != nil {
-		return 0, err
-	}
-	defer db.Close()
-	var count int
-	query := fmt.Sprintf(
-		"select count(*) from telemetry where tenant_id='%s' and device_id='%s';",
-		strings.ReplaceAll(tenantID, "'", "''"),
-		strings.ReplaceAll(deviceID, "'", "''"),
-	)
-	if err := db.QueryRow(query).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

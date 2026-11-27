@@ -166,17 +166,14 @@ func TestRepoErrorsMapToStatusCodes(t *testing.T) {
 	}
 }
 
-type fakeRepo struct{}
+type fakeRepo struct{ Repository }
 
 func (fakeRepo) CreateTenant(platform.Tenant) (platform.Tenant, error) { return platform.Tenant{}, nil }
-func (fakeRepo) ListTenants() []platform.Tenant                        { return nil }
 func (fakeRepo) CreateDevice(platform.Device) (platform.Device, error) { return platform.Device{}, nil }
-func (fakeRepo) ListDevices() []platform.Device                        { return nil }
 func (fakeRepo) GetDevice(string, string) (platform.Device, bool)      { return platform.Device{}, false }
 func (fakeRepo) RecordTelemetry(contracts.Envelope) (platform.TelemetryRecord, error) {
 	return platform.TelemetryRecord{}, nil
 }
-func (fakeRepo) ListTelemetry(string, string) []platform.TelemetryRecord { return nil }
 func (fakeRepo) GetDeviceStatus(string, string) (platform.DeviceStatus, bool) {
 	return platform.DeviceStatus{}, false
 }
@@ -186,12 +183,11 @@ func (fakeRepo) CreateCommand(string, string, json.RawMessage) (platform.Command
 func (fakeRepo) AckCommand(string, string, string) (platform.Command, error) {
 	return platform.Command{}, nil
 }
-func (fakeRepo) ListCommands() []platform.Command           { return nil }
 func (fakeRepo) GetCommand(string) (platform.Command, bool) { return platform.Command{}, false }
 
 type pagedFakeRepo struct{ fakeRepo }
 
-func (pagedFakeRepo) ListCommandsPage(page platform.PageRequest) ([]platform.Command, string, error) {
+func (pagedFakeRepo) ListCommandsPageContext(_ context.Context, page platform.PageRequest) ([]platform.Command, string, error) {
 	if page.TenantID != "tenant-a" {
 		return nil, "", fmt.Errorf("unexpected tenant filter %q", page.TenantID)
 	}

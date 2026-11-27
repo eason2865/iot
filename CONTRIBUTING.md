@@ -18,6 +18,16 @@ make test
 make build
 ```
 
+The opt-in MQTT end-to-end tests use a running four-service deployment. Set
+`IOT_E2E_API_URL` (default `http://127.0.0.1:8080`) and `MANAGEMENT_API_TOKEN`
+for its management gateway, and point `EMQX_URL`, `KAFKA_BROKERS`, `POSTGRES_DSN`,
+and `TDENGINE_DSN` at the same test stack. Use `IOT_E2E=1` for the single-device
+flow or `IOT_E2E_LOAD=1` for five tenants and fifty devices.
+
+Local validation artifacts belong in `outputs/`. Its nested Go module keeps
+archived runners out of the project's package scan. To rebuild a standalone
+runner with the project dependencies, run `go build -o /tmp/runner ./outputs/<case>/main.go` from the repository root.
+
 ## Pull Request Checklist
 
 - Keep changes focused on one topic.

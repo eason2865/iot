@@ -157,36 +157,6 @@ func (s *PostgresStore) CreateTenantContext(ctx context.Context, t Tenant) (Tena
 	return t, nil
 }
 
-func (s *PostgresStore) ListTenants() []Tenant {
-	rows, _ := s.ListTenantsContext(context.Background())
-	return rows
-}
-
-func (s *PostgresStore) ListTenantsContext(ctx context.Context) ([]Tenant, error) {
-	ctx, cancel := postgresOperationContext(ctx)
-	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name FROM tenants ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Tenant
-	for rows.Next() {
-		var item Tenant
-
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
-			return nil, err
-		}
-
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *PostgresStore) ListTenantsPage(page PageRequest) ([]Tenant, string, error) {
-	return s.ListTenantsPageContext(context.Background(), page)
-}
-
 func (s *PostgresStore) ListTenantsPageContext(ctx context.Context, page PageRequest) ([]Tenant, string, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
@@ -230,10 +200,6 @@ func (s *PostgresStore) ListTenantsPageContext(ctx context.Context, page PageReq
 		return nil, "", err
 	}
 	return out, next, nil
-}
-
-func (s *PostgresStore) ListDevicesPage(page PageRequest) ([]Device, string, error) {
-	return s.ListDevicesPageContext(context.Background(), page)
 }
 
 func (s *PostgresStore) ListDevicesPageContext(ctx context.Context, page PageRequest) ([]Device, string, error) {
@@ -327,32 +293,6 @@ func (s *PostgresStore) CreateDeviceContext(ctx context.Context, d Device) (Devi
 	}
 	d.Secret = ""
 	return d, nil
-}
-
-func (s *PostgresStore) ListDevices() []Device {
-	rows, _ := s.ListDevicesContext(context.Background())
-	return rows
-}
-
-func (s *PostgresStore) ListDevicesContext(ctx context.Context) ([]Device, error) {
-	ctx, cancel := postgresOperationContext(ctx)
-	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT tenant_id,device_id,product_id,created_at FROM devices ORDER BY tenant_id,device_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Device
-	for rows.Next() {
-		var item Device
-
-		if err := rows.Scan(&item.TenantID, &item.DeviceID, &item.ProductID, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-
-		out = append(out, item)
-	}
-	return out, rows.Err()
 }
 
 func (s *PostgresStore) GetDevice(tenantID, deviceID string) (Device, bool) {
@@ -525,36 +465,6 @@ func (s *PostgresStore) ListUnwrittenTelemetry(ctx context.Context, olderThan ti
 		out = append(out, rec)
 	}
 	return out, cursor, rows.Err()
-}
-
-func (s *PostgresStore) ListTelemetry(tenantID, deviceID string) []TelemetryRecord {
-	rows, _ := s.ListTelemetryContext(context.Background(), tenantID, deviceID)
-	return rows
-}
-
-func (s *PostgresStore) ListTelemetryContext(ctx context.Context, tenantID, deviceID string) ([]TelemetryRecord, error) {
-	ctx, cancel := postgresOperationContext(ctx)
-	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT msg_id,tenant_id,device_id,ts,type,version,payload,received_at FROM telemetry_records WHERE tenant_id=$1 AND device_id=$2 ORDER BY received_at ASC`, tenantID, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []TelemetryRecord
-	for rows.Next() {
-		var item TelemetryRecord
-		var payload []byte
-		if err := rows.Scan(&item.MsgID, &item.TenantID, &item.DeviceID, &item.Ts, &item.Type, &item.Version, &payload, &item.ReceivedAt); err != nil {
-			return nil, err
-		}
-		item.Payload = json.RawMessage(payload)
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *PostgresStore) ListTelemetryPage(page PageRequest) ([]TelemetryRecord, string, error) {
-	return s.ListTelemetryPageContext(context.Background(), page)
 }
 
 func (s *PostgresStore) ListTelemetryPageContext(ctx context.Context, page PageRequest) ([]TelemetryRecord, string, error) {
@@ -995,26 +905,6 @@ func (s *PostgresStore) updateCommandsWithEvent(ctx context.Context, query, even
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-func (s *PostgresStore) ListCommands() []Command {
-	rows, _ := s.ListCommandsContext(context.Background())
-	return rows
-}
-
-func (s *PostgresStore) ListCommandsContext(ctx context.Context) ([]Command, error) {
-	ctx, cancel := postgresOperationContext(ctx)
-	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,tenant_id,device_id,status,payload,created_at,updated_at,dispatch_attempts,deadline_at,result FROM commands ORDER BY created_at DESC,id DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanCommands(rows)
-}
-
-func (s *PostgresStore) ListCommandsPage(page PageRequest) ([]Command, string, error) {
-	return s.ListCommandsPageContext(context.Background(), page)
 }
 
 func (s *PostgresStore) ListCommandsPageContext(ctx context.Context, page PageRequest) ([]Command, string, error) {

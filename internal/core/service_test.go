@@ -180,7 +180,7 @@ func (fakeRepo) GetDeviceStatus(string, string) (platform.DeviceStatus, bool) {
 func (fakeRepo) CreateCommand(string, string, json.RawMessage) (platform.Command, error) {
 	return platform.Command{}, nil
 }
-func (fakeRepo) AckCommand(string, string, string) (platform.Command, error) {
+func (fakeRepo) AckCommandResultContext(context.Context, string, string, string, contracts.CommandResult) (platform.Command, error) {
 	return platform.Command{}, nil
 }
 func (fakeRepo) GetCommand(string) (platform.Command, bool) { return platform.Command{}, false }

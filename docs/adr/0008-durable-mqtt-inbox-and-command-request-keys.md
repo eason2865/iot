@@ -39,9 +39,8 @@ command-ID deduplication could not prevent two actions after a lost HTTP respons
   clients' behavior. Keys remain reserved while their command rows exist.
 - Reuse the active transaction for device checks and duplicate telemetry reads.
   Context-aware lookups distinguish missing rows from database failures.
-- Embed SQL from migrations/ as the single schema source. Under a transactional
-  advisory lock, run the legacy column upgrade (002) before the current initial
-  schema (001), then hash legacy credentials in the same transaction. Deployment
+- Embed `migrations/001_init.sql` as the schema for new databases. A transaction
+  and advisory lock make initialization atomic and repeatable. Deployment
   tooling uses the migrate binary. POSTGRES_AUTO_MIGRATE=false keeps DDL out of
   application startup and ACK DLQ replay; local development defaults to true.
   The replay CLI validates the flag before opening PostgreSQL, opens the store
@@ -69,11 +68,4 @@ command-ID deduplication could not prevent two actions after a lost HTTP respons
 Device authentication rejects the reserved MQTT ClientID namespaces
 `iot-device-worker`, `iot-telemetry-ingestor` and `iot-demo`, including every
 hyphen-suffixed variant, before checking device credentials. Trusted internal
-service credentials still pass their role-specific branch. Existing ordinary
-device ClientIDs remain compatible; mandatory device identity binding requires
-a coordinated device-side ClientID migration and is not silently enabled.
-
-Legacy mixed plaintext/hash migration validates the full bcrypt header, cost,
-length and canonical salt/checksum base64 encoding before erasing plaintext.
-Cost() alone does not validate the salt. Invalid encodings roll back the whole
-migration; valid hashes are preserved even if legacy plaintext is stale.
+service credentials still pass their role-specific branch.

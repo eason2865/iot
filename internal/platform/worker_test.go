@@ -131,14 +131,6 @@ type flakyAckStore struct {
 	calls    int
 }
 
-func (s *flakyAckStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	s.calls++
-	if s.calls <= s.failures {
-		return Command{}, fmt.Errorf("transient store error")
-	}
-	return s.memoryStore.AckCommand(id, tenantID, deviceID)
-}
-
 type fakeMQTTMessage struct {
 	topic   string
 	payload []byte
@@ -254,7 +246,7 @@ func TestCommandDeliveryFailsClosed(t *testing.T) {
 	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); !deliver || err != nil {
 		t.Fatalf("created command: %t %v", deliver, err)
 	}
-	if _, err := base.AckCommand(cmd.ID, cmd.TenantID, cmd.DeviceID); err != nil {
+	if _, err := base.AckCommandResultContext(t.Context(), cmd.ID, cmd.TenantID, cmd.DeviceID, contracts.CommandResult{Status: contracts.CommandStatusAcked}); err != nil {
 		t.Fatal(err)
 	}
 	if _, deliver, err := worker.commandForDelivery(context.Background(), cmd); deliver || err != nil {

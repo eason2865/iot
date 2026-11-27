@@ -44,13 +44,14 @@ func IsTelemetryDuplicate(err error) bool {
 }
 
 type Repository interface {
+	RestoreTelemetryContext(context.Context, TelemetryRecord) (TelemetryRecord, error)
 	CreateTenant(Tenant) (Tenant, error)
 	CreateDevice(Device) (Device, error)
 	GetDevice(tenantID, deviceID string) (Device, bool)
 	RecordTelemetry(env contracts.Envelope) (TelemetryRecord, error)
 	GetDeviceStatus(tenantID, deviceID string) (DeviceStatus, bool)
 	CreateCommand(tenantID, deviceID string, payload json.RawMessage) (Command, error)
-	AckCommand(id, tenantID, deviceID string) (Command, error)
+	CommandResultStore
 	GetCommand(id string) (Command, bool)
 }
 

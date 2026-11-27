@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"iot/internal/contracts"
+
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
 
@@ -22,7 +24,7 @@ type blockedAckStore struct {
 
 type failingAckStore struct{ Repository }
 
-func (*failingAckStore) AckCommandContext(context.Context, string, string, string) (Command, error) {
+func (*failingAckStore) AckCommandResultContext(context.Context, string, string, string, contracts.CommandResult) (Command, error) {
 	return Command{}, errors.New("database unavailable")
 }
 
@@ -233,7 +235,7 @@ func TestWorkerDrainsAckPersistenceBeforeDisconnect(t *testing.T) {
 	}
 }
 
-func (s *blockedAckStore) AckCommandContext(ctx context.Context, _, _, _ string) (Command, error) {
+func (s *blockedAckStore) AckCommandResultContext(ctx context.Context, _, _, _ string, _ contracts.CommandResult) (Command, error) {
 	s.once.Do(func() { close(s.entered) })
 	select {
 	case <-s.release:

@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 	"iot/internal/contracts"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // Every test owns a schema; the application database and running workers are untouched.
@@ -37,7 +39,7 @@ func isolatedPostgresStore(t *testing.T) *PostgresStore {
 	db := stdlib.OpenDB(*cfg)
 	s := &PostgresStore{db: db, ttl: 5 * time.Minute}
 	t.Cleanup(func() { _ = db.Close() })
-	if err = s.ensureSchema(t.Context()); err != nil {
+	if err = s.MigrateSchema(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.CreateTenant(Tenant{ID: "t", Name: "test"}); err != nil {
@@ -142,11 +144,11 @@ func TestCommandTransitionAuditAtomicity(t *testing.T) {
 				case "published":
 					return s.MarkCommandPublished(cmd.ID, 10)
 				case "delivered":
-					return s.MarkCommandSent(cmd.ID, time.Now().Add(time.Minute))
+					return s.MarkCommandSentContext(t.Context(), cmd.ID, time.Now().Add(time.Minute))
 				case "timeout":
-					_, err = s.ExpireCommands(time.Now(), time.Minute)
+					_, err = s.ExpireCommandsContext(t.Context(), time.Now())
 				case "requeued":
-					err = s.RequeueCommand(cmd.ID, time.Second)
+					err = s.RequeueCommandContext(t.Context(), cmd.ID, time.Second)
 				case "failed":
 					_, _, err = s.RecoverStaleCommands(time.Now().Add(-time.Minute), 10)
 				}
@@ -320,12 +322,8 @@ func TestPostgresContextWritesAndLookups(t *testing.T) {
 	}
 }
 
-func TestPostgresSchemaUpgradeIsSerializedAndPreservesCredentials(t *testing.T) {
+func TestCurrentSchemaInitializationIsRepeatable(t *testing.T) {
 	s := isolatedPostgresStore(t)
-	_, err := s.db.Exec(`ALTER TABLE devices ADD COLUMN secret TEXT NOT NULL DEFAULT 'legacy-secret'; ALTER TABLE devices ALTER COLUMN secret_hash DROP NOT NULL; UPDATE devices SET secret_hash=NULL; ALTER TABLE commands DROP COLUMN idempotency_key CASCADE`)
-	if err != nil {
-		t.Fatal(err)
-	}
 	s.db.SetMaxOpenConns(2)
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
@@ -336,15 +334,17 @@ func TestPostgresSchemaUpgradeIsSerializedAndPreservesCredentials(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if !s.AuthenticateDevice("t", "d", "legacy-secret") {
-		t.Fatal("legacy credential not preserved")
+	if !s.AuthenticateDevice("t", "d", "test-secret") {
+		t.Fatal("initialization changed the device credential")
 	}
-	var plaintext *string
-	if err := s.db.QueryRow(`SELECT secret FROM devices WHERE tenant_id='t' AND device_id='d'`).Scan(&plaintext); err != nil || plaintext != nil {
-		t.Fatalf("plaintext secret retained: %v", err)
-	}
-	if _, err := s.CreateCommandWithKey(t.Context(), "t", "d", "upgraded-key", nil); err != nil {
+	cmd, err := s.CreateCommandWithKey(t.Context(), "t", "d", "request-key", nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	_, err = s.db.ExecContext(t.Context(), `UPDATE commands SET status='sent' WHERE id=$1`, cmd.ID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("sent command without deadline: want check violation, got %v", err)
 	}
 }
 

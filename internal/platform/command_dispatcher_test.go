@@ -61,7 +61,7 @@ func (s *stubDispatchStore) MarkCommandPublishedContext(context.Context, string,
 func (s *stubDispatchStore) RescheduleCommandContext(context.Context, string, int, time.Duration) error {
 	return nil
 }
-func (s *stubDispatchStore) ExpireCommandsContext(context.Context, time.Time, time.Duration) (int64, error) {
+func (s *stubDispatchStore) ExpireCommandsContext(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
 func (s *stubDispatchStore) RecoverStaleCommandsContext(context.Context, time.Time, int) (int64, int64, error) {

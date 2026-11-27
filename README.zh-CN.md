@@ -50,7 +50,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - 7 个运行入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`、`cmd/migrate`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
-- PostgreSQL 建表与历史列升级 SQL：`migrations/001_init.sql`、`migrations/002_upgrade.sql`
+- PostgreSQL 新库初始化脚本为 `migrations/001_init.sql`。
 - 1 份 MQTT 消息 Schema：`docs/mqtt-envelope.schema.json`
 - 已包含基础测试，`go test ./...` 可直接运行
 
@@ -175,9 +175,9 @@ make build
 
 列表使用 `pageSize`（默认50，显式1–100）和不透明 `cursor`，响应 `{ "items": [], "nextCursor": "" }`。遥测支持 `startTime/endTime/type/sort`；命令支持 `deviceId/status/startTime/endTime/sort`。时间为带时区的 RFC3339、最多毫秒精度，范围左闭右开；遥测按设备事件时间、命令按创建时间，默认倒序。重复、未知、空值或编码错误的 Query 返回400；游标必须沿用原过滤范围。
 
-ACK Body 为 `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`，状态仅允许 `acked/failed`，结果写入后可在命令的 `result` 读取。相同结果幂等，冲突结果409。MQTT ACK 同样必须带状态，DLQ重放保留结果。升级前先迁移数据库，并协调升级所有调用方及Demo。
+ACK Body 为 `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`，状态仅允许 `acked/failed`，结果写入后可在命令的 `result` 读取。相同结果幂等，冲突结果409。MQTT ACK 同样必须带状态，DLQ重放保留结果。
 
-完整路由、JSON字段、限制、时间边界和升级说明见 [API契约](docs/api-contract.md)。REST以`internal/adminapi`为准，不单独维护OpenAPI。
+完整路由、JSON字段、限制、时间边界和部署说明见 [API契约](docs/api-contract.md)。REST以`internal/adminapi`为准，不单独维护OpenAPI。
 
 ## 架构速览
 
@@ -527,7 +527,7 @@ worker 每 30 秒按 ID 游标扫描最多 500 条、接收时间超过两分钟
 
 `telemetry-ingestor` 关闭 MQTT 自动 ACK，优先将遥测写入 PostgreSQL 收件记录后确认；Kafka 发布失败或进程随后退出时，worker 会补偿未完成的 TDengine 写入。PostgreSQL 不可用时，Kafka 或 DLQ 成功写入也可完成确认；所有存储失败则不确认并退出。停机先停止接收新任务，排空在途发布。此保证覆盖应用已接收的消息，设备离线和 broker 未投递消息仍需单独配置 EMQX 会话策略。
 
-SQL 唯一来源为 `migrations/`，Go 通过 embed 使用同一份文件。迁移器先执行 `002_upgrade.sql` 补齐历史列，再执行 `001_init.sql` 建表和索引，整个过程持有事务级 advisory lock 并迁移旧明文密钥，避免多副本同时 DDL。生产用迁移角色提前执行：
+迁移工具内嵌 `migrations/001_init.sql`，在空的 PostgreSQL 数据库中创建当前版本所需的表、约束和索引。初始化在同一事务中执行，通过 advisory lock 串行化并发调用，可在当前结构上重复运行。部署前用迁移角色执行下面的命令。
 
 ```bash
 # POSTGRES_DSN 由部署环境注入，不将凭据写入命令或仓库。
@@ -544,7 +544,7 @@ CI 包含隔离 PostgreSQL 回归、REST→gRPC→数据库幂等验证、vet、
 
 DLQ writer 的 batch 上限为 2 MiB，为现有约 1 MiB 业务消息预留 Base64 和元数据空间。启动时将 DLQ `max.message.bytes` 提升到至少 2 MiB，保留更大的运维配置；其他 topic 不变。重放 reader 上限为 10 MB。`valueBase64` 保留完整原文字节，不截断；包装后仍超限时继续报错且不确认。
 
-实时摄入使用服务端接收时间；worker 历史恢复保留 `TelemetryRecord.receivedAt`，旧记录缺失时使用原 Kafka 时间戳。DLQ 重放保留已有接收时间，否则使用 `occurredAt`；两者均缺失的旧死信以设备事件时间估算，不使用重放处理时间。设备状态仅在接收时间递增时原子更新 `last_seen_at` 和 `last_msg_id`；重复、较旧或相同时间的消息均不刷新在线状态。
+遥测接入时记录服务端接收时间。消费和重放 Kafka 遥测时必须有 `TelemetryRecord.receivedAt`，缺失时 worker 将原消息写入 `telemetry.decode` 死信。对于 `mqtt.kafka` 阶段的原始 MQTT 信封，重放使用死信中必填的服务端时间 `occurredAt`。只有接收时间递增时才一起更新设备的 `last_seen_at` 和 `last_msg_id`。
 
 ## 开发建议
 
@@ -587,15 +587,11 @@ JSONB 存储范围的数字，这些输入返回 HTTP 400。分页必须完整�
 指令受理检查完整编码消息及 PostgreSQL JSONB 规范化结果，在 1 MiB Kafka 预算中
 预留 1024 字节传输开销。topic 初始化失败或分区/副本数不匹配会阻止启动，所有
 生产者关闭自动建 topic；升级修改这些配置前，需要先由运维调整现有 topic。
-旧密钥迁移会清理已有 hash 旁的明文，保留有效 hash，移除旧明文列默认值；非法
-旧凭据导致整个迁移回滚。TDengine 改写整数毫秒时间戳，不受连接时区影响；已有
-偏移历史不会自动修正。
+TDengine 以整数毫秒写入时间戳，写入结果与连接时区无关。
 
 
 设备凭据禁止使用 worker、ingestor、demo 的保留 MQTT ClientID（基础名称及其带短横线
-后缀的形式）。其他既有设备 ClientID 继续兼容；强制绑定设备身份需要协调设备端迁移，
-本轮不直接启用。旧明文/hash混合迁移会完整检查 bcrypt 的规范编码，异常时回滚，
-有效hash保持原值。
+后缀的形式）。
 
 JSONB 校验在构造大十进制字符串前，用字节预算保守估算数字及文本展开成本。遥测
 payload预算为1MiB减4096字节，其他JSONB输入限制为1MiB；新建租户name为1–256 UTF-8字节且非空白，productId为1–64字符ASCII标识；遥测

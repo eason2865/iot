@@ -189,11 +189,7 @@ func splitCSV(value string) []string {
 	return out
 }
 
-type ackReplayStore interface {
-	AckCommandContext(context.Context, string, string, string) (platform.Command, error)
-}
-
-func replayAck(ctx context.Context, item platform.DeadLetter, value []byte, store ackReplayStore) error {
+func replayAck(ctx context.Context, item platform.DeadLetter, value []byte, store platform.CommandResultStore) error {
 	var ack platform.CommandAckMessage
 	if err := contracts.DecodeRequestJSON(bytes.NewReader(value), &ack); err != nil {
 		return err
@@ -206,14 +202,7 @@ func replayAck(ctx context.Context, item platform.DeadLetter, value []byte, stor
 	if err != nil {
 		return err
 	}
-	if resultStore, ok := store.(platform.CommandResultStore); ok {
-		_, err = resultStore.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, result)
-		return err
-	}
-	if ack.Status != "acked" || ack.ErrorCode != "" || len(ack.Payload) > 0 {
-		return fmt.Errorf("ACK replay store does not support execution results")
-	}
-	_, err = store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
+	_, err = store.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, result)
 	return err
 }
 
@@ -222,19 +211,10 @@ func replayKafkaPayload(item platform.DeadLetter, value []byte) (string, []byte,
 		return "", nil, fmt.Errorf("invalid MQTT messages must be corrected at their source")
 	}
 	if item.Stage != platform.StageMQTTKafka {
-		if item.Stage == platform.StageTelemetryPostgres || item.Stage == platform.StageTelemetryTDengine {
-			var rec platform.TelemetryRecord
-			if err := json.Unmarshal(value, &rec); err != nil {
+		switch item.Stage {
+		case platform.StageTelemetryDecode, platform.StageTelemetryPostgres, platform.StageTelemetryTDengine:
+			if _, err := platform.DecodeTelemetryRecord(value); err != nil {
 				return "", nil, err
-			}
-			if rec.ReceivedAt.IsZero() {
-				received, err := replayReceivedAt(item, rec.Ts)
-				if err != nil {
-					return "", nil, err
-				}
-				rec.ReceivedAt = received
-				payload, err := json.Marshal(rec)
-				return item.SourceTopic, payload, err
 			}
 		}
 		return item.SourceTopic, value, nil
@@ -251,26 +231,10 @@ func replayKafkaPayload(item platform.DeadLetter, value []byte) (string, []byte,
 	if topic == "" {
 		topic = "iot.telemetry"
 	}
-	received, err := replayReceivedAt(item, env.Ts)
-	if err != nil {
-		return "", nil, err
+	received, err := time.Parse(time.RFC3339Nano, item.OccurredAt)
+	if err != nil || received.IsZero() {
+		return "", nil, fmt.Errorf("mqtt.kafka replay requires valid occurredAt")
 	}
 	payload, err := json.Marshal(platform.TelemetryRecord{MsgID: env.MsgID, TenantID: env.TenantID, DeviceID: env.DeviceID, Ts: env.Ts, Type: env.Type, Version: env.Version, Payload: env.Payload, ReceivedAt: received})
 	return topic, payload, err
-}
-
-func replayReceivedAt(item platform.DeadLetter, ts int64) (time.Time, error) {
-	if item.OccurredAt != "" {
-		received, err := time.Parse(time.RFC3339Nano, item.OccurredAt)
-		if err != nil || received.IsZero() {
-			return time.Time{}, fmt.Errorf("invalid dead-letter occurredAt: %q", item.OccurredAt)
-		}
-		return received, nil
-	}
-	// Legacy DLQs have no server timestamp. Use device event time as a
-	// conservative estimate rather than declaring historical traffic live now.
-	if ts <= 0 {
-		return time.Time{}, fmt.Errorf("telemetry replay has no original timestamp")
-	}
-	return time.UnixMilli(ts).UTC(), nil
 }

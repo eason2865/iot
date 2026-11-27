@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -13,7 +14,7 @@ import (
 
 type recordingTelemetryMarker map[string]bool
 
-func (m recordingTelemetryMarker) MarkTelemetryTDengineWritten(msgID, _, _ string) error {
+func (m recordingTelemetryMarker) MarkTelemetryTDengineWrittenContext(_ context.Context, msgID, _, _ string) error {
 	m[msgID] = true
 	return nil
 }

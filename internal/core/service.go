@@ -341,11 +341,7 @@ func (s *Service) AckCommand(ctx context.Context, req *corev1.AckCommandRequest)
 	if err != nil {
 		return nil, mapRepoError(err)
 	}
-	store, ok := s.repo.(platform.CommandResultStore)
-	if !ok {
-		return nil, status.Error(codes.FailedPrecondition, "repository does not support execution results")
-	}
-	command, err := store.AckCommandResultContext(ctx, req.GetId(), req.GetTenantId(), req.GetDeviceId(), result)
+	command, err := s.repo.AckCommandResultContext(ctx, req.GetId(), req.GetTenantId(), req.GetDeviceId(), result)
 	if err != nil {
 		return nil, mapRepoError(err)
 	}

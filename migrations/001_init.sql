@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS telemetry_records (
   version TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   tdengine_written BOOLEAN NOT NULL DEFAULT FALSE,
-  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  received_at TIMESTAMPTZ NOT NULL,
   UNIQUE (msg_id, tenant_id, device_id)
 );
 
@@ -45,9 +45,11 @@ CREATE TABLE IF NOT EXISTS commands (
   device_id TEXT NOT NULL,
   status TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  idempotency_key TEXT,
+  result JSONB,
   next_dispatch_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   dispatch_attempts INTEGER NOT NULL DEFAULT 0,
-  deadline_at TIMESTAMPTZ,
+  deadline_at TIMESTAMPTZ CHECK (status <> 'sent' OR deadline_at IS NOT NULL),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -77,12 +79,8 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device ON telemetry_records(tena
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_unwritten ON telemetry_records(id) WHERE tdengine_written=FALSE;
 
--- Optional caller request key, scoped by tenant. Unkeyed calls retain their old semantics.
-ALTER TABLE commands ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_idempotency
   ON commands(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
--- Device execution results are independent of dispatcher bookkeeping.
-ALTER TABLE commands ADD COLUMN IF NOT EXISTS result JSONB;
 CREATE INDEX IF NOT EXISTS idx_telemetry_event_page ON telemetry_records(tenant_id,device_id,ts DESC,msg_id DESC);
 CREATE INDEX IF NOT EXISTS idx_commands_filter_page ON commands(tenant_id,created_at DESC,id DESC);

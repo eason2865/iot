@@ -50,7 +50,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - 7 runtime entrypoints: `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`, `cmd/migrate`, plus 2 E2E test tools (`cmd/e2eclient`, `cmd/e2espoof`)
 - `management-api` uses go-zero REST; `iot-core` uses gRPC + protobuf
 - Local Docker orchestration no longer includes a business service-discovery component
-- PostgreSQL initialization and legacy upgrade SQL: `migrations/001_init.sql`, `migrations/002_upgrade.sql`
+- PostgreSQL schema for new installations: `migrations/001_init.sql`
 - 1 MQTT message schema: `docs/mqtt-envelope.schema.json`
 - Basic tests included; `go test ./...` runs directly
 
@@ -175,9 +175,9 @@ Release 2.56 replaces the old routes with tenant-nested resources, without alias
 
 Lists accept `pageSize` (default 50, explicit 1–100) and opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`. Telemetry supports `startTime/endTime/type/sort`; commands support `deviceId/status/startTime/endTime/sort`. Times are offset-bearing RFC3339 with at most millisecond precision, using half-open intervals. Telemetry uses device event time; commands use creation time; default order is descending. Unknown, repeated, empty or malformed query parameters return 400. Keep cursor filter scope unchanged.
 
-Acknowledgements carry `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`. Status is `acked` or `failed`; command responses expose the persisted `result`. Identical results are idempotent; conflicting results return 409. MQTT ACKs also require status, and DLQ replay retains results. Migrate the database and coordinate application, caller and Demo upgrades.
+Acknowledgements carry `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`. Status is `acked` or `failed`; command responses expose the persisted `result`. Identical results are idempotent; conflicting results return 409. MQTT ACKs also require status, and DLQ replay retains results.
 
-See the [API contract](docs/api-contract.md) for all fields, limits, boundaries and upgrade instructions. REST routes remain owned by `internal/adminapi`, without a separate OpenAPI document.
+See the [API contract](docs/api-contract.md) for all fields, limits, boundaries and deployment instructions. REST routes remain owned by `internal/adminapi`, without a separate OpenAPI document.
 
 ## Architecture at a Glance
 
@@ -546,7 +546,7 @@ POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands accepts an optional 
 
 The telemetry ingestor disables automatic MQTT ACKs and persists a PostgreSQL inbox row before acknowledging. If Kafka publishing fails or the process is replaced, the worker compensates unfinished TDengine writes. When PostgreSQL is unavailable, a successful Kafka or DLQ write can also establish durability. If every sink fails, the delivery remains unacknowledged and the ingestor exits. Shutdown closes admission and drains pending tasks. This covers messages received by the application; offline devices and broker delivery still require an EMQX session policy.
 
-SQL lives only in `migrations/` and is embedded by Go. The migrator runs `002_upgrade.sql` first to prepare legacy columns, then `001_init.sql` for tables/indexes, and hashes legacy credentials under one transaction/advisory lock. Run it with a migration role before deploying production:
+The migrator embeds `migrations/001_init.sql` and initializes an empty PostgreSQL database. All tables, constraints and indexes are created in one transaction under an advisory lock. Initialization can be repeated on the current schema. Run it with a migration role before deployment:
 
 ```bash
 # Inject POSTGRES_DSN through the deployment environment.
@@ -563,7 +563,7 @@ Runtime PostgreSQL operations propagate caller cancellation and have a default f
 
 DLQ writers use a 2 MiB batch limit to fit base64 and metadata around the existing roughly 1 MiB business messages. Startup raises DLQ `max.message.bytes` to at least 2 MiB while preserving larger operator overrides; other topics remain unchanged. Replay readers accept up to 10 MB. Original bytes are retained in `valueBase64` without truncation; larger wrapped records still fail without acknowledgement.
 
-Live ingress stamps server receive time. Worker recovery preserves `TelemetryRecord.receivedAt`, falling back to the original Kafka timestamp for older records. DLQ replay preserves existing receive time or uses `occurredAt`; legacy DLQs without either use device event time as an estimate. Replay never substitutes the current processing time. Device state updates atomically only when receive time advances, keeping `last_seen_at` and `last_msg_id` together; duplicates and older/equal-time records do not refresh liveness.
+Ingress stamps the server receive time. Kafka telemetry consumers and manual replay require `TelemetryRecord.receivedAt`. The worker sends records missing this field to `telemetry.decode`. For an `mqtt.kafka` dead letter, replay converts the original MQTT envelope using its required server-side `occurredAt`. Device state updates `last_seen_at` and `last_msg_id` together only when receive time advances.
 
 ## Development Guidelines
 
@@ -610,18 +610,11 @@ Command admission checks the full encoded message and its PostgreSQL JSONB form
 against the 1 MiB Kafka budget with 1024 bytes reserved for transport overhead.
 Topic initialization errors and partition/replica drift block startup; all producers
 disable automatic topic creation. Fix existing topic assignments before upgrading
-a deployment that changes these settings. Legacy credential migration clears
-plaintext even when a hash already exists, preserves valid hashes, and removes the
-legacy plaintext column default. Invalid legacy credentials roll the migration back.
-TDengine writes integer milliseconds, independent of connection timezone; existing
-shifted history is not repaired automatically.
+a deployment that changes these settings. TDengine writes integer milliseconds independently of the connection timezone.
 
 
 Device credentials cannot use MQTT ClientIDs reserved for worker, ingestor or demo
-services (base names and hyphen-suffixed forms). Existing other device ClientIDs
-remain compatible; strict per-device ClientID binding requires a device migration.
-Legacy mixed-secret migration verifies full canonical bcrypt encoding before
-clearing plaintext and rolls back malformed credentials.
+services (base names and hyphen-suffixed forms).
 
 JSONB preflight budgets the expanded numeric/text representation without building
 giant decimal strings. Telemetry payloads have a conservative 1 MiB minus 4096

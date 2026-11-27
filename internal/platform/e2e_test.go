@@ -161,69 +161,6 @@ func TestE2ESchemeTelemetryCommandAck(t *testing.T) {
 
 }
 
-// TestE2EExpireCommandsNullDeadlineBackstop pins the defensive backstop for
-// legacy 'sent' rows with no deadline_at: with a grace period they converge to
-// timeout; with grace disabled they are left alone.
-func TestE2EExpireCommandsNullDeadlineBackstop(t *testing.T) {
-	if os.Getenv("IOT_E2E") == "" {
-		t.Skip("set IOT_E2E=1 to run the end-to-end local stack test")
-	}
-	postgresDSN := envOr("POSTGRES_DSN", "postgres://iot:iot123@localhost:5432/iot?sslmode=disable")
-	store, err := platform.NewPostgresStore(postgresDSN, 5*time.Minute)
-	if err != nil {
-		t.Fatalf("NewPostgresStore() error = %v", err)
-	}
-	defer store.Close()
-
-	db, err := sql.Open("pgx", postgresDSN)
-	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
-	}
-	defer db.Close()
-
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	tenantID := "tenant-expire-" + suffix
-	deviceID := "device-expire-" + suffix
-	if _, err := store.CreateTenant(platform.Tenant{ID: tenantID, Name: tenantID}); err != nil {
-		t.Fatalf("CreateTenant() error = %v", err)
-	}
-	if _, err := store.CreateDevice(platform.Device{TenantID: tenantID, DeviceID: deviceID, ProductID: "p", Secret: "s"}); err != nil {
-		t.Fatalf("CreateDevice() error = %v", err)
-	}
-	cmd, err := store.CreateCommand(tenantID, deviceID, json.RawMessage(`{"switch":"on"}`))
-	if err != nil {
-		t.Fatalf("CreateCommand() error = %v", err)
-	}
-	// Simulate a legacy row: sent, no deadline, last touched long ago.
-	stale := time.Now().UTC().Add(-time.Hour)
-	if _, err := db.Exec(`UPDATE commands SET status = 'sent', deadline_at = NULL, updated_at = $1 WHERE id = $2`, stale, cmd.ID); err != nil {
-		t.Fatalf("legacy row setup error = %v", err)
-	}
-
-	// Grace disabled: the NULL-deadline row must survive the scan.
-	_, err = store.ExpireCommands(time.Now().UTC(), 0)
-	if err != nil {
-		t.Fatalf("ExpireCommands(grace=0) error = %v", err)
-	}
-	if got, _ := store.GetCommand(cmd.ID); got.Status != platform.CommandStatusSent {
-		t.Fatal("NULL deadline expired with grace disabled")
-	}
-
-	// Grace enabled and already exceeded: the row converges to timeout.
-	_, err = store.ExpireCommands(time.Now().UTC(), 5*time.Minute)
-	if err != nil {
-		t.Fatalf("ExpireCommands(grace=5m) error = %v", err)
-	}
-
-	got, ok := store.GetCommand(cmd.ID)
-	if !ok {
-		t.Fatal("GetCommand() did not find the seeded command")
-	}
-	if got.Status != platform.CommandStatusTimeout {
-		t.Fatalf("command status = %q, want timeout", got.Status)
-	}
-}
-
 type commandEnvelope struct {
 	ID        string          `json:"id"`
 	TenantID  string          `json:"tenantId"`

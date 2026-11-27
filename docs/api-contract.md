@@ -1,7 +1,4 @@
-# Management API contract (2.56)
-
-This release intentionally replaces the old device/command/telemetry routes.
-Upgrade callers and Demo together with the application. There are no legacy aliases.
+# Management API contract
 
 ## Resources and identity
 
@@ -101,8 +98,7 @@ REST acknowledgement body:
   `status`, `errorCode` and `payload`.
 - Repeating the same result is idempotent and returns 200 with no additional
   ACK or audit event. A different result after a recorded result returns 409.
-  Existing terminal timeout/dispatch failure or historical success without a
-  recorded result remains terminal; a late ACK does not overwrite it.
+  A timeout or dispatch failure remains terminal when a late ACK arrives.
 - MQTT ACKs retain `commandId`, `tenantId`, `deviceId` matching the source topic,
   and require the same `status`/`errorCode`/`payload` fields. Invalid results are
   rejected and confirmed without applying business state. Valid results receive
@@ -111,11 +107,8 @@ REST acknowledgement body:
 - Execution remains at least once: devices must deduplicate command IDs. A
   device-reported `acked` result is not independent proof of physical success.
 
-## Upgrade
+## Deployment
 
-Run the migration binary with a migration role before starting 2.56 with
-`POSTGRES_AUTO_MIGRATE=false`. The embedded `001_init.sql` idempotently adds
-nullable `commands.result` and indexes for the event-time/command list queries.
-There is no historical result backfill. Update HTTP callers and MQTT ACK senders,
-then deploy gateway, core, ingestor, worker and Demo together. Keep the previous
-release and its client versions available for a coordinated rollback.
+Initialize an empty PostgreSQL database with the migrate binary before starting
+services with `POSTGRES_AUTO_MIGRATE=false`. The embedded `001_init.sql` creates
+the current schema, including command results and pagination indexes.

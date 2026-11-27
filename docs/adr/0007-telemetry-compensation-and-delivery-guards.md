@@ -43,12 +43,10 @@ can also present a command whose device has already acknowledged it.
   Expiry/recovery sweeps select at most 500 rows per transition using
   `FOR UPDATE SKIP LOCKED`; a locked row is retried later without blocking other
   commands. State and audit still commit in one statement.
-- Live ingress stamps server receive time; trusted worker restoration preserves
-  `receivedAt` from the Kafka record and uses the original Kafka message timestamp
-  only for older records without that field. DLQ replay uses existing receive
-  time, then DLQ `occurredAt`, then device event time for legacy metadata. It
-  never labels replay processing as a fresh receive. Device liveness still uses
-  receive time and the configured TTL, not device event time for normal ingress.
+- Live ingress stamps server receive time. Kafka telemetry requires `receivedAt`
+  for both worker recovery and DLQ replay. A missing value enters the decode DLQ
+  and fails manual replay. For `mqtt.kafka` envelopes replay uses the required
+  server-side `occurredAt`. Device liveness uses receive time and the configured TTL.
   PostgreSQL updates `last_seen_at` and `last_msg_id` together only when receive
   time strictly advances (NULL accepts the first sample); equal/older arrivals
   cannot regress state. `updated_at` is also monotonic. Duplicate storage keeps
@@ -78,8 +76,8 @@ can also present a command whose device has already acknowledged it.
   SHA-256 fingerprint, preventing independent tenant subsets from advancing
   each other's offsets. Changing an allowlist creates new offsets and can replay
   retained history; overlapping subsets should not be deployed simultaneously.
-- Legacy sent commands with no deadline converge to timeout after the configured
-  ACK grace measured from their last update; normal deadlines are unchanged.
+- PostgreSQL requires a deadline for every sent command. The dispatcher expires
+  sent commands when that deadline passes.
 
 ## Consequences
 

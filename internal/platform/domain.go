@@ -2,6 +2,7 @@ package platform
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"iot/internal/contracts"
@@ -39,6 +40,18 @@ type TelemetryRecord struct {
 	// replay compensation; it must not be exposed on the management API.
 	TDengineWritten bool      `json:"-"`
 	ReceivedAt      time.Time `json:"receivedAt"`
+}
+
+// DecodeTelemetryRecord reads a Kafka record with its original server receive time.
+func DecodeTelemetryRecord(value []byte) (TelemetryRecord, error) {
+	var record TelemetryRecord
+	if err := json.Unmarshal(value, &record); err != nil {
+		return TelemetryRecord{}, err
+	}
+	if record.ReceivedAt.IsZero() {
+		return TelemetryRecord{}, fmt.Errorf("%w: telemetry receivedAt is required", contracts.ErrInvalidEnvelope)
+	}
+	return record, nil
 }
 
 type Command struct {

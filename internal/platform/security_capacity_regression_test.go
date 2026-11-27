@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"iot/internal/contracts"
 )
 
@@ -83,38 +82,13 @@ func TestPaginationHasByteBudgetAndNoSkippedCommands(t *testing.T) {
 	}
 }
 
-func TestLegacyMigrationRejectsCorruptedBcryptEncoding(t *testing.T) {
-	s := isolatedPostgresStore(t)
-	hash, err := HashDeviceSecret("test-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	damaged := hash[:7] + "!" + hash[8:]
-	if _, err = bcrypt.Cost([]byte(damaged)); err != nil {
-		t.Fatal("fixture must pass Cost")
-	}
-	if _, err = s.db.Exec(`ALTER TABLE devices ADD COLUMN secret TEXT`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.db.Exec(`UPDATE devices SET secret='retained-plaintext',secret_hash=$1`, damaged); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.MigrateSchema(t.Context()); err == nil {
-		t.Fatal("migration accepted invalid salt encoding")
-	}
-	var secret, stored string
-	if err = s.db.QueryRow(`SELECT secret,secret_hash FROM devices WHERE tenant_id='t' AND device_id='d'`).Scan(&secret, &stored); err != nil || secret != "retained-plaintext" || stored != damaged {
-		t.Fatal("failed migration did not preserve credentials")
-	}
-}
-
 // A pending publish must not prevent the independent expiry loop from running.
 type independentScanStore struct {
 	stubDispatchStore
 	scans chan struct{}
 }
 
-func (s *independentScanStore) ExpireCommandsContext(context.Context, time.Time, time.Duration) (int64, error) {
+func (s *independentScanStore) ExpireCommandsContext(context.Context, time.Time) (int64, error) {
 	select {
 	case s.scans <- struct{}{}:
 	default:
@@ -162,7 +136,7 @@ func TestExpiryCommitsWhileRealPostgresPublisherIsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.MarkCommandSent(exp.ID, time.Now().Add(time.Hour)); err != nil {
+	if err = s.MarkCommandSentContext(t.Context(), exp.ID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.CreateCommand("t", "d", nil); err != nil {
@@ -215,20 +189,5 @@ func TestOversizedHistoricalRowFailsExplicitly(t *testing.T) {
 	}
 	if _, _, err := s.ListTelemetryPageContext(t.Context(), PageRequest{TenantID: "t", DeviceID: "d", Size: 1}); !errors.Is(err, ErrListItemTooLarge) {
 		t.Fatalf("oversized history did not fail explicitly: %v", err)
-	}
-}
-
-func TestBcryptEncodingChecksSaltAndChecksum(t *testing.T) {
-	valid, err := HashDeviceSecret("secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !validBcryptEncoding(valid) {
-		t.Fatal("valid encoding rejected")
-	}
-	for _, bad := range []string{valid[:7] + "!" + valid[8:], valid[:29] + "!" + valid[30:], valid[:28] + "/" + valid[29:], valid[:59] + "/", valid + "x"} {
-		if validBcryptEncoding(bad) {
-			t.Fatal("corrupt/noncanonical bcrypt encoding accepted")
-		}
 	}
 }

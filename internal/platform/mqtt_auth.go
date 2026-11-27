@@ -3,7 +3,6 @@ package platform
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -197,36 +196,4 @@ func isReservedMQTTClientID(id string) bool {
 		}
 	}
 	return false
-}
-
-// Cost parses the header without decoding the salt. Check the complete canonical
-// bcrypt encoding without running an attacker-controlled (possibly huge) cost.
-func validBcryptEncoding(hash string) bool {
-	offset := 7
-	switch {
-	case strings.HasPrefix(hash, "$2a$"), strings.HasPrefix(hash, "$2b$"), strings.HasPrefix(hash, "$2y$"):
-	case strings.HasPrefix(hash, "$2$"):
-		offset = 6
-	default:
-		return false
-	}
-	if len(hash) != offset+53 || hash[offset-1] != '$' {
-		return false
-	}
-	if _, err := bcrypt.Cost([]byte(hash)); err != nil {
-		return false
-	}
-	const alphabet = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	for _, c := range hash[offset:] {
-		if !strings.ContainsRune(alphabet, c) {
-			return false
-		}
-	}
-	encoding := base64.NewEncoding(alphabet).WithPadding(base64.NoPadding).Strict()
-	salt, err := encoding.DecodeString(hash[offset : offset+22])
-	if err != nil || len(salt) != 16 {
-		return false
-	}
-	digest, err := encoding.DecodeString(hash[offset+22:])
-	return err == nil && len(digest) == 23
 }

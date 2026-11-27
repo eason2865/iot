@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"iot/internal/contracts"
+
+	"github.com/segmentio/kafka-go"
 )
 
 func TestSecretAndJSONBInputBounds(t *testing.T) {
@@ -20,26 +21,6 @@ func TestSecretAndJSONBInputBounds(t *testing.T) {
 		if err := contracts.ValidateTelemetryPayload(json.RawMessage(raw)); err == nil {
 			t.Errorf("accepted JSONB-incompatible payload %s", raw)
 		}
-	}
-}
-
-func TestMixedLegacySecretsAreErased(t *testing.T) {
-	s := isolatedPostgresStore(t)
-	if _, err := s.db.Exec(`ALTER TABLE devices ADD COLUMN secret TEXT DEFAULT 'stale-plaintext'; UPDATE devices SET secret='stale-plaintext'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.MigrateSchema(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateDevice(Device{TenantID: "t", DeviceID: "new", ProductID: "p", Secret: "new-secret"}); err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	if err := s.db.QueryRow(`SELECT count(*) FROM devices WHERE secret IS NOT NULL`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("plaintext remains count=%d err=%v", n, err)
-	}
-	if !s.AuthenticateDevice("t", "d", "test-secret") {
-		t.Fatal("existing hash changed")
 	}
 }
 

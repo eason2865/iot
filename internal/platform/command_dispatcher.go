@@ -10,11 +10,17 @@ import (
 // command is marked failed instead of looping forever.
 const maxDispatchAttempts = 10
 
+// Defensive bounds also protect maintenance callers from a manually corrupted
+// database counter; untrusted Kafka counters are rejected before lookup.
+func commandRetryBackoff(attempt int) time.Duration {
+	return time.Second * time.Duration(1<<min(max(attempt, 0), 6))
+}
+
 type CommandDispatchStore interface {
 	ClaimCommandsForDispatchContext(ctx context.Context, limit int, lease time.Duration) ([]Command, error)
 	MarkCommandPublishedContext(ctx context.Context, id string, attempt int) error
 	RescheduleCommandContext(ctx context.Context, id string, attempt int, retryAfter time.Duration) error
-	ExpireCommandsContext(ctx context.Context, now time.Time, nullDeadlineGrace time.Duration) (int64, error)
+	ExpireCommandsContext(ctx context.Context, now time.Time) (int64, error)
 	RecoverStaleCommandsContext(ctx context.Context, staleBefore time.Time, maxAttempts int) (int64, int64, error)
 }
 
@@ -83,10 +89,7 @@ func (d *CommandDispatcher) scanCommands(ctx context.Context) {
 	} else if requeued > 0 || failed > 0 {
 		log.Printf("command recovery scan requeued %d, failed %d commands", requeued, failed)
 	}
-	// The ACK timeout doubles as the grace period for legacy 'sent' rows that
-	// predate deadline_at: they are given one full timeout window from their
-	// last update before being expired.
-	if expired, err := d.store.ExpireCommandsContext(ctx, time.Now().UTC(), d.timeout); err != nil {
+	if expired, err := d.store.ExpireCommandsContext(ctx, time.Now().UTC()); err != nil {
 		log.Printf("command timeout scan error: %v", err)
 	} else if expired > 0 {
 		log.Printf("command timeout scan marked %d commands", expired)

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/eclipse/paho.mqtt.golang"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/segmentio/kafka-go"
 
 	"iot/internal/contracts"
@@ -299,9 +299,9 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			}
 			return err
 		}
-		var rec TelemetryRecord
-		if err := json.Unmarshal(msg.Value, &rec); err != nil {
-			log.Printf("telemetry unmarshal error: %v", err)
+		rec, err := DecodeTelemetryRecord(msg.Value)
+		if err != nil {
+			log.Printf("telemetry decode error: %v", err)
 			if w.metrics != nil {
 				w.metrics.IncDeviceWorker("telemetry", "error")
 			}
@@ -324,15 +324,10 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 			continue
 		}
 		log.Printf("telemetry consumed: tenant=%s device=%s msg=%s", rec.TenantID, rec.DeviceID, rec.MsgID)
-		// Older producers may lack receivedAt. The original Kafka timestamp is
-		// the fallback, never the time this historical record is being consumed.
-		if rec.ReceivedAt.IsZero() {
-			rec.ReceivedAt = msg.Time
-		}
 		storedRec := rec
 		needTDengine := true
 		if w.store != nil {
-			stored, err := restoreStoredTelemetry(ctx, w.store, rec)
+			stored, err := w.store.RestoreTelemetryContext(ctx, rec)
 			if err != nil {
 				if IsTelemetryDuplicate(err) {
 					// DLQ replay or redelivery: PostgreSQL already has the row.
@@ -374,10 +369,8 @@ func (w *Worker) consumeTelemetry(ctx context.Context) error {
 				continue
 			}
 			// Persist TDengine completion so a later replay does not rewrite it.
-			if marker, ok := w.store.(interface {
-				MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
-			}); ok {
-				if err := markTelemetryWritten(ctx, marker, storedRec.MsgID, storedRec.TenantID, storedRec.DeviceID); err != nil {
+			if marker, ok := w.store.(telemetryCompletionMarker); ok {
+				if err := marker.MarkTelemetryTDengineWrittenContext(ctx, storedRec.MsgID, storedRec.TenantID, storedRec.DeviceID); err != nil {
 					log.Printf("tdengine completion mark error: %v", err)
 				}
 			}
@@ -532,10 +525,10 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 				// The DLQ copy below still preserves the event for
 				// observability. Same backoff formula as the dispatcher.
 				if requeuer, ok := w.store.(interface {
-					RequeueCommand(id string, retryAfter time.Duration) error
+					RequeueCommandContext(ctx context.Context, id string, retryAfter time.Duration) error
 				}); ok {
 					backoff := commandRetryBackoff(cmd.DispatchAttempts)
-					if rqErr := requeueStoredCommand(ctx, requeuer, cmd.ID, backoff); rqErr != nil {
+					if rqErr := requeuer.RequeueCommandContext(ctx, cmd.ID, backoff); rqErr != nil {
 						log.Printf("command requeue error: id=%s err=%v", cmd.ID, rqErr)
 					}
 				}
@@ -547,9 +540,9 @@ func (w *Worker) consumeCommands(ctx context.Context) error {
 			// MQTT downlink succeeded: transition published -> sent and start the
 			// ACK deadline now, so the command status reflects real delivery.
 			if marker, ok := w.store.(interface {
-				MarkCommandSent(id string, deadline time.Time) error
+				MarkCommandSentContext(ctx context.Context, id string, deadline time.Time) error
 			}); ok {
-				if err := markStoredCommandSent(ctx, marker, cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
+				if err := marker.MarkCommandSentContext(ctx, cmd.ID, time.Now().UTC().Add(w.ackTimeout)); err != nil {
 					return fmt.Errorf("command mark sent: id=%s: %w", cmd.ID, err)
 				}
 			}
@@ -575,9 +568,7 @@ func (w *Worker) compensateUnwrittenTelemetry(ctx context.Context) {
 	if !ok || scanner == nil {
 		return
 	}
-	marker, ok := w.store.(interface {
-		MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
-	})
+	marker, ok := w.store.(telemetryCompletionMarker)
 	if !ok || marker == nil {
 		return
 	}
@@ -612,7 +603,7 @@ func (w *Worker) compensateUnwrittenTelemetry(ctx context.Context) {
 }
 
 type telemetryCompletionMarker interface {
-	MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error
+	MarkTelemetryTDengineWrittenContext(ctx context.Context, msgID, tenantID, deviceID string) error
 }
 
 // False preserves the scan cursor for transient sink failures. Permanent input
@@ -635,7 +626,7 @@ func (w *Worker) compensateTelemetryRows(ctx context.Context, rows []TelemetryRe
 			}
 			return false
 		}
-		if err := markTelemetryWritten(ctx, marker, rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
+		if err := marker.MarkTelemetryTDengineWrittenContext(ctx, rec.MsgID, rec.TenantID, rec.DeviceID); err != nil {
 			log.Printf("tdengine compensation mark error: msg=%s err=%v", rec.MsgID, err)
 			continue
 		}

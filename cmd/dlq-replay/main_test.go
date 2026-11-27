@@ -39,7 +39,7 @@ func TestReplayGroupIDIsPerStage(t *testing.T) {
 }
 
 func TestMQTTDeadLetterReplayTargetsKafkaTelemetry(t *testing.T) {
-	item := platform.DeadLetter{Stage: platform.StageMQTTKafka, SourceTopic: "tenant/t/device/d/telemetry"}
+	item := platform.DeadLetter{OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Stage: platform.StageMQTTKafka, SourceTopic: "tenant/t/device/d/telemetry"}
 	value := []byte(`{"msgId":"m","tenantId":"t","deviceId":"d","ts":1700000000000,"type":"telemetry","version":"v1","payload":{"x":1}}`)
 	topic, payload, err := replayKafkaPayload(item, value)
 	if err != nil || topic != "iot.telemetry" {
@@ -57,32 +57,45 @@ func TestMQTTDeadLetterReplayTargetsKafkaTelemetry(t *testing.T) {
 
 func TestTelemetryReplayPreservesOriginalReceiveTime(t *testing.T) {
 	received := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
-	for _, stage := range []string{platform.StageMQTTKafka, platform.StageTelemetryPostgres, platform.StageTelemetryTDengine} {
-		for _, legacy := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/legacy=%t", stage, legacy), func(t *testing.T) {
-				item := platform.DeadLetter{Stage: stage, SourceTopic: "tenant/t/device/d/telemetry", OccurredAt: received.Format(time.RFC3339Nano)}
-				value := []byte(fmt.Sprintf(`{"msgId":"m","tenantId":"t","deviceId":"d","ts":%d,"type":"telemetry","version":"v1","payload":{}}`, received.UnixMilli()))
-				want := received
-				if legacy {
-					item.OccurredAt = ""
-					want = time.UnixMilli(received.UnixMilli())
-				}
-				_, payload, err := replayKafkaPayload(item, value)
-				var rec platform.TelemetryRecord
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err = json.Unmarshal(payload, &rec); err != nil || !rec.ReceivedAt.Equal(want) {
-					t.Fatalf("replay replaced receive time: got %s want %s err=%v", rec.ReceivedAt, want, err)
-				}
-			})
-		}
+	for _, stage := range []string{platform.StageMQTTKafka, platform.StageTelemetryDecode, platform.StageTelemetryPostgres, platform.StageTelemetryTDengine} {
+		t.Run(stage, func(t *testing.T) {
+			mqtt := stage == platform.StageMQTTKafka
+			item := platform.DeadLetter{Stage: stage, SourceTopic: "tenant/t/device/d/telemetry"}
+			record := map[string]any{"msgId": "m", "tenantId": "t", "deviceId": "d", "ts": received.Add(-time.Hour).UnixMilli(), "type": "telemetry", "version": "v1", "payload": map[string]any{}}
+			if !mqtt {
+				item.OccurredAt = received.Add(time.Hour).Format(time.RFC3339Nano)
+			}
+			value, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := replayKafkaPayload(item, value); err == nil {
+				t.Fatal("missing server timestamp accepted")
+			}
+			if mqtt {
+				item.OccurredAt = received.Format(time.RFC3339Nano)
+			} else {
+				record["receivedAt"] = received
+			}
+			value, err = json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, payload, err := replayKafkaPayload(item, value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec, err := platform.DecodeTelemetryRecord(payload)
+			if err != nil || !rec.ReceivedAt.Equal(received) {
+				t.Fatalf("receivedAt=%v error=%v", rec.ReceivedAt, err)
+			}
+		})
 	}
 }
 
 type replayAckRecorder struct{ id, tenant, device string }
 
-func (s *replayAckRecorder) AckCommandContext(_ context.Context, id, tenant, device string) (platform.Command, error) {
+func (s *replayAckRecorder) AckCommandResultContext(_ context.Context, id, tenant, device string, _ contracts.CommandResult) (platform.Command, error) {
 	s.id, s.tenant, s.device = id, tenant, device
 	return platform.Command{}, nil
 }
@@ -126,18 +139,22 @@ func TestE2EAckReplayPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MarkCommandSent(cmd.ID, time.Now().Add(5*time.Minute)); err != nil {
+	if err := store.MarkCommandSentContext(t.Context(), cmd.ID, time.Now().Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	item := platform.DeadLetter{Stage: platform.StageCommandAck, SourceTopic: "tenant/" + tenant + "/device/d/ack"}
-	value, _ := json.Marshal(platform.CommandAckMessage{Status: "acked", CommandID: cmd.ID, TenantID: tenant, DeviceID: "d"})
+	value, _ := json.Marshal(platform.CommandAckMessage{Status: "failed", ErrorCode: "MOTOR_BLOCKED", Payload: json.RawMessage(`{"retry":false}`), CommandID: cmd.ID, TenantID: tenant, DeviceID: "d"})
 	for i := 0; i < 2; i++ {
 		if err := replayAck(context.Background(), item, value, store); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got, ok := store.GetCommand(cmd.ID)
-	if !ok || got.Status != contracts.CommandStatusAcked {
-		t.Fatalf("ACK replay did not persist: %+v", got)
+	if !ok || got.Status != contracts.CommandStatusFailed || got.Result == nil || got.Result.ErrorCode != "MOTOR_BLOCKED" {
+		t.Fatalf("ACK replay did not persist failure: %+v", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(got.Result.Payload, &payload); err != nil || payload["retry"] != false {
+		t.Fatalf("ACK replay lost device payload: %s (err=%v)", got.Result.Payload, err)
 	}
 }

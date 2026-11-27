@@ -56,7 +56,7 @@ func OpenPostgresStore(dsn string, ttl time.Duration, autoMigrate bool) (*Postgr
 	}
 	store := &PostgresStore{db: db, ttl: ttl}
 	if autoMigrate {
-		if err := store.ensureSchema(ctx); err != nil {
+		if err := store.MigrateSchema(ctx); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -72,10 +72,8 @@ func (s *PostgresStore) Close() error {
 }
 
 // MigrateSchema applies the repository SQL under a database/schema-scoped lock.
-// Multiple replicas cannot race DDL; a failed upgrade rolls back as one unit.
-func (s *PostgresStore) MigrateSchema(ctx context.Context) error { return s.ensureSchema(ctx) }
-
-func (s *PostgresStore) ensureSchema(ctx context.Context) error {
+// Multiple replicas cannot race DDL; a failed initialization rolls back as one unit.
+func (s *PostgresStore) MigrateSchema(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -84,57 +82,10 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(current_database()),hashtext(current_schema() || ':iot-schema'))`); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, migrations.UpgradeSQL); err != nil {
-		return err
-	}
 	if _, err = tx.ExecContext(ctx, migrations.InitialSQL); err != nil {
 		return err
 	}
-	if err = migrateLegacyDeviceSecrets(ctx, tx); err != nil {
-		return err
-	}
 	return tx.Commit()
-}
-
-func migrateLegacyDeviceSecrets(ctx context.Context, tx *sql.Tx) error {
-	var legacy bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='devices' AND column_name='secret')`).Scan(&legacy); err != nil || !legacy {
-		return err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT tenant_id,device_id,secret,COALESCE(secret_hash,'') FROM devices WHERE secret IS NOT NULL`)
-	if err != nil {
-		return err
-	}
-	type credential struct{ tenant, device, secret, hash string }
-	var credentials []credential
-	for rows.Next() {
-		var c credential
-		if err = rows.Scan(&c.tenant, &c.device, &c.secret, &c.hash); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		credentials = append(credentials, c)
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, c := range credentials {
-		hash := c.hash
-		if hash == "" {
-			hash, err = HashDeviceSecret(c.secret)
-			if err != nil {
-				return fmt.Errorf("legacy device credential is invalid: %w", err)
-			}
-		} else if !validBcryptEncoding(hash) {
-			return fmt.Errorf("legacy device hash is invalid; migration rolled back")
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE devices SET secret_hash=$1,secret=NULL WHERE tenant_id=$2 AND device_id=$3`, hash, c.tenant, c.device); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *PostgresStore) CreateTenant(t Tenant) (Tenant, error) {
@@ -417,12 +368,8 @@ func (s *PostgresStore) RestoreTelemetryContext(ctx context.Context, rec Telemet
 	return rec, nil
 }
 
-// MarkTelemetryTDengineWritten records that the telemetry row was persisted to
+// MarkTelemetryTDengineWrittenContext records that the telemetry row was persisted to
 // TDengine, so a later DLQ replay does not write it twice.
-func (s *PostgresStore) MarkTelemetryTDengineWritten(msgID, tenantID, deviceID string) error {
-	return s.MarkTelemetryTDengineWrittenContext(context.Background(), msgID, tenantID, deviceID)
-}
-
 func (s *PostgresStore) MarkTelemetryTDengineWrittenContext(ctx context.Context, msgID, tenantID, deviceID string) error {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
@@ -649,14 +596,6 @@ func (s *PostgresStore) CreateCommandWithKey(ctx context.Context, tenantID, devi
 	return cmd, nil
 }
 
-func (s *PostgresStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	return s.AckCommandContext(context.Background(), id, tenantID, deviceID)
-}
-
-func (s *PostgresStore) AckCommandContext(ctx context.Context, id, tenantID, deviceID string) (Command, error) {
-	return s.AckCommandResultContext(ctx, id, tenantID, deviceID, contracts.CommandResult{Status: contracts.CommandStatusAcked})
-}
-
 func (s *PostgresStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (Command, error) {
 	if err := contracts.ValidateDeviceIdentity(tenantID, deviceID); err != nil {
 		return Command{}, err
@@ -786,16 +725,12 @@ func (s *PostgresStore) MarkCommandPublishedContext(ctx context.Context, id stri
 	return err
 }
 
-// MarkCommandSent transitions a command to sent once the MQTT downlink
+// MarkCommandSentContext transitions a command to sent once the MQTT downlink
 // succeeded, and starts the ACK deadline. It accepts both 'created' and
 // 'published' as the prior state: the worker can confirm the MQTT downlink
 // before the dispatcher's MarkCommandPublished commit lands (dispatcher writes
 // Kafka first, then updates the row), so requiring strictly 'published' would
 // race and leave the command stuck in published with no deadline.
-func (s *PostgresStore) MarkCommandSent(id string, deadline time.Time) error {
-	return s.MarkCommandSentContext(context.Background(), id, deadline)
-}
-
 func (s *PostgresStore) MarkCommandSentContext(ctx context.Context, id string, deadline time.Time) error {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
@@ -816,7 +751,7 @@ func (s *PostgresStore) RescheduleCommandContext(ctx context.Context, id string,
 	return err
 }
 
-// RequeueCommand returns a 'published' command to 'created' so the dispatcher
+// RequeueCommandContext returns a 'published' command to 'created' so the dispatcher
 // redelivers it on the next poll instead of waiting up to 5 minutes for the
 // stale-command recovery scan. The worker calls this when the MQTT downlink
 // fails. It only matches 'published': if the dispatcher's MarkCommandPublished
@@ -826,10 +761,6 @@ func (s *PostgresStore) RescheduleCommandContext(ctx context.Context, id string,
 // bounded: each redelivery goes through ClaimCommandsForDispatch, which
 // increments dispatch_attempts, and RecoverStaleCommands marks the command
 // failed once the cap is hit.
-func (s *PostgresStore) RequeueCommand(id string, retryAfter time.Duration) error {
-	return s.RequeueCommandContext(context.Background(), id, retryAfter)
-}
-
 func (s *PostgresStore) RequeueCommandContext(ctx context.Context, id string, retryAfter time.Duration) error {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
@@ -840,25 +771,11 @@ func (s *PostgresStore) RequeueCommandContext(ctx context.Context, id string, re
 	return err
 }
 
-// ExpireCommands marks 'sent' commands whose ACK deadline passed as timeout.
-// The NULL-deadline branch is a defensive backstop: MarkCommandSent always
-// writes deadline_at, but rows written by older versions (or by a manual
-// status flip) can sit in 'sent' with no deadline and would otherwise never
-// converge. nullDeadlineGrace <= 0 disables that backstop.
-func (s *PostgresStore) ExpireCommands(now time.Time, nullDeadlineGrace time.Duration) (int64, error) {
-	return s.ExpireCommandsContext(context.Background(), now, nullDeadlineGrace)
-}
-
-func (s *PostgresStore) ExpireCommandsContext(ctx context.Context, now time.Time, nullDeadlineGrace time.Duration) (int64, error) {
+// ExpireCommandsContext expires sent commands once their recorded ACK deadline passes.
+func (s *PostgresStore) ExpireCommandsContext(ctx context.Context, now time.Time) (int64, error) {
 	ctx, cancel := postgresOperationContext(ctx)
 	defer cancel()
-	predicate := `status='sent' AND deadline_at <= $1`
-	args := []any{now}
-	if nullDeadlineGrace > 0 {
-		predicate = `status='sent' AND (deadline_at <= $1 OR (deadline_at IS NULL AND updated_at + $2::interval <= $1))`
-		args = append(args, nullDeadlineGrace.String())
-	}
-	return s.updateCommandBatchWithEvent(ctx, `status='timeout',updated_at=$1`, predicate, "timeout", args...)
+	return s.updateCommandBatchWithEvent(ctx, `status='timeout',updated_at=$1`, `status='sent' AND deadline_at <= $1`, "timeout", now)
 }
 
 // RecoverStaleCommands repairs commands stranded by dispatcher/worker outages:

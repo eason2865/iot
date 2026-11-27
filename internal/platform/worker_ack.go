@@ -150,25 +150,9 @@ func (w *Worker) rejectAck(msg mqtt.Message, reason string) {
 }
 
 func (w *Worker) applyAck(ack CommandAckMessage) error {
-	if store, ok := w.store.(CommandResultStore); ok {
-		ctx, cancel := context.WithTimeout(w.acks.ctx, 2*time.Second)
-		defer cancel()
-		_, err := store.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, contracts.CommandResult{Status: contracts.CommandStatus(ack.Status), ErrorCode: ack.ErrorCode, Payload: ack.Payload})
-		return err
-	}
-	if ack.Status != "acked" || ack.ErrorCode != "" || len(ack.Payload) > 0 {
-		return errors.New("ACK store does not support execution results")
-	}
-
-	if store, ok := w.store.(interface {
-		AckCommandContext(context.Context, string, string, string) (Command, error)
-	}); ok {
-		ctx, cancel := context.WithTimeout(w.acks.ctx, 2*time.Second)
-		defer cancel()
-		_, err := store.AckCommandContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID)
-		return err
-	}
-	_, err := w.store.AckCommand(ack.CommandID, ack.TenantID, ack.DeviceID)
+	ctx, cancel := context.WithTimeout(w.acks.ctx, 2*time.Second)
+	defer cancel()
+	_, err := w.store.AckCommandResultContext(ctx, ack.CommandID, ack.TenantID, ack.DeviceID, contracts.CommandResult{Status: contracts.CommandStatus(ack.Status), ErrorCode: ack.ErrorCode, Payload: ack.Payload})
 	return err
 }
 

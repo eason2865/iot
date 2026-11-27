@@ -50,7 +50,9 @@ Set against that, the volume is low and a fix almost always needs a human anyway
 - ACK failures use stage `command.ack`; replay applies the PostgreSQL ACK
   transition using `POSTGRES_DSN`, without republishing a device command.
 - `mqtt.kafka` replay converts the original envelope to a telemetry record and
-  publishes to `KAFKA_TELEMETRY_TOPIC`. Invalid `mqtt.decode`/`mqtt.identity`
+  uses the required DLQ `occurredAt` as server receive time, then publishes to
+  `KAFKA_TELEMETRY_TOPIC`. Kafka telemetry replay requires `receivedAt` in the
+  original record. Invalid `mqtt.decode`/`mqtt.identity`
   messages are inspectable but cannot be blindly replayed.
 - PostgreSQL-backed telemetry sink compensation is a separate bounded scan,
   described in ADR 0007. It never consumes the DLQ or resends commands.

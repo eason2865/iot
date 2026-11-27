@@ -150,9 +150,6 @@ func (s *memoryStore) createCommand(tenantID, deviceID string, payload json.RawM
 	return cmd, nil
 }
 
-func (s *memoryStore) AckCommand(id, tenantID, deviceID string) (Command, error) {
-	return s.AckCommandResultContext(context.Background(), id, tenantID, deviceID, contracts.CommandResult{Status: contracts.CommandStatusAcked})
-}
 func (s *memoryStore) AckCommandResultContext(ctx context.Context, id, tenantID, deviceID string, input contracts.CommandResult) (Command, error) {
 	if err := ctx.Err(); err != nil {
 		return Command{}, err

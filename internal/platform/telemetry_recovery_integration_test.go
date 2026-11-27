@@ -2,29 +2,24 @@ package platform
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"iot/internal/contracts"
+
+	"github.com/segmentio/kafka-go"
 )
 
-func TestHistoricalKafkaTelemetryDoesNotRefreshLiveness(t *testing.T) {
+func TestKafkaTelemetryRequiresOriginalReceiveTime(t *testing.T) {
 	s := isolatedPostgresStore(t)
 	brokers, topic := regressionKafkaTopic(t)
+	_, dlqTopic := regressionKafkaTopic(t)
 	received := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
 	rec := TelemetryRecord{MsgID: "historical", TenantID: "t", DeviceID: "d", Ts: received.UnixMilli(), Type: "temp", Version: "v1", Payload: []byte(`{}`), ReceivedAt: received}
 	value, err := json.Marshal(rec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy := rec
-	legacy.MsgID = "legacy"
-	legacy.ReceivedAt = time.Time{}
-	legacyTime := received.Add(-24 * time.Hour).Truncate(time.Millisecond)
-	legacyValue, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +27,8 @@ func TestHistoricalKafkaTelemetryDoesNotRefreshLiveness(t *testing.T) {
 	defer writer.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	if err = writer.WriteMessages(ctx, kafka.Message{Value: value}, kafka.Message{Value: legacyValue, Time: legacyTime}); err != nil {
+	missing := []byte(`{"msgId":"missing","tenantId":"t","deviceId":"d","ts":1,"type":"temp","version":"v1","payload":{}}`)
+	if err = writer.WriteMessages(ctx, kafka.Message{Value: missing}, kafka.Message{Value: value}); err != nil {
 		t.Fatal(err)
 	}
 	reader := kafka.NewReader(kafka.ReaderConfig{Brokers: brokers, Topic: topic, GroupID: topic, StartOffset: kafka.FirstOffset, MinBytes: 1, MaxBytes: 10e6, MaxWait: 100 * time.Millisecond})
@@ -43,26 +39,37 @@ func TestHistoricalKafkaTelemetryDoesNotRefreshLiveness(t *testing.T) {
 		client := &kafka.Client{Addr: kafka.TCP(brokers...)}
 		_, _ = client.DeleteGroups(cleanup, &kafka.DeleteGroupsRequest{GroupIDs: []string{topic}})
 	}()
-	w := &Worker{store: s, telemetryReader: reader}
+	dlqWriter := &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: dlqTopic, RequiredAcks: kafka.RequireAll, BatchSize: 1}
+	defer dlqWriter.Close()
+	w := &Worker{store: s, telemetryReader: reader, dlqWriter: dlqWriter}
 	done := make(chan error, 1)
 	go func() { done <- w.consumeTelemetry(ctx) }()
 	defer func() { cancel(); <-done }()
+	dlq := kafka.NewReader(kafka.ReaderConfig{Brokers: brokers, Topic: dlqTopic, Partition: 0, MinBytes: 1, MaxBytes: 10e6})
+	defer dlq.Close()
+	msg, err := dlq.ReadMessage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item DeadLetter
+	if err := json.Unmarshal(msg.Value, &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.Stage != StageTelemetryDecode || item.SourceTopic != topic || item.ValueBase64 != base64.StdEncoding.EncodeToString(missing) {
+		t.Fatalf("record missing receivedAt was not retained in the decode DLQ: %+v", item)
+	}
 	var stored []TelemetryRecord
 	for ctx.Err() == nil {
 		stored, _, err = s.ListTelemetryPageContext(ctx, PageRequest{TenantID: "t", DeviceID: "d"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(stored) == 2 {
+		if len(stored) == 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	receivedByID := make(map[string]time.Time)
-	for _, rec := range stored {
-		receivedByID[rec.MsgID] = rec.ReceivedAt
-	}
-	if len(stored) != 2 || !receivedByID["legacy"].Equal(legacyTime) || !receivedByID["historical"].Equal(received) {
+	if len(stored) != 1 || stored[0].MsgID != rec.MsgID || !stored[0].ReceivedAt.Equal(received) {
 		t.Fatalf("historical receive time was replaced: %+v, want %s", stored, received)
 	}
 	status, err := s.GetDeviceStatusContext(ctx, "t", "d")

@@ -28,6 +28,12 @@ Local validation artifacts belong in `outputs/`. Its nested Go module keeps
 archived runners out of the project's package scan. To rebuild a standalone
 runner with the project dependencies, run `go build -o /tmp/runner ./outputs/<case>/main.go` from the repository root.
 
+## Commit Messages
+
+Use `type: description` or `type(scope): description`. Choose `feat` for a new feature and `fix` for a bug fix. Other common types include `refactor`, `perf`, `docs`, `test`, `build`, `ci`, and `chore`. Use a short description that names the change.
+
+For example, `refactor(worker): remove duplicate Kafka initialization` describes a cleanup, and `ci: authenticate protoc release lookup` describes a workflow change. Mark a breaking change with `!` before the colon or a `BREAKING CHANGE:` footer explaining the impact. [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+
 ## Pull Request Checklist
 
 - Keep changes focused on one topic.

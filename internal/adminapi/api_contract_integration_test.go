@@ -65,7 +65,7 @@ func contractIntegrationServer(t *testing.T) (http.Handler, *sql.DB, string) {
 	api := &Server{rpc: corev1.NewCoreServiceClient(conn)}
 	server := newManagementHTTPServer()
 	server.Use(rest.ToMiddleware(limitRequestBodyMiddleware))
-	server.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-t": "t"})))
+	server.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-t": "t"}, nil)))
 	server.AddRoutes(api.routes())
 	var handler http.Handler
 	type bound struct{}

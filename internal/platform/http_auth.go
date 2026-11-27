@@ -37,7 +37,7 @@ func (e *authError) Error() string { return e.msg }
 
 // BearerTokenMiddlewareWithTenants authorizes a single parsed path scope. The
 // global token can manage tenants; bound tokens require the matching tenant path.
-func BearerTokenMiddlewareWithTenants(token string, tenantTokens map[string]string) func(http.Handler) http.Handler {
+func BearerTokenMiddlewareWithTenants(token string, tenantTokens, commandReadTokens map[string]string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Probes and the public schema must stay unauthenticated: the
@@ -53,7 +53,8 @@ func BearerTokenMiddlewareWithTenants(token string, tenantTokens map[string]stri
 			}
 			global := token != "" && len(provided) == len(token) && subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
 			boundTenant, isTenantToken := tenantTokens[provided]
-			if !global && !isTenantToken {
+			readTenant, readOnly := commandReadTokens[provided]
+			if !global && !isTenantToken && !readOnly {
 				log.Printf("bearer auth rejected: method=%s", r.Method)
 				writeError(w, http.StatusUnauthorized, "valid bearer token is required")
 				return
@@ -67,7 +68,12 @@ func BearerTokenMiddlewareWithTenants(token string, tenantTokens map[string]stri
 				}
 				return
 			}
-			if !global && (params.TenantID == "" || params.TenantID != boundTenant) {
+			if readOnly {
+				if params.TenantID != readTenant || r.Method != http.MethodGet || params.Resource != "command" || params.CommandID == "" {
+					writeError(w, http.StatusForbidden, "token is restricted to reading one tenant command")
+					return
+				}
+			} else if !global && (params.TenantID == "" || params.TenantID != boundTenant) {
 				writeError(w, http.StatusForbidden, "token is not authorized for this tenant")
 				return
 			}

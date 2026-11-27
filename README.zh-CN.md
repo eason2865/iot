@@ -1,9 +1,9 @@
-# IoT Platform
+# IoT Platform 3.0
 
 [English](README.md) | 简体中文
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="IoT platform architecture" />
+  <img src="docs/images/architecture.zh-CN.svg" alt="IoT 3.0 系统架构与独立运维服务" />
 </p>
 
 <p align="center">
@@ -22,10 +22,24 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 - `device-worker` 负责时序落库、业务状态更新和命令投递
 - `demo` 负责多租户多设备造流和 ACK 回执，适合联调和压测
 
+## 运维诊断
+
+3.0 新增独立的 `ops-agent`。运维人员提交租户、命令 ID 和可选问题，Agent 通过 management-api 查询持久化状态，通过 Prometheus 查询命令最后更新时间的 worker 抓取状态，并通过 Tempo 查询同一命令的阶段与耗时。接口分别返回已确认事实、来源状态和可选的模型建议。开启诊断无需修改设备固件。
+
+```bash
+kubectl -n iot port-forward svc/ops-agent 18085:8084
+# 在另一个终端中，使用属于该租户的运维令牌
+curl -fsS -X POST "http://localhost:18085/api/v1/tenants/$TENANT_ID/commands/$COMMAND_ID/diagnoses" \
+  -H "Authorization: Bearer $OPS_OPERATOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"question":"命令在哪一步超时？"}'
+```
+
+`opsAgent.enabled` 默认关闭。启用步骤、独立 Secret、模型连接和 Tempo 配置见[生产部署指南](docs/production-deployment.zh-CN.md#运维-agent-30)。本地部署脚本接受 `IOT_VALUES_FILE`。本地 Tempo 可通过 `docker compose -f monitoring/docker-compose.yml --profile tracing up -d tempo` 启动，默认只向本机开放 3200（查询）和 4317（OTLP/gRPC）。[接口契约](docs/api-contract.md#ops-agent-30)
+
 ## 一图看懂
 
 <p align="center">
-  <img src="docs/images/command-cycle.svg" alt="IoT platform command lifecycle" />
+  <img src="docs/images/command-cycle.zh-CN.svg" alt="IoT 3.0 命令下发、回执和运维诊断时序" />
 </p>
 
 ## 核心特性
@@ -47,7 +61,7 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 
 ## 当前实现
 
-- 7 个运行入口：`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`、`cmd/migrate`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
+- 8 个运行入口：`cmd/ops-agent`、`cmd/management-api`、`cmd/iot-core`、`cmd/demo`、`cmd/telemetry-ingestor`、`cmd/device-worker`、`cmd/dlq-replay`、`cmd/migrate`，另有 2 个 E2E 测试工具（`cmd/e2eclient`、`cmd/e2espoof`）
 - `management-api` 使用 go-zero REST，`iot-core` 使用 gRPC + protobuf
 - 本地 Docker 编排不再包含业务服务发现组件
 - PostgreSQL 新库初始化脚本为 `migrations/001_init.sql`。
@@ -56,9 +70,9 @@ Go-zero + gRPC + protobuf + EMQX + Kafka + TDengine + PostgreSQL 的物联网平
 
 ## 观测
 
-- 每个服务都暴露 `/metrics`
+- 四个业务服务和 demo 暴露 `/metrics`
 - `management-api` 的访问日志仅记录方法、路由模板、状态码、耗时和请求 ID，不记录请求/响应正文、请求头、查询参数或任意 panic 内容；核心 RPC 统计日志也不记录请求正文。
-- 服务启动时开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`。单文件最多 8 MiB，保留 `.1`/`.2` 两个备份，每个服务合计最多 24 MiB；启用轮转时丢弃这些路径中原有的超限文件。轮转失败或单条 trace 超限时导出失败，不继续追加突破上限。Helm 保留可写的 128Mi 临时卷，Pod 重建后本地 trace 丢失；长期保留请配置外部 OTLP exporter。根 span 默认采样率为 0.1，子 span 保留父级采样决定；`/healthz`、`/readyz`、`/metrics` 及就绪检查到核心的 RPC 不产生 trace。
+- 业务服务启动时开启 OpenTelemetry trace agent，默认写到 `/tmp/<service>-traces.log`。单文件最多 8 MiB，保留 `.1`/`.2` 两个备份，每个服务合计最多 24 MiB；启用轮转时丢弃这些路径中原有的超限文件。轮转失败或单条 trace 超限时导出失败，不继续追加突破上限。Helm 保留可写的 128Mi 临时卷，Pod 重建后本地 trace 丢失；长期保留请配置外部 OTLP exporter。根 span 默认采样率为 0.1，子 span 保留父级采样决定；`/healthz`、`/readyz`、`/metrics` 及就绪检查到核心的 RPC 不产生 trace。
 - HTTP 请求会自动补 `X-Request-Id`，并透传到 `management-api -> iot-core` 的 gRPC 调用
 - `demo` 发往 `management-api` 的请求会带上 request id 和 trace 上下文，便于串联压测/联调链路
 - 标准输出日志已切换为结构化 JSON，便于在容器和本地直接检索
@@ -177,7 +191,7 @@ make build
 - `GET /api/v1/tenants/{tenantId}/commands/{commandId}`
 - `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements`
 
-2.56 统一使用租户资源路径，旧路由已移除。`tenantId` 不再放 Query/Body，已有设备的 `deviceId` 也只从路径读取；创建设备时 Body 提供新 `deviceId`。鉴权和业务共用同一份路径参数，租户 Token 可以列出本租户设备。
+管理 API 统一使用租户资源路径。`tenantId` 不再放 Query/Body，已有设备的 `deviceId` 也只从路径读取；创建设备时 Body 提供新 `deviceId`。鉴权和业务共用同一份路径参数，租户 Token 可以列出本租户设备。
 
 列表使用 `pageSize`（默认50，显式1–100）和不透明 `cursor`，响应 `{ "items": [], "nextCursor": "" }`。遥测支持 `startTime/endTime/type/sort`；命令支持 `deviceId/status/startTime/endTime/sort`。时间为带时区的 RFC3339、最多毫秒精度，范围左闭右开；遥测按设备事件时间、命令按创建时间，默认倒序。重复、未知、空值或编码错误的 Query 返回400；游标必须沿用原过滤范围。
 
@@ -192,8 +206,9 @@ ACK Body 为 `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"r
 1. 设备通过 MQTT 进入 EMQX
 2. `telemetry-ingestor` 负责标准化和事件解耦
 3. `management-api` 通过 gRPC 调用 `iot-core`
-4. `management-api` 通过 `iot-core:9001` 调用核心服务
+4. `iot-core` 领取 PostgreSQL 中的命令租约并发布到 Kafka
 5. `device-worker` 消费 Kafka，完成时序和状态落库
+6. 可选的 `ops-agent` 通过管理 API 与观测后端获取诊断证据，独立于设备消息链路。
 
 这套拆法的原则是先保留一个清晰的核心边界，再根据业务压力继续扩展，而不是一下拆成很多很难排障的小服务。
 
@@ -287,14 +302,17 @@ tenant/{tenantId}/device/{deviceId}/...
 ```text
 iot/
 ├── cmd/
+│   ├── ops-agent/           # 租户命令只读诊断
 │   ├── management-api/      # 查询与管理 API
 │   ├── iot-core/            # 核心业务 gRPC 服务
 │   ├── demo/       # 随机造流与 ACK 的模拟器
 │   ├── telemetry-ingestor/  # MQTT 接入与事件解耦
 │   ├── device-worker/       # Kafka 消费、落库和下行处理
+│   ├── migrate/             # 初始化数据库结构
 │   ├── dlq-replay/          # DLQ 检查与重放工具
 │   └── e2eclient/ e2espoof/ # 端到端测试客户端（不部署）
 ├── internal/
+│   ├── opsagent/   # 诊断工具与可选模型适配
 │   ├── adminapi/   # REST 网关，负责 HTTP 到 iot-core 的转换
 │   ├── bootstrap/  # 启动装配
 │   ├── contracts/  # topic、envelope、状态机、REST 响应和 Schema 契约
@@ -304,7 +322,7 @@ iot/
 ├── charts/iot/     # Helm 部署清单
 ├── migrations/     # 数据库迁移
 ├── proto/          # iot-core protobuf 契约
-├── monitoring/     # 本地 Prometheus / Grafana 配置
+├── monitoring/     # 本地 Prometheus、Grafana 和可选 Tempo 的配置
 └── docs/           # MQTT Schema（唯一源，经 docs/contracts.go embed）、生产部署指南和 ADR
 ```
 
@@ -323,7 +341,7 @@ iot/
 当前推荐的本地形态是：
 
 - Docker：PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo，以及访问 Kubernetes 服务的转发器
-- Kubernetes：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`，以及独立 `emqx` 命名空间中的 EMQX 集群
+- Kubernetes：`management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`、按需启用的 `ops-agent`，以及独立 `emqx` 命名空间中的 EMQX 集群
 
 Prometheus 和 Grafana 是 IoT 全链路的观测层，但在本地刻意作为 Docker Compose 独立服务运行，而不是随业务 Helm release 发布。Prometheus 通过 Kubernetes API（`kubernetes_sd`，role `pod`）发现 `iot` 命名空间下的所有 Pod，并经由 apiserver pod proxy 逐副本抓取 `metrics` 端口，多副本服务不再有单 Pod 盲区；这样可以在重新部署业务服务时保留监控配置与历史数据。
 
@@ -375,11 +393,11 @@ kubectl rollout status deploy/device-worker -n iot
 scripts/helm-deploy-local.sh
 ```
 
-该脚本会强制 apps-only 部署，只安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
+该脚本会强制 apps-only 部署，默认安装 `management-api`、`iot-core`、`telemetry-ingestor`、`device-worker` 以及它们共享的配置，不会安装 PostgreSQL、Kafka、EMQX、TDengine、Prometheus、Grafana 或 demo。运行前需要按上一步先创建本地 EMQX。
 其中 `iot-core` 是 `management-api` 的 gRPC 核心依赖，脚本会等待四个服务全部就绪。
-在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:2.56`。
+在 Docker Desktop Kubernetes 环境中，脚本会用镜像 ID 生成临时不可变 `iot-app:local-<image-id>` 标签，导入 `desktop-control-plane` 的 containerd 后再传给 Helm，避免固定 tag 重建后被 k8s `IfNotPresent` 复用旧镜像；导入完成即删除本机临时标签。本地镜像只需保留 `iot-app:3.0`。
 
-Helm Chart 只定义四个业务服务：PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
+Helm Chart 定义四个业务服务和可选的 ops-agent。PostgreSQL、Kafka 与 TDengine 通过 Docker Desktop 网关 IP 连接，EMQX 则通过 Kubernetes Service DNS 连接。Docker 容器内访问宿主机端口时仍使用 `host.docker.internal`，例如 Prometheus 通过 `https://host.docker.internal:6443` 访问 Kubernetes apiserver 进行逐 Pod 指标抓取。
 
 给本地 Prometheus 和 demo 建立访问 k8s 业务服务的通道：
 

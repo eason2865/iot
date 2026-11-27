@@ -19,7 +19,7 @@ func runAuthRequest(t *testing.T, mw func(http.Handler) http.Handler, method, pa
 	return rec
 }
 func TestTenantBoundTokenScoping(t *testing.T) {
-	mw := BearerTokenMiddlewareWithTenants("global-token", map[string]string{"tok-a": "tenant-a"})
+	mw := BearerTokenMiddlewareWithTenants("global-token", map[string]string{"tok-a": "tenant-a"}, nil)
 	for _, tc := range []struct {
 		method, path, token, body string
 		want                      int
@@ -45,7 +45,7 @@ func TestTenantBoundTokenPreservesRequestBody(t *testing.T) {
 	r := httptest.NewRequest("POST", "/api/v1/tenants/tenant-a/devices/d/commands", strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer tok-a")
 	rec := httptest.NewRecorder()
-	BearerTokenMiddlewareWithTenants("", map[string]string{"tok-a": "tenant-a"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	BearerTokenMiddlewareWithTenants("", map[string]string{"tok-a": "tenant-a"}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ := io.ReadAll(r.Body)
 		if string(got) != body {
 			t.Error("body changed")
@@ -61,7 +61,7 @@ func TestTenantBoundTokenPreservesRequestBody(t *testing.T) {
 	}
 }
 func TestTenantTokenCannotOverrideHandlerTenant(t *testing.T) {
-	mw := BearerTokenMiddlewareWithTenants("admin", map[string]string{"tok-a": "tenant-a"})
+	mw := BearerTokenMiddlewareWithTenants("admin", map[string]string{"tok-a": "tenant-a"}, nil)
 	for _, path := range []string{"/api/v1/tenants?tenantId=tenant-a", "/api/v1/tenants/tenant-b/commands?tenantId=tenant-a", "/api/v1/tenants/tenant-a/commands?status=failed&status=acked", "/api/v1/tenants/tenant-a/commands?bad=%zz", "/api/v1/tenants/tenant-a/commands?unknown=x"} {
 		if rec := runAuthRequest(t, mw, "GET", path, "tok-a", ""); rec.Code != 400 {
 			t.Errorf("%s HTTP %d", path, rec.Code)
@@ -72,8 +72,27 @@ func TestBearerSchemeRequiredForTenantToken(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/v1/tenants/tenant-a/commands", nil)
 	r.Header.Set("Authorization", "tok-a")
 	rec := httptest.NewRecorder()
-	BearerTokenMiddlewareWithTenants("", map[string]string{"tok-a": "tenant-a"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthorized handler called") })).ServeHTTP(rec, r)
+	BearerTokenMiddlewareWithTenants("", map[string]string{"tok-a": "tenant-a"}, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("unauthorized handler called") })).ServeHTTP(rec, r)
 	if rec.Code != 401 {
 		t.Fatal(rec.Code)
+	}
+}
+
+func TestCommandReadCredential(t *testing.T) {
+	mw := BearerTokenMiddlewareWithTenants("", nil, map[string]string{"reader": "a"})
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/api/v1/tenants/a/commands/c", 200},
+		{"GET", "/api/v1/tenants/b/commands/c", 403},
+		{"GET", "/api/v1/tenants/a/commands", 403},
+		{"GET", "/api/v1/tenants/a/devices/d", 403},
+		{"POST", "/api/v1/tenants/a/devices/d/commands", 403},
+		{"POST", "/api/v1/tenants/a/devices/d/commands/c/acknowledgements", 403},
+	} {
+		if rec := runAuthRequest(t, mw, tc.method, tc.path, "reader", ""); rec.Code != tc.want {
+			t.Errorf("%s %s: got %d want %d", tc.method, tc.path, rec.Code, tc.want)
+		}
 	}
 }

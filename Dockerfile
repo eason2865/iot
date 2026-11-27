@@ -5,6 +5,7 @@ FROM scratch
 
 COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
+COPY bin/ops-agent /usr/local/bin/ops-agent
 COPY bin/management-api /usr/local/bin/management-api
 COPY bin/iot-core /usr/local/bin/iot-core
 COPY bin/telemetry-ingestor /usr/local/bin/telemetry-ingestor

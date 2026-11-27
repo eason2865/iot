@@ -34,3 +34,5 @@ The production manifest `cluster.yaml` uses the same mechanism: when creating `i
 Note: the local single-node license crashes during rolling updates due to the transient double-core state (`SINGLE_NODE_LICENSE`). After updating the EMQX CR, run `kubectl delete sts -n emqx --all` to let the Operator rebuild the single node.
 
 Local Compose does not run an EMQX container; instead it port-forwards `emqx-listeners:1883` and `emqx-dashboard:18083` to the host, so both the demo inside Docker and host-side MQTT clients go through the same Kubernetes EMQX Service.
+
+In 3.0, command diagnosis reads the recorded gateway state and sampled MQTT spans through the separate [operations agent](../../docs/production-deployment.md#operations-agent-30). EMQX continues to handle device authentication, command delivery and ACK forwarding.

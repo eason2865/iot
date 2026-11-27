@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 810" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
+<title id="title">IoT 3.0 命令生命周期</title><desc id="desc">命令创建、异步派发、设备回执或超时，以及独立的只读诊断。</desc>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#476379"/></marker></defs>
+<rect width="1240" height="810" rx="12" fill="#f7fafb"/>
+<text x="24" y="44" text-anchor="start" font-size="28" font-weight="700" fill="#183248">IoT 3.0  /  命令生命周期</text>
+<rect x="8" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="80" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">Client</text>
+<path d="M80 104 L80 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="194" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="266" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">management-api</text>
+<path d="M266 104 L266 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="376" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="448" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">iot-core</text>
+<path d="M448 104 L448 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="554" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="626" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">PostgreSQL</text>
+<path d="M626 104 L626 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="736" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="808" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">Kafka</text>
+<path d="M808 104 L808 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="915" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="987" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">device-worker</text>
+<path d="M987 104 L987 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="1090" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="1162" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">EMQX / Device</text>
+<path d="M1162 104 L1162 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<path d="M80 144 L266 144" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="173.0" y="138" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">POST …/commands</text>
+<path d="M266 181 L448 181" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="357.0" y="175" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">gRPC CreateCommand</text>
+<path d="M448 218 L626 218" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="212" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">写入 created 和 traceparent</text>
+<path d="M448 255 L266 255" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="357.0" y="249" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">命令 ID</text>
+<path d="M266 288 L80 288" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="173.0" y="282" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">201 Created</text>
+<path d="M448 329 L626 329" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="323" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">领取派发租约</text>
+<path d="M448 366 L808 366" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="628.0" y="360" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">发布命令并传递 traceparent</text>
+<path d="M448 399 L626 399" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="393" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">记录 published</text>
+<path d="M808 438 L987 438" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="897.5" y="432" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">消费命令</text>
+<path d="M987 473 L1162 473" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="1074.5" y="467" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">MQTT QoS 1 下发</text>
+<path d="M1162 509 L987 509" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="1074.5" y="503" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">代理 PUBACK</text>
+<path d="M987 545 L626 545" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="806.5" y="539" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">记录 sent 和 ACK 截止时间</text>
+<path d="M1162 581 L987 581" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="1074.5" y="575" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">设备通过 ACK topic 回执</text>
+<path d="M987 617 L626 617" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="806.5" y="611" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">持久化 acked 或 failed</text>
+<text x="26" y="651" text-anchor="start" font-size="15" font-weight="400" fill="#183248">若没有设备 ACK，iot-core 将到期的 sent 命令置为 timeout。快速回执可能先于 sent 更新。</text>
+<rect x="22" y="675" width="1195" height="109" rx="10" fill="#e7f4ed" stroke="#a7c9b7"/>
+<text x="40" y="704" text-anchor="start" font-size="18" font-weight="650" fill="#225b49">创建命令后的只读诊断</text>
+<text x="40" y="734" text-anchor="start" font-size="16" font-weight="400" fill="#183248">运维人员 → ops-agent → 租户命令 GET、Prometheus 抓取状态、Tempo 命令阶段</text>
+<text x="40" y="761" text-anchor="start" font-size="14" font-weight="400" fill="#183248">诊断返回已确认的状态和阶段时间，可选的模型建议单独呈现。</text>
+</svg>

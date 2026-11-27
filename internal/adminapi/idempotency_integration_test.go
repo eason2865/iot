@@ -149,7 +149,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			}
 		}
 	}
-	handler := platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"})(http.HandlerFunc(server.createCommandHandler))
+	handler := platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"}, nil)(http.HandlerFunc(server.createCommandHandler))
 	post := func(key, payload, tenant string) (int, string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/"+tenant+"/devices/d/commands", bytes.NewBufferString(fmt.Sprintf(`{"payload":%s}`, payload)))
@@ -200,7 +200,7 @@ func TestCommandIdempotencyThroughRESTAndGRPC(t *testing.T) {
 			req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
 			req.Header.Set("Authorization", "Bearer "+token)
 			rec := httptest.NewRecorder()
-			h := limitRequestBodyMiddleware(platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"})(tc.handler))
+			h := limitRequestBodyMiddleware(platform.BearerTokenMiddlewareWithTenants("admin", map[string]string{"tenant-token": "t"}, nil)(tc.handler))
 			h.ServeHTTP(rec, req)
 			if rec.Code != 400 {
 				t.Errorf("token=%s path=%s invalid input status=%d", token, tc.path, rec.Code)

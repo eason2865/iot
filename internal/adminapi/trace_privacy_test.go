@@ -18,7 +18,7 @@ import (
 func boundManagementHandler(t *testing.T) http.Handler {
 	t.Helper()
 	s := newManagementHTTPServer()
-	s.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants("fictional-admin-token", nil)))
+	s.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants("fictional-admin-token", nil, nil)))
 	s.AddRoute(rest.Route{Method: "GET", Path: "/api/v1/tenants", Handler: func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("cursor") != "fictional-query-secret" {
 			t.Error("original query changed")

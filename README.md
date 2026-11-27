@@ -1,4 +1,4 @@
-# IoT Platform
+# IoT Platform 3.0
 
 English | [简体中文](README.zh-CN.md)
 
@@ -21,6 +21,20 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 - `telemetry-ingestor`: MQTT ingestion, normalization, and event decoupling
 - `device-worker`: time-series persistence, business state updates, and command delivery
 - `demo`: multi-tenant, multi-device traffic generation with ACK receipts, ideal for integration testing and load testing
+
+## Operations agent
+
+Version 3.0 adds an independently deployed `ops-agent`. An operator supplies a tenant, command ID and optional question. The agent reads persisted command state from management-api, checks worker scrape health in Prometheus at the last status update, and searches Tempo for that command’s stages and timings. Verified findings, source availability and optional model advice are separate response fields.
+
+```bash
+kubectl -n iot port-forward svc/ops-agent 18085:8084
+# In another terminal, use the operator token for this tenant.
+curl -fsS -X POST "http://localhost:18085/api/v1/tenants/$TENANT_ID/commands/$COMMAND_ID/diagnoses" \
+  -H "Authorization: Bearer $OPS_OPERATOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"question":"Which stages completed before timeout?"}'
+```
+
+The Helm setting `opsAgent.enabled` defaults to false. The [deployment guide](docs/production-deployment.md#operations-agent-30) covers credentials, external tools and model configuration. The local deployment script accepts `IOT_VALUES_FILE`. Start a local Tempo with `docker compose -f monitoring/docker-compose.yml --profile tracing up -d tempo`. It binds port 3200 for queries and 4317 for OTLP/gRPC on loopback by default. [API contract](docs/api-contract.md#ops-agent-30)
 
 ## At a Glance
 
@@ -47,7 +61,7 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 
 ## Current Implementation
 
-- 7 runtime entrypoints: `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`, `cmd/migrate`, plus 2 E2E test tools (`cmd/e2eclient`, `cmd/e2espoof`)
+- 8 runtime entrypoints: `cmd/ops-agent`, `cmd/management-api`, `cmd/iot-core`, `cmd/demo`, `cmd/telemetry-ingestor`, `cmd/device-worker`, `cmd/dlq-replay`, `cmd/migrate`, plus 2 E2E test tools (`cmd/e2eclient`, `cmd/e2espoof`)
 - `management-api` uses go-zero REST; `iot-core` uses gRPC + protobuf
 - Local Docker orchestration no longer includes a business service-discovery component
 - PostgreSQL schema for new installations: `migrations/001_init.sql`
@@ -56,9 +70,9 @@ This is open-source infrastructure with the key IoT loops already wired end to e
 
 ## Observability
 
-- Every service exposes `/metrics`
+- The four business services and demo expose `/metrics`
 - `management-api` uses access logs with an explicit field allowlist (method, route template, status, duration and request ID). Request/response bodies, headers, query strings and arbitrary panic values are excluded. Core RPC statistics also exclude request content.
-- Each service starts an OpenTelemetry trace agent. Default file traces use `/tmp/<service>-traces.log`, an 8 MiB active file and at most two 8 MiB backups (`.1`/`.2`), for at most 24 MiB per service. Existing oversized files at these paths are discarded when this retention policy starts. Rotation failures or individual records above the limit fail export instead of growing the file. Helm retains the writable 128Mi temporary volume; traces are lost when the Pod is replaced. Use an external OTLP exporter for retained traces. Root sampling defaults to 0.1; valid parent sampling decisions are preserved. `/healthz`, `/readyz` and `/metrics` are excluded, including the readiness RPC into core.
+- Each business service starts an OpenTelemetry trace agent. Default file traces use `/tmp/<service>-traces.log`, an 8 MiB active file and at most two 8 MiB backups (`.1`/`.2`), for at most 24 MiB per service. Existing oversized files at these paths are discarded when this retention policy starts. Rotation failures or individual records above the limit fail export instead of growing the file. Helm retains the writable 128Mi temporary volume; traces are lost when the Pod is replaced. Use an external OTLP exporter for retained traces. Root sampling defaults to 0.1; valid parent sampling decisions are preserved. `/healthz`, `/readyz` and `/metrics` are excluded, including the readiness RPC into core.
 - HTTP requests automatically get an `X-Request-Id`, propagated through the `management-api -> iot-core` gRPC call
 - `demo` requests to `management-api` carry a request id and trace context, making load-test/integration chains easy to follow
 - stdout logs are structured JSON, easy to search in containers and locally
@@ -72,7 +86,7 @@ Sampled command traces carry the span attribute `iot.command.id`. The creation t
 
 On `command.dispatch`, `iot.command.age_at_dispatch_ms` measures age since creation, including earlier attempts. On `command.kafka.consume`, `iot.command.kafka_age_ms` measures age since the Kafka message timestamp. `command.mqtt.publish` measures the wait for the broker acknowledgement. Once the sent transition is recorded, `command.ack` or `command.timeout` reports `iot.command.ack_wait_ms`. An ACK racing ahead of the sent transition records the ACK alone. Recovery emits `command.requeued` or `command.failed`.
 
-The Helm values `tracing.batcher`, `tracing.endpoint`, `tracing.sampler` and `tracing.httpSecure` apply to all four deployments. To export to an existing OTLP/HTTP receiver set the batcher to `otlphttp`, the endpoint to `host:port` and `httpSecure=true` for HTTPS. Roll the pods after changing the configuration. The defaults use local files and 10% root sampling. Set the sampler to 1 for a focused test. For installations using a migration role, run the current `cmd/migrate` before rolling out the applications.
+The Helm values `tracing.batcher`, `tracing.endpoint`, `tracing.sampler` and `tracing.httpSecure` apply to the four business deployments. To export to an existing OTLP/HTTP receiver set the batcher to `otlphttp`, the endpoint to `host:port` and `httpSecure=true` for HTTPS. Roll the pods after changing the configuration. The defaults use local files and 10% root sampling. Set the sampler to 1 for a focused test. For installations using a migration role, run the current `cmd/migrate` before rolling out the applications.
 
 ## Quick Start
 
@@ -177,13 +191,13 @@ Core business endpoints:
 - `GET /api/v1/tenants/{tenantId}/commands/{commandId}`
 - `POST /api/v1/tenants/{tenantId}/devices/{deviceId}/commands/{commandId}/acknowledgements`
 
-Release 2.56 replaces the old routes with tenant-nested resources, without aliases. Tenant identity comes exclusively from the path; existing device identity also belongs in the path. A new device supplies its `deviceId` in the creation body. Tenant-bound tokens can list their own devices.
+The management API uses tenant-nested resources. Tenant identity comes exclusively from the path; existing device identity also belongs in the path. A new device supplies its `deviceId` in the creation body. Tenant-bound tokens can list their own devices.
 
 Lists accept `pageSize` (default 50, explicit 1–100) and opaque `cursor`, returning `{ "items": [], "nextCursor": "" }`. Telemetry supports `startTime/endTime/type/sort`; commands support `deviceId/status/startTime/endTime/sort`. Times are offset-bearing RFC3339 with at most millisecond precision, using half-open intervals. Telemetry uses device event time; commands use creation time; default order is descending. Unknown, repeated, empty or malformed query parameters return 400. Keep cursor filter scope unchanged.
 
 Acknowledgements carry `{ "status": "failed", "errorCode": "MOTOR_BLOCKED", "payload": {"reason":"jammed"} }`. Status is `acked` or `failed`; command responses expose the persisted `result`. Identical results are idempotent; conflicting results return 409. MQTT ACKs also require status, and DLQ replay retains results.
 
-See the [API contract](docs/api-contract.md) for all fields, limits, boundaries and deployment instructions. REST routes remain owned by `internal/adminapi`, without a separate OpenAPI document.
+See the [API contract](docs/api-contract.md) for all fields, limits, boundaries and deployment instructions. Management REST routes are owned by `internal/adminapi`, without a separate OpenAPI document.
 
 ## Architecture at a Glance
 
@@ -192,8 +206,9 @@ To quickly understand the current version, read in this order:
 1. Devices connect to EMQX over MQTT
 2. `telemetry-ingestor` normalizes messages and decouples events
 3. `management-api` calls `iot-core` over gRPC
-4. `management-api` reaches the core via `iot-core:9001`
+4. `iot-core` claims command leases in PostgreSQL and publishes to Kafka
 5. `device-worker` consumes Kafka and persists time-series data and state
+6. Optional `ops-agent` reads the command and its observations independently of the message path.
 
 The design principle is to keep one clear core boundary first, then split further as business pressure demands — rather than fragmenting upfront into many small services that are hard to troubleshoot.
 
@@ -287,14 +302,17 @@ See [docs/mqtt-envelope.schema.json](docs/mqtt-envelope.schema.json) for the ful
 ```text
 iot/
 ├── cmd/
+│   ├── ops-agent/           # Tenant-scoped command diagnosis
 │   ├── management-api/      # Query and management API
 │   ├── iot-core/            # Core business gRPC service
 │   ├── demo/                # Simulator generating random traffic and ACKs
 │   ├── telemetry-ingestor/  # MQTT ingestion and event decoupling
 │   ├── device-worker/       # Kafka consumption, persistence, and downlink handling
+│   ├── migrate/             # Database schema initialization
 │   ├── dlq-replay/          # DLQ inspection and replay tool
 │   └── e2eclient/ e2espoof/ # End-to-end test clients (not deployed)
 ├── internal/
+│   ├── opsagent/   # Diagnosis tools and model adapter
 │   ├── adminapi/   # REST gateway translating HTTP to iot-core calls
 │   ├── bootstrap/  # Startup assembly
 │   ├── contracts/  # Topic, envelope, state machine, REST response, and schema contracts
@@ -304,7 +322,7 @@ iot/
 ├── charts/iot/     # Helm deployment manifests
 ├── migrations/     # Database migrations
 ├── proto/          # iot-core protobuf contracts
-├── monitoring/     # Local Prometheus / Grafana configuration
+├── monitoring/     # Local Prometheus, Grafana and optional Tempo configuration
 └── docs/           # MQTT schema (single source, embedded via docs/contracts.go), deployment guide, and ADRs
 ```
 
@@ -323,7 +341,7 @@ Docs are layered by purpose to avoid maintaining duplicate architecture descript
 The recommended local setup is:
 
 - Docker: PostgreSQL / Kafka / TDengine / Prometheus / Grafana / demo, plus forwarders that reach Kubernetes services
-- Kubernetes: `management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`, plus an EMQX cluster in a separate `emqx` namespace
+- Kubernetes: `management-api` / `iot-core` / `telemetry-ingestor` / `device-worker`, optional `ops-agent`, plus an EMQX cluster in a separate `emqx` namespace
 
 Prometheus and Grafana are the observability layer for the whole IoT pipeline, but locally they deliberately run as standalone Docker Compose services rather than as part of the business Helm release. Prometheus discovers every Pod in the `iot` namespace via the Kubernetes API (`kubernetes_sd`, role `pod`) and scrapes each replica's `metrics` port through the apiserver pod proxy, so multi-replica services have no single-Pod blind spot; monitoring configuration and history survive business redeployments.
 
@@ -375,11 +393,11 @@ Or use the repo script to run dependency connectivity checks, the Helm install, 
 scripts/helm-deploy-local.sh
 ```
 
-The script enforces an apps-only deployment: it installs only `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
+The script enforces an apps-only deployment: by default it installs `management-api`, `iot-core`, `telemetry-ingestor`, `device-worker`, and their shared configuration — not PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, or demo. Create the local EMQX first as described above.
 `iot-core` is the gRPC core dependency of `management-api`; the script waits for all four services to become ready.
-On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:2.56`.
+On Docker Desktop Kubernetes, the script generates a temporary immutable `iot-app:local-<image-id>` tag from the image ID, imports it into the `desktop-control-plane` containerd, and passes it to Helm — preventing a rebuilt fixed tag from being shadowed by a stale image under k8s `IfNotPresent`. The temporary tag is removed after the import; locally you only need to keep `iot-app:3.0`.
 
-The Helm chart defines only the four business services: PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
+The Helm chart defines the four business services and an optional ops-agent. PostgreSQL, Kafka, and TDengine are reached through the Docker Desktop gateway IP, while EMQX is reached via Kubernetes Service DNS. Containers accessing host ports still use `host.docker.internal`, e.g. Prometheus reaching the Kubernetes apiserver at `https://host.docker.internal:6443` for per-Pod metric scraping.
 
 Create the channels for local Prometheus and demo to reach the k8s business services:
 

@@ -6,7 +6,7 @@ NAMESPACE="${NAMESPACE:-iot}"
 CHART="${CHART:-charts/iot}"
 TIMEOUT="${TIMEOUT:-180s}"
 CHECK_EXTERNAL_DEPS="${CHECK_EXTERNAL_DEPS:-1}"
-APP_IMAGE="${APP_IMAGE:-iot-app:2.56}"
+APP_IMAGE="${APP_IMAGE:-iot-app:3.0}"
 DEPLOY_APP_IMAGE="$APP_IMAGE"
 DOCKER_GATEWAY_HOST="${DOCKER_GATEWAY_HOST:-192.168.65.254}"
 DOCKER_GATEWAY_KAFKA_PORT="${DOCKER_GATEWAY_KAFKA_PORT:-29092}"
@@ -107,6 +107,7 @@ fi
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n "$NAMESPACE" create secret generic iot-runtime-secrets \
   --from-literal=MANAGEMENT_API_TOKEN="$MANAGEMENT_API_TOKEN" \
+  --from-literal=MANAGEMENT_COMMAND_READ_TOKENS="${IOT_MANAGEMENT_COMMAND_READ_TOKENS:-}" \
   --from-literal=MANAGEMENT_API_TOKENS="$MANAGEMENT_API_TOKENS" \
   --from-literal=EMQX_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
   --from-literal=EMQX_INTERNAL_PASSWORD="$EMQX_INTERNAL_PASSWORD" \
@@ -156,12 +157,16 @@ if [ "$GRPC_TLS_ENABLED" = "1" ]; then
   "
 fi
 
+set --
+if [ -n "${IOT_VALUES_FILE:-}" ]; then
+  set -- -f "$IOT_VALUES_FILE"
+fi
 helm upgrade --install "$RELEASE" "$CHART" \
   -n "$NAMESPACE" \
   --create-namespace \
   --wait \
   --timeout "$TIMEOUT" \
-  $COMMON_HELM_ARGS
+  "$@" $COMMON_HELM_ARGS
 
 kubectl rollout restart deployment/management-api deployment/iot-core deployment/telemetry-ingestor deployment/device-worker -n "$NAMESPACE"
 
@@ -169,6 +174,10 @@ wait_for_deployment management-api
 wait_for_deployment iot-core
 wait_for_deployment telemetry-ingestor
 wait_for_deployment device-worker
+if kubectl get deployment ops-agent -n "$NAMESPACE" >/dev/null 2>&1; then
+  kubectl rollout restart deployment/ops-agent -n "$NAMESPACE"
+  wait_for_deployment ops-agent
+fi
 
 kubectl get pods -n "$NAMESPACE"
 
@@ -181,6 +190,7 @@ This script deploys application services only:
   - iot-core
   - telemetry-ingestor
   - device-worker
+  - ops-agent when enabled in IOT_VALUES_FILE
 
 Useful local forwards:
   scripts/port-forward-local-monitoring.sh

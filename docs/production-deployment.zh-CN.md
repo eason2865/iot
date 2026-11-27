@@ -6,12 +6,12 @@
 
 生产环境按职责拆分部署，不将所有组件放进同一个业务 Helm Release：
 
-- `iot` 命名空间：四个无状态业务服务。
+- `iot` 命名空间：四个无状态业务服务，以及可选的只读 ops-agent。
 - `emqx` 命名空间：设备 MQTT 长连接集群。
-- `observability` 命名空间：Prometheus、Grafana 和按需启用的 Alertmanager。
+- `observability` 命名空间：Prometheus、Grafana、用于命令追踪的 Tempo，以及按需启用的 Alertmanager。
 - 数据与消息平台：PostgreSQL、Kafka、TDengine 由独立平台团队管理，或采用各自的 Operator 管理，不能与业务服务生命周期绑定。
 
-`charts/iot` 仅部署 `iot` 命名空间中的四个业务服务。集群控制面的 etcd 由 Kubernetes 平台管理；本项目不再部署业务 etcd。`management-api` 通过 Kubernetes Service DNS `iot-core:9001` 调用 `iot-core`。
+`charts/iot` 部署 `iot` 命名空间中的四个业务服务，并可按需启用 ops-agent。集群控制面的 etcd 由 Kubernetes 平台管理；本项目不再部署业务 etcd。`management-api` 通过 Kubernetes Service DNS `iot-core:9001` 调用 `iot-core`。
 
 ## 生产与本地映射
 
@@ -39,6 +39,8 @@
 | 服务 | 职责 | 推荐部署位置 | 推荐方式 |
 | --- | --- | --- | --- |
 | API Gateway / Ingress | TLS 终止、认证、限流和对外 API 入口 | 平台网关命名空间 | 由平台统一部署高可用 Gateway 或 Ingress Controller；仅将 `management-api` 暴露为 HTTP API。当前 Chart 不安装网关。 |
+| `ops-agent` | 租户命令只读诊断 | `iot`，按需启用 | 独立 Deployment/ClusterIP、专用 Secret；可连接外部模型。 |
+| Tempo | 采样链路导入与查询 | 可观测平台 | OTLP 写入、HTTP 查询；按容量设计保留期。 |
 | `management-api` | REST API、鉴权边界、调用核心服务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。通过 `iot-core:9001` Service DNS 调用核心服务。 |
 | `iot-core` | 租户、设备、命令、状态等核心 gRPC 业务 | `iot` | Kubernetes Deployment；生产至少 2 副本、HPA、PDB、滚动更新和拓扑分散。仅用 ClusterIP Service 暴露 gRPC 与指标端口。 |
 | `telemetry-ingestor` | MQTT 上行消息解析并写入 Kafka | `iot` | Kubernetes Deployment。通过 EMQX 共享订阅扩容，并为每个 Pod 注入唯一 MQTT Client ID；当前 Chart 默认 2 副本，已具备这两项配置。Chart 已有 PDB、可选 HPA 和拓扑分散，生产应通过 overlay 启用并压测调优。 |
@@ -100,3 +102,29 @@
 `POSTGRES_AUTO_MIGRATE=false` 和 `POSTGRES_DSN`；CLI 为兼容本地环境默认开启迁移。
 worker 对合法 ACK 仅在 PostgreSQL 或 DLQ 保存成功后确认，双失败时保留未确认状态并报错退出。
 断连或副本替换后的重投依赖 EMQX 会话及共享订阅投递策略，应用手动确认本身不提供 broker 持久化。
+
+## 运维 Agent 3.0
+
+构建当前版本（`make build && docker build -t iot-app:3.0 .`），生产环境将镜像推送到集群可用的仓库并设置 `images.app`。Agent 使用独立 ClusterIP 服务，端口 8084。四个业务服务可独立部署。
+
+1. 为每个租户分别生成运维令牌和命令只读令牌。在 management-api 使用的现有 Secret 中添加 `MANAGEMENT_COMMAND_READ_TOKENS`，值为 `{"<只读令牌>":"factory"}`，并滚动更新 management-api。本地脚本接受 `IOT_MANAGEMENT_COMMAND_READ_TOKENS`。只读凭据仅能 GET 该租户的一条命令。
+2. 在同一命名空间创建专用 Secret `iot-ops-agent`。键 `OPS_TENANTS` 的值为 `{"factory":{"operatorToken":"<运维令牌>","managementToken":"<只读令牌>"}}`。模型要求鉴权时增加键 `OPS_MODEL_KEY`。轮换 Secret 后滚动更新使用它的 Deployment。
+3. 将下列 values 合并到已有部署参数。所有地址以 Pod 实际可达的服务为准。模型 URL 是兼容 Chat Completions 的 API 根路径，通常以 `/v1` 结尾。使用自部署或云端模型均可。Prometheus、Tempo 和模型可独立启用。
+
+```yaml
+opsAgent:
+  enabled: true
+  existingSecret: iot-ops-agent
+  prometheusURL: http://prometheus.observability:9090
+  tempoURL: http://tempo.observability:3200
+  modelURL: http://inference.models:8000/v1
+  model: your-installed-model
+tracing:
+  batcher: otlpgrpc
+  endpoint: tempo.observability:4317
+  sampler: 0.1
+```
+
+使用现有 Helm 环境参数发布，或本地通过 `IOT_VALUES_FILE=/path/to/ops-values.yaml scripts/helm-deploy-local.sh` 部署。若只改 tracing 配置，请滚动更新业务 Pod。联调可临时将采样率设为 1。Tempo 导出与索引存在延迟，查不到 span 时仍可根据持久化状态诊断。Grafana 可添加类型 Tempo 的数据源，使用同一查询地址。本地 Compose profile `tracing` 使用单实例、24 小时保留期；跨 Pod 访问时，使用受控网络上的可达地址，按需显式设置 `TEMPO_BIND_IP`。
+
+诊断只会向模型发送用户自填的问题、已确认结论、阶段和指标；问题原文会发送给配置的模型，请勿在其中包含设备密钥。模型输出仅用于建议。Agent 不挂载 Kubernetes 服务账号令牌。部署时为凭据和数据流配置内部 TLS 或服务网格；Prometheus 与 Tempo 查询 URL 适用于可信内部网络或已鉴权的内部代理。

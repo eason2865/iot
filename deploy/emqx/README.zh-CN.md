@@ -34,3 +34,5 @@ kubectl wait --for=condition=Ready emqx/emqx -n emqx --timeout=10m
 注意：本地单节点 license 在滚动更新时会因瞬时双 core 崩溃（`SINGLE_NODE_LICENSE`）。更新 EMQX CR 后执行 `kubectl delete sts -n emqx --all` 让 Operator 重建单节点。
 
 本地 Compose 不运行 EMQX 容器，而是把 `emqx-listeners:1883` 和 `emqx-dashboard:18083` port-forward 到宿主机，使 Docker 内的 demo 与宿主机 MQTT 客户端都走同一套 Kubernetes EMQX Service。
+
+3.0 的[运维 Agent](../../docs/production-deployment.zh-CN.md#运维-agent-30)通过管理 API 和已采样的 MQTT span 排查命令。设备认证、命令投递和 ACK 转发仍由 EMQX 负责。

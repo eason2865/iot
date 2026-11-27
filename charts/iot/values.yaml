@@ -1,5 +1,5 @@
 images:
-  app: iot-app:2.56
+  app: iot-app:3.0
 
 replicas:
   managementAPI: 2
@@ -119,3 +119,17 @@ topologySpread:
 # Disable automatic DDL after running the migrate binary with a migration role.
 postgres:
   autoMigrate: true
+
+# Opt in after provisioning tenant credentials in a dedicated Secret.
+opsAgent:
+  enabled: false
+  replicas: 1
+  existingSecret: iot-ops-agent
+  managementURL: http://management-api:8080
+  prometheusURL: ""
+  tempoURL: ""
+  modelURL: ""
+  model: ""
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}

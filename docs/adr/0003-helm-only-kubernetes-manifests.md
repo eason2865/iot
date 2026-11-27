@@ -10,7 +10,7 @@ Kubernetes deployment definitions need one authoritative source to avoid duplica
 
 ## Decision
 
-Use `charts/iot` as the Kubernetes manifest source for the four application services only. PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, and the demo are independently managed dependencies and are not rendered by this chart. `management-api` uses the `iot-core` Kubernetes Service directly, so no business etcd deployment is required.
+Use `charts/iot` as the Kubernetes manifest source for the four application services. Release 3.0 adds an optional operations agent to the same chart as described in [ADR 0011](0011-read-only-operations-agent.md). PostgreSQL, Kafka, EMQX, TDengine, Prometheus, Grafana, and the demo are independently managed dependencies and are not rendered by this chart. `management-api` uses the `iot-core` Kubernetes Service directly, so no business etcd deployment is required.
 
 ## Consequences
 

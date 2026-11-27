@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 682" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
+<title id="title">IoT 3.0 系统架构</title><desc id="desc">设备流量和可选的运维诊断服务独立运行。</desc>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#476379"/></marker></defs>
+<rect width="1220" height="682" rx="12" fill="#f7fafb"/>
+<text x="28" y="44" text-anchor="start" font-size="28" font-weight="700" fill="#183248">IoT 3.0  /  系统架构</text>
+<text x="28" y="84" text-anchor="start" font-size="18" font-weight="650" fill="#183248">设备遥测</text>
+<rect x="28" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="111.0" y="123" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">Device</text>
+<text x="111.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">遥测上报</text>
+<path d="M195 129 L225 129" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="228" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="311.0" y="123" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">EMQX</text>
+<text x="311.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">MQTT</text>
+<path d="M395 129 L425 129" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="428" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="511.0" y="123" text-anchor="middle" font-size="14" font-weight="650" fill="#183248">telemetry-ingestor</text>
+<text x="511.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">标准化</text>
+<path d="M595 129 L625 129" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="628" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="711.0" y="123" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">Kafka</text>
+<text x="711.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">iot.telemetry</text>
+<path d="M795 129 L825 129" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="828" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="911.0" y="123" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">device-worker</text>
+<text x="911.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">消费并落库</text>
+<path d="M995 129 L1025 129" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="1028" y="99" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="1111.0" y="123" text-anchor="middle" font-size="14" font-weight="650" fill="#183248">Postgres / TDengine</text>
+<text x="1111.0" y="144" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">状态 / 时序数据</text>
+<text x="28" y="196" text-anchor="start" font-size="18" font-weight="650" fill="#183248">设备命令</text>
+<rect x="28" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="111.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">management-api</text>
+<text x="111.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">租户 REST 接口</text>
+<path d="M195 241 L225 241" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="228" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="311.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">iot-core</text>
+<text x="311.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">Postgres 租约与派发</text>
+<path d="M395 241 L425 241" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="428" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="511.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">Kafka</text>
+<text x="511.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">iot.command</text>
+<path d="M595 241 L625 241" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="628" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="711.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">device-worker</text>
+<text x="711.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">下发 MQTT</text>
+<path d="M795 241 L825 241" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="828" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="911.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">EMQX</text>
+<text x="911.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">代理确认</text>
+<path d="M995 241 L1025 241" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="1028" y="211" width="166" height="60" rx="8" stroke="#a3bcc7" fill="#e4f0f6"/>
+<text x="1111.0" y="235" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">Device</text>
+<text x="1111.0" y="256" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">执行并回执</text>
+<text x="28" y="300" text-anchor="start" font-size="14" font-weight="400" fill="#183248">设备 ACK 经 EMQX 返回 device-worker，结果写入 PostgreSQL。</text>
+<rect x="18" y="325" width="1185" height="260" rx="12" fill="#eef7f2" stroke="#a7c9b7"/>
+<text x="34" y="359" text-anchor="start" font-size="20" font-weight="650" fill="#225b49">只读运维  /  可选的独立 Helm Deployment</text>
+<rect x="37" y="404" width="166" height="62" rx="8" stroke="#a3bcc7" fill="#fff"/>
+<text x="120.0" y="428" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">运维人员</text>
+<text x="120.0" y="449" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">租户运维令牌</text>
+<path d="M204 436 L248 436" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<rect x="251" y="404" width="175" height="62" rx="8" stroke="#a3bcc7" fill="#d1ecdf"/>
+<text x="338.5" y="428" text-anchor="middle" font-size="16" font-weight="650" fill="#183248">ops-agent</text>
+<text x="338.5" y="449" text-anchor="middle" font-size="12" font-weight="400" fill="#183248">固定工具 · HTTP 8084</text>
+<path d="M427 436 L489 436" stroke="#476379" stroke-width="1.6" fill="none"/>
+<path d="M489 393 L489 527" stroke="#476379" stroke-width="1.6" fill="none"/>
+<path d="M489 393 L532 393" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="547" y="398" text-anchor="start" font-size="16" font-weight="650" fill="#183248">management-api</text>
+<text x="757" y="398" text-anchor="start" font-size="15" font-weight="400" fill="#183248">单命令 GET，使用租户只读凭据</text>
+<path d="M489 437 L532 437" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="547" y="442" text-anchor="start" font-size="16" font-weight="650" fill="#183248">Prometheus</text>
+<text x="757" y="442" text-anchor="start" font-size="15" font-weight="400" fill="#183248">查询命令状态变更时的 worker 抓取状态</text>
+<path d="M489 481 L532 481" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="547" y="486" text-anchor="start" font-size="16" font-weight="650" fill="#183248">Tempo</text>
+<text x="757" y="486" text-anchor="start" font-size="15" font-weight="400" fill="#183248">按命令 ID 查已采样的 span</text>
+<path d="M489 527 L532 527" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="547" y="532" text-anchor="start" font-size="16" font-weight="650" fill="#183248">模型服务</text>
+<text x="757" y="532" text-anchor="start" font-size="15" font-weight="400" fill="#183248">问题与筛选后的证据 → 可选的模型建议</text>
+<text x="34" y="568" text-anchor="start" font-size="14" font-weight="400" fill="#183248">四个业务服务配置 OTLP 后，可将 OpenTelemetry 链路导出到 Tempo。</text>
+<text x="32" y="619" text-anchor="start" font-size="17" font-weight="650" fill="#183248">配套服务</text>
+<text x="32" y="647" text-anchor="start" font-size="14" font-weight="400" fill="#183248">EMQX → iot-core 设备认证  ·  异常消息 → Kafka 死信队列  ·  Grafana → Prometheus / Tempo  ·  Demo → REST / MQTT</text>
+</svg>

@@ -112,3 +112,29 @@ REST acknowledgement body:
 Initialize an empty PostgreSQL database with the migrate binary before starting
 services with `POSTGRES_AUTO_MIGRATE=false`. The embedded `001_init.sql` creates
 the current schema, including command results and pagination indexes.
+
+## Ops Agent 3.0
+
+The optional `ops-agent` serves its own HTTP API on port 8084. The operator credential is bound to one tenant in `OPS_TENANTS`. Its separate management credential is registered in `MANAGEMENT_COMMAND_READ_TOKENS` on the gateway. This credential permits only the single-command GET for that tenant. The agent verifies the returned tenant and command before querying any other service.
+
+```http
+POST /api/v1/tenants/factory/commands/0190bafd-075a-7000-8000-000000000001/diagnoses
+Authorization: Bearer <operator-token>
+Content-Type: application/json
+
+{"question":"Which stages completed before the ACK timeout?"}
+```
+
+An empty body or `{}` requests the default diagnosis. The optional question accepts up to 512 Unicode characters. Unknown fields, duplicate fields and query parameters return 400. Each POST performs a fresh read. No command or diagnosis record is created.
+
+| Response field | Meaning |
+| --- | --- |
+| `command` | Authorized command ID, tenant ID, status, creation time and latest update time |
+| `finding` | Deterministic interpretation of the persisted command status |
+| `metrics` | State, query time and, when available, whether all observed worker scrape targets were up. Fleet-level context at the last command update |
+| `trace` | Source state and matching command stages ordered by start time, with duration in milliseconds and span status |
+| `modelStatus`, `modelAdvice` | Model availability and optional generated advice, separate from verified evidence |
+
+Source states are `ok`, `disabled`, `unavailable`, and (for queries) `no_data`. Trace results can also be `partial` when the search window or result cap was exceeded. Tempo searches up to 24 hours around the command, eight traces and 64 spans per span set. Export latency, sampling and retention can yield no data. Prometheus uses the fixed `min(up{job="device-worker"})` instant query. A successful scrape does not establish device connectivity.
+
+HTTP 401 covers an invalid operator credential or tenant mismatch. An authorized lookup of a missing command returns 404. HTTP 502 indicates that command evidence could not be verified. HTTP 429 indicates eight diagnoses are already in flight on that replica. Optional upstream failures return 200 with the available evidence. The unauthenticated `GET /healthz` checks the agent process.

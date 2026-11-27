@@ -1,0 +1,80 @@
+{{- if .Values.opsAgent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ops-agent
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: ops-agent
+  ports:
+    - name: http
+      port: 8084
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ops-agent
+  labels:
+    {{- include "iot.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.opsAgent.replicas }}
+  selector:
+    matchLabels:
+      app: ops-agent
+  template:
+    metadata:
+      labels:
+        app: ops-agent
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 55
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ops-agent
+          image: {{ .Values.images.app }}
+          command: ["/usr/local/bin/ops-agent"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8084
+          env:
+            - name: OPS_MANAGEMENT_URL
+              value: {{ .Values.opsAgent.managementURL | quote }}
+            - name: OPS_PROMETHEUS_URL
+              value: {{ .Values.opsAgent.prometheusURL | quote }}
+            - name: OPS_TEMPO_URL
+              value: {{ .Values.opsAgent.tempoURL | quote }}
+            - name: OPS_MODEL_URL
+              value: {{ .Values.opsAgent.modelURL | quote }}
+            - name: OPS_MODEL
+              value: {{ .Values.opsAgent.model | quote }}
+            - name: OPS_TENANTS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.opsAgent.existingSecret | quote }}
+                  key: OPS_TENANTS
+            - name: OPS_MODEL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.opsAgent.existingSecret | quote }}
+                  key: OPS_MODEL_KEY
+                  optional: true
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            {{- toYaml .Values.opsAgent.resources | nindent 12 }}
+{{- end }}

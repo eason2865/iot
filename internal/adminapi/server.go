@@ -69,7 +69,17 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf("invalid MANAGEMENT_API_TOKENS configuration")
 	}
-	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants(runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", ""), tenantTokens)))
+	commandReads, err := platform.ParseTenantBoundTokens(runtimeconfig.EnvOrDefault("MANAGEMENT_COMMAND_READ_TOKENS", ""))
+	if err != nil {
+		return fmt.Errorf("invalid MANAGEMENT_COMMAND_READ_TOKENS configuration")
+	}
+	globalToken := runtimeconfig.EnvOrDefault("MANAGEMENT_API_TOKEN", "")
+	for key := range commandReads {
+		if key == globalToken || tenantTokens[key] != "" {
+			return fmt.Errorf("command-read credentials must be distinct from management tokens")
+		}
+	}
+	httpServer.Use(rest.ToMiddleware(platform.BearerTokenMiddlewareWithTenants(globalToken, tenantTokens, commandReads)))
 	defer httpServer.Stop()
 
 	go serveManagementAPIMetrics(metrics.Handler(), managementAPIMetricsHost(), managementAPIMetricsPort(), runtimeconfig.EnvOrDefault("MANAGEMENT_API_METRICS_PATH", "/metrics"))

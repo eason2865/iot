@@ -1,129 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 720" role="img" aria-label="Command dispatch and ACK cycle" font-family="-apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-  <defs>
-    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
-    </marker>
-    <style>
-      .actor { stroke-width: 1.6; }
-      .actor-title { font-size: 14px; font-weight: 600; }
-      .lifeline { stroke: #CBD5E1; stroke-width: 1.4; stroke-dasharray: 4 4; }
-      .msg { fill: none; stroke: #475569; stroke-width: 1.8; }
-      .msg-ret { fill: none; stroke: #94A3B8; stroke-width: 1.6; stroke-dasharray: 6 4; }
-      .msg-label { font-size: 12.5px; fill: #334155; paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
-      .msg-num { font-size: 11px; font-weight: 700; fill: #ffffff; }
-      .msg-circle { fill: #475569; }
-      .note { font-size: 12.5px; fill: #64748B; }
-      .cli  { fill: #F3F4F6; stroke: #9CA3AF; }
-      .clit { fill: #374151; }
-      .svc  { fill: #EFF6FF; stroke: #3B82F6; }
-      .svct { fill: #1E3A8A; }
-      .store { fill: #ECFDF5; stroke: #10B981; }
-      .storet { fill: #065F46; }
-      .emqx { fill: #FEF3C7; stroke: #F59E0B; }
-      .emqxt { fill: #92400E; }
-    </style>
-  </defs>
-
-  <rect x="0" y="0" width="1240" height="720" fill="#FFFFFF"/>
-
-  <text class="note" x="620" y="28" text-anchor="middle">命令状态机：created → published → sent → acked（internal/contracts/command_state.go）</text>
-
-  <!-- lifelines -->
-  <line class="lifeline" x1="95"   y1="88" x2="95"   y2="648"/>
-  <line class="lifeline" x1="240"  y1="88" x2="240"  y2="648"/>
-  <line class="lifeline" x1="385"  y1="88" x2="385"  y2="648"/>
-  <line class="lifeline" x1="530"  y1="88" x2="530"  y2="648"/>
-  <line class="lifeline" x1="675"  y1="88" x2="675"  y2="648"/>
-  <line class="lifeline" x1="820"  y1="88" x2="820"  y2="648"/>
-  <line class="lifeline" x1="975"  y1="88" x2="975"  y2="648"/>
-  <line class="lifeline" x1="1120" y1="88" x2="1120" y2="648"/>
-
-  <!-- actors (top) -->
-  <g>
-    <rect class="actor cli"   x="30"   y="46" width="130" height="42" rx="8"/><text class="actor-title clit"   x="95"   y="72" text-anchor="middle">管理后台</text>
-    <rect class="actor svc"   x="175"  y="46" width="130" height="42" rx="8"/><text class="actor-title svct"   x="240"  y="72" text-anchor="middle">management-api</text>
-    <rect class="actor svc"   x="320"  y="46" width="130" height="42" rx="8"/><text class="actor-title svct"   x="385"  y="72" text-anchor="middle">iot-core</text>
-    <rect class="actor store" x="465"  y="46" width="130" height="42" rx="8"/><text class="actor-title storet" x="530"  y="72" text-anchor="middle">PostgreSQL</text>
-    <rect class="actor store" x="610"  y="46" width="130" height="42" rx="8"/><text class="actor-title storet" x="675"  y="72" text-anchor="middle">Kafka</text>
-    <rect class="actor svc"   x="755"  y="46" width="130" height="42" rx="8"/><text class="actor-title svct"   x="820"  y="72" text-anchor="middle">device-worker</text>
-    <rect class="actor emqx"  x="910"  y="46" width="130" height="42" rx="8"/><text class="actor-title emqxt"  x="975"  y="72" text-anchor="middle">EMQX</text>
-    <rect class="actor cli"   x="1055" y="46" width="130" height="42" rx="8"/><text class="actor-title clit"   x="1120" y="72" text-anchor="middle">Device</text>
-  </g>
-
-  <!-- actors (bottom) -->
-  <g>
-    <rect class="actor cli"   x="30"   y="648" width="130" height="42" rx="8"/><text class="actor-title clit"   x="95"   y="674" text-anchor="middle">管理后台</text>
-    <rect class="actor svc"   x="175"  y="648" width="130" height="42" rx="8"/><text class="actor-title svct"   x="240"  y="674" text-anchor="middle">management-api</text>
-    <rect class="actor svc"   x="320"  y="648" width="130" height="42" rx="8"/><text class="actor-title svct"   x="385"  y="674" text-anchor="middle">iot-core</text>
-    <rect class="actor store" x="465"  y="648" width="130" height="42" rx="8"/><text class="actor-title storet" x="530"  y="674" text-anchor="middle">PostgreSQL</text>
-    <rect class="actor store" x="610"  y="648" width="130" height="42" rx="8"/><text class="actor-title storet" x="675"  y="674" text-anchor="middle">Kafka</text>
-    <rect class="actor svc"   x="755"  y="648" width="130" height="42" rx="8"/><text class="actor-title svct"   x="820"  y="674" text-anchor="middle">device-worker</text>
-    <rect class="actor emqx"  x="910"  y="648" width="130" height="42" rx="8"/><text class="actor-title emqxt"  x="975"  y="674" text-anchor="middle">EMQX</text>
-    <rect class="actor cli"   x="1055" y="648" width="130" height="42" rx="8"/><text class="actor-title clit"   x="1120" y="674" text-anchor="middle">Device</text>
-  </g>
-
-  <!-- 1. 管理后台 -> management-api -->
-  <circle class="msg-circle" cx="103" cy="112" r="9"/><text class="msg-num" x="103" y="116" text-anchor="middle">1</text>
-  <path class="msg" d="M112,112 L232,112" marker-end="url(#arr)"/>
-  <text class="msg-label" x="172" y="102" text-anchor="middle">POST …/commands</text>
-
-  <!-- 2. management-api -> iot-core -->
-  <circle class="msg-circle" cx="248" cy="154" r="9"/><text class="msg-num" x="248" y="158" text-anchor="middle">2</text>
-  <path class="msg" d="M257,154 L377,154" marker-end="url(#arr)"/>
-  <text class="msg-label" x="317" y="144" text-anchor="middle">gRPC CreateCommand（mTLS）</text>
-
-  <!-- 3. iot-core -> PostgreSQL -->
-  <circle class="msg-circle" cx="393" cy="196" r="9"/><text class="msg-num" x="393" y="200" text-anchor="middle">3</text>
-  <path class="msg" d="M402,196 L522,196" marker-end="url(#arr)"/>
-  <text class="msg-label" x="462" y="186" text-anchor="middle">INSERT command · status=created</text>
-
-  <!-- 4. iot-core -> Kafka -->
-  <circle class="msg-circle" cx="393" cy="238" r="9"/><text class="msg-num" x="393" y="242" text-anchor="middle">4</text>
-  <path class="msg" d="M402,238 L667,238" marker-end="url(#arr)"/>
-  <text class="msg-label" x="535" y="228" text-anchor="middle">写入 iot.command · status=published</text>
-
-  <!-- 5. iot-core -> management-api (return) -->
-  <circle class="msg-circle" cx="377" cy="280" r="9"/><text class="msg-num" x="377" y="284" text-anchor="middle">5</text>
-  <path class="msg-ret" d="M368,280 L248,280" marker-end="url(#arr)"/>
-  <text class="msg-label" x="308" y="270" text-anchor="middle">commandId（UUIDv7）</text>
-
-  <!-- 6. management-api -> 管理后台 (return) -->
-  <circle class="msg-circle" cx="232" cy="322" r="9"/><text class="msg-num" x="232" y="326" text-anchor="middle">6</text>
-  <path class="msg-ret" d="M223,322 L103,322" marker-end="url(#arr)"/>
-  <text class="msg-label" x="163" y="312" text-anchor="middle">201 Created · commandId</text>
-
-  <!-- 7. Kafka -> device-worker -->
-  <circle class="msg-circle" cx="683" cy="364" r="9"/><text class="msg-num" x="683" y="368" text-anchor="middle">7</text>
-  <path class="msg" d="M692,364 L812,364" marker-end="url(#arr)"/>
-  <text class="msg-label" x="752" y="354" text-anchor="middle">消费命令消息</text>
-
-  <!-- 8. device-worker -> EMQX -->
-  <circle class="msg-circle" cx="828" cy="406" r="9"/><text class="msg-num" x="828" y="410" text-anchor="middle">8</text>
-  <path class="msg" d="M837,406 L967,406" marker-end="url(#arr)"/>
-  <text class="msg-label" x="902" y="396" text-anchor="middle">publish command topic（QoS1）</text>
-
-  <!-- 9. device-worker -> PostgreSQL -->
-  <circle class="msg-circle" cx="812" cy="448" r="9"/><text class="msg-num" x="812" y="452" text-anchor="middle">9</text>
-  <path class="msg" d="M803,448 L538,448" marker-end="url(#arr)"/>
-  <text class="msg-label" x="670" y="438" text-anchor="middle">UPDATE status=sent（MarkCommandSent）</text>
-
-  <!-- 10. EMQX -> Device -->
-  <circle class="msg-circle" cx="983" cy="490" r="9"/><text class="msg-num" x="983" y="494" text-anchor="middle">10</text>
-  <path class="msg" d="M992,490 L1112,490" marker-end="url(#arr)"/>
-  <text class="msg-label" x="1052" y="480" text-anchor="middle">deliver command</text>
-
-  <!-- 11. Device -> EMQX -->
-  <circle class="msg-circle" cx="1112" cy="532" r="9"/><text class="msg-num" x="1112" y="536" text-anchor="middle">11</text>
-  <path class="msg" d="M1103,532 L983,532" marker-end="url(#arr)"/>
-  <text class="msg-label" x="1043" y="522" text-anchor="middle">publish ack topic</text>
-
-  <!-- 12. EMQX -> device-worker -->
-  <circle class="msg-circle" cx="967" cy="574" r="9"/><text class="msg-num" x="967" y="578" text-anchor="middle">12</text>
-  <path class="msg" d="M958,574 L828,574" marker-end="url(#arr)"/>
-  <text class="msg-label" x="893" y="564" text-anchor="middle">消费 ack 消息</text>
-
-  <!-- 13. device-worker -> PostgreSQL -->
-  <circle class="msg-circle" cx="812" cy="616" r="9"/><text class="msg-num" x="812" y="620" text-anchor="middle">13</text>
-  <path class="msg" d="M803,616 L538,616" marker-end="url(#arr)"/>
-  <text class="msg-label" x="670" y="606" text-anchor="middle">UPDATE status=acked（AckCommand）</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 810" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
+<title id="title">IoT 3.0 command lifecycle</title><desc id="desc">Command creation, asynchronous dispatch, device acknowledgement or timeout and read-only diagnosis.</desc>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#476379"/></marker></defs>
+<rect width="1240" height="810" rx="12" fill="#f7fafb"/>
+<text x="24" y="44" text-anchor="start" font-size="28" font-weight="700" fill="#183248">IoT 3.0  /  Command lifecycle</text>
+<rect x="8" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="80" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">Client</text>
+<path d="M80 104 L80 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="194" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="266" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">management-api</text>
+<path d="M266 104 L266 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="376" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="448" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">iot-core</text>
+<path d="M448 104 L448 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="554" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="626" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">PostgreSQL</text>
+<path d="M626 104 L626 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="736" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="808" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">Kafka</text>
+<path d="M808 104 L808 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="915" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="987" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">device-worker</text>
+<path d="M987 104 L987 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<rect x="1090" y="65" width="144" height="38" rx="7" fill="#deedf4" stroke="#abc1cb"/>
+<text x="1162" y="89" text-anchor="middle" font-size="15" font-weight="650" fill="#183248">EMQX / Device</text>
+<path d="M1162 104 L1162 635" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4"/>
+<path d="M80 144 L266 144" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="173.0" y="138" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">POST …/commands</text>
+<path d="M266 181 L448 181" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="357.0" y="175" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">gRPC CreateCommand</text>
+<path d="M448 218 L626 218" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="212" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Insert created + traceparent</text>
+<path d="M448 255 L266 255" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="357.0" y="249" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Command ID</text>
+<path d="M266 288 L80 288" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="173.0" y="282" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">201 Created</text>
+<path d="M448 329 L626 329" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="323" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Claim dispatch lease</text>
+<path d="M448 366 L808 366" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="628.0" y="360" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Publish command + traceparent</text>
+<path d="M448 399 L626 399" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="537.0" y="393" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Mark published</text>
+<path d="M808 438 L987 438" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="897.5" y="432" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Consume command</text>
+<path d="M987 473 L1162 473" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="1074.5" y="467" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">MQTT QoS 1 publish</text>
+<path d="M1162 509 L987 509" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="1074.5" y="503" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Broker PUBACK</text>
+<path d="M987 545 L626 545" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="806.5" y="539" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Mark sent + start ACK deadline</text>
+<path d="M1162 581 L987 581" stroke="#476379" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="1074.5" y="575" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Device result via ACK topic</text>
+<path d="M987 617 L626 617" stroke="#476379" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+<text x="806.5" y="611" text-anchor="middle" font-size="13" font-weight="550" fill="#183248" stroke="#f7fafb" stroke-width="4" paint-order="stroke">Persist acked or failed</text>
+<text x="26" y="651" text-anchor="start" font-size="15" font-weight="400" fill="#183248">Without an ACK, iot-core expires sent commands. A fast device ACK may arrive before the sent update.</text>
+<rect x="22" y="675" width="1195" height="109" rx="10" fill="#e7f4ed" stroke="#a7c9b7"/>
+<text x="40" y="704" text-anchor="start" font-size="18" font-weight="650" fill="#225b49">Read-only diagnosis after creation</text>
+<text x="40" y="734" text-anchor="start" font-size="16" font-weight="400" fill="#183248">Operator → ops-agent → tenant command GET · Prometheus scrape health · Tempo command stages</text>
+<text x="40" y="761" text-anchor="start" font-size="14" font-weight="400" fill="#183248">The report includes verified state and timestamps. Model advice is optional and returned separately.</text>
 </svg>

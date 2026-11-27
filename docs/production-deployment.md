@@ -6,12 +6,12 @@ English | [简体中文](production-deployment.zh-CN.md)
 
 Production is deployed by responsibility; not all components live in a single business Helm release:
 
-- `iot` namespace: the four stateless business services.
+- `iot` namespace: the four stateless business services and the optional read-only ops-agent.
 - `emqx` namespace: the device MQTT long-connection cluster.
-- `observability` namespace: Prometheus, Grafana, and an optionally enabled Alertmanager.
+- `observability` namespace: Prometheus, Grafana, a Tempo query/OTLP endpoint for command tracing, and an optionally enabled Alertmanager.
 - Data and messaging platforms: PostgreSQL, Kafka, and TDengine are managed by independent platform teams or by their respective Operators, and must not be tied to the business services' lifecycle.
 
-`charts/iot` deploys only the four business services in the `iot` namespace. The cluster control plane's etcd is managed by the Kubernetes platform; this project no longer deploys a business etcd. `management-api` calls `iot-core` through the Kubernetes Service DNS `iot-core:9001`.
+`charts/iot` deploys the four business services and, when enabled, ops-agent in the `iot` namespace. The cluster control plane's etcd is managed by the Kubernetes platform; this project no longer deploys a business etcd. `management-api` calls `iot-core` through the Kubernetes Service DNS `iot-core:9001`.
 
 ## Production-to-Local Mapping
 
@@ -39,6 +39,8 @@ Local is not a production substitute, but it mirrors production deployment bound
 | Service | Responsibility | Recommended location | Recommended approach |
 | --- | --- | --- | --- |
 | API Gateway / Ingress | TLS termination, authentication, rate limiting, public API entrypoint | Platform gateway namespace | A highly available Gateway or Ingress Controller deployed uniformly by the platform; expose only `management-api` as the HTTP API. The current chart does not install a gateway. |
+| `ops-agent` | Tenant-scoped command diagnosis | `iot`, optional | Separate Deployment, ClusterIP and credentials. Optionally connects to an inference endpoint. |
+| Tempo | Ingest and query sampled traces | Observability platform | Expose OTLP ingestion and HTTP query endpoints; size retention for the site. |
 | `management-api` | REST API, auth boundary, calls the core service | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Calls the core via the `iot-core:9001` Service DNS. |
 | `iot-core` | Core gRPC business: tenants, devices, commands, status | `iot` | Kubernetes Deployment; in production at least 2 replicas with HPA, PDB, rolling updates, and topology spread. Expose gRPC and metrics ports via ClusterIP Services only. |
 | `telemetry-ingestor` | Parses MQTT uplink messages and writes to Kafka | `iot` | Kubernetes Deployment. Scales via EMQX shared subscriptions with a unique MQTT Client ID per Pod; the current chart defaults to 2 replicas with both already configured. The chart has a PDB plus optional HPA and topology spread; enable the production overlay and tune through load tests. |
@@ -123,3 +125,29 @@ valid ACKs only after PostgreSQL or DLQ persistence; simultaneous failures leave
 them unacknowledged and fail the worker. Configure EMQX session/shared-delivery
 policy for redelivery after disconnect or replacement; application manual ACK
 alone does not supply broker persistence.
+
+## Operations agent 3.0
+
+Build the current application image with `make build && docker build -t iot-app:3.0 .`. Push to a registry accessible to the cluster and set `images.app`. The agent has a separate ClusterIP service on port 8084. The four business deployments can operate independently.
+
+1. Generate separate operator and command-reader credentials for each tenant. Add `MANAGEMENT_COMMAND_READ_TOKENS` with value `{"<read-token>":"factory"}` to the management-api runtime Secret and roll management-api. The local deployment script accepts `IOT_MANAGEMENT_COMMAND_READ_TOKENS`. A reader can only GET an individual command in its tenant.
+2. Create a dedicated Secret named `iot-ops-agent` in the release namespace. Set `OPS_TENANTS` to `{"factory":{"operatorToken":"<operator-token>","managementToken":"<read-token>"}}`. Add `OPS_MODEL_KEY` if the model requires authentication. Roll the consuming Deployments after rotating credentials.
+3. Merge these values into the release configuration. Use addresses reachable from the pods. The model URL is the base of a Chat Completions compatible API, typically ending in `/v1`. The Prometheus, Tempo and model integrations can each be enabled independently.
+
+```yaml
+opsAgent:
+  enabled: true
+  existingSecret: iot-ops-agent
+  prometheusURL: http://prometheus.observability:9090
+  tempoURL: http://tempo.observability:3200
+  modelURL: http://inference.models:8000/v1
+  model: your-installed-model
+tracing:
+  batcher: otlpgrpc
+  endpoint: tempo.observability:4317
+  sampler: 0.1
+```
+
+Deploy with the existing release values, or run `IOT_VALUES_FILE=/path/to/ops-values.yaml scripts/helm-deploy-local.sh` locally. Roll the business pods after a tracing configuration change. Use sampler 1 temporarily for verification. Export and indexing take time; persisted status is available even when trace search is empty. Grafana can use the same query URL as a Tempo data source. The local Compose profile `tracing` has one Tempo instance with 24-hour retention. When reaching it from pods, choose a routable address on a trusted network and set `TEMPO_BIND_IP` explicitly if necessary.
+
+The model receives the operator’s question as written, the verified finding, stage evidence and scrape health. Keep credentials out of questions. Model output is advisory. The agent disables Kubernetes service account token mounting. Use internal TLS or a service mesh for credential-bearing traffic, and trusted internal endpoints or an authenticating internal proxy for Prometheus and Tempo.

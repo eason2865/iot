@@ -1,6 +1,6 @@
 .PHONY: all test fmt fmt-check build clean helm-local proto
 
-BINS := management-api iot-core demo telemetry-ingestor device-worker dlq-replay migrate
+BINS := ops-agent management-api iot-core demo telemetry-ingestor device-worker dlq-replay migrate
 GOOS ?= linux
 GOARCH ?= arm64
 CGO_ENABLED ?= 0

@@ -28,6 +28,10 @@ Local validation artifacts belong in `outputs/`. Its nested Go module keeps
 archived runners out of the project's package scan. To rebuild a standalone
 runner with the project dependencies, run `go build -o /tmp/runner ./outputs/<case>/main.go` from the repository root.
 
+## Testing operations diagnostics
+
+Run `go test -race ./internal/opsagent` and `go test ./internal/platform -run TestCommandReadCredential` when changing a diagnostic tool or credential boundary. Exercise the opt-in deployment with `helm template iot charts/iot --set opsAgent.enabled=true`. Update both language editions of the architecture and command lifecycle diagrams when a flow changes.
+
 ## Commit Messages
 
 Use `type: description` or `type(scope): description`. Choose `feat` for a new feature and `fix` for a bug fix. Other common types include `refactor`, `perf`, `docs`, `test`, `build`, `ci`, and `chore`. Use a short description that names the change.

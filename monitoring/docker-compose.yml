@@ -134,8 +134,19 @@ services:
     depends_on:
       - prometheus
 
+  tempo:
+    profiles: ["tracing"]
+    image: grafana/tempo:2.9.0@sha256:65a5789759435f1ef696f1953258b9bbdb18eb571d5ce711ff812d2e128288a4
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "${TEMPO_BIND_IP:-127.0.0.1}:3200:3200"
+      - "${TEMPO_BIND_IP:-127.0.0.1}:4317:4317"
+
   demo:
-    image: iot-app:2.56
+    image: iot-app:3.0
     container_name: iot-demo
     restart: unless-stopped
     command: ["/usr/local/bin/demo"]
@@ -166,6 +177,8 @@ services:
         condition: service_started
 
 volumes:
+  tempo-data:
+    name: iot-tempo-data
   postgres-data:
     name: iot-postgres-data
   kafka-data:
